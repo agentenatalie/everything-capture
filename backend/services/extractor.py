@@ -613,11 +613,129 @@ async def _extract_twitter_fallback(url: str) -> ExtractResult | None:
 
 
 # ---------------------------------------------------------------------------
+# 页面媒体提取（通用）
+# ---------------------------------------------------------------------------
+
+_IGNORED_IMAGE_PATTERNS = {
+    "logo", "icon", "favicon", "avatar", "emoji", "badge", "button",
+    "pixel", "tracker", "spacer", "blank", "1x1", "loading", "spinner",
+    "ads", "banner", "sprite", "arrow", ".svg",
+}
+
+
+def _extract_page_media(soup: BeautifulSoup, base_url: str = "") -> list[dict]:
+    """从任意 HTML 页面提取有意义的图片和视频 URL"""
+    media = []
+    seen_urls = set()
+    img_order = 0
+    vid_order = 0
+
+    def _normalize_url(src: str) -> str:
+        if not src:
+            return ""
+        src = src.strip()
+        if src.startswith("data:") or src.startswith("blob:"):
+            return ""
+        if src.startswith("//"):
+            return "https:" + src
+        if src.startswith("/") and base_url:
+            from urllib.parse import urlparse
+            parsed = urlparse(base_url)
+            return f"{parsed.scheme}://{parsed.netloc}{src}"
+        if not src.startswith("http"):
+            return ""
+        return src
+
+    def _is_meaningful_image(url: str, tag=None) -> bool:
+        """过滤掉图标、追踪像素、装饰图等"""
+        url_lower = url.lower()
+        for pat in _IGNORED_IMAGE_PATTERNS:
+            if pat in url_lower:
+                return False
+        # 检查尺寸属性（过滤小于 50px 的图片）
+        if tag:
+            w = tag.get("width", "") or ""
+            h = tag.get("height", "") or ""
+            try:
+                if w and int(str(w).replace("px", "")) < 50:
+                    return False
+                if h and int(str(h).replace("px", "")) < 50:
+                    return False
+            except (ValueError, TypeError):
+                pass
+        return True
+
+    # 1. OG/meta 图片和视频
+    for prop in ("og:image", "og:image:url", "twitter:image"):
+        val = _html_meta(soup, prop)
+        if val:
+            url = _normalize_url(val)
+            if url and url not in seen_urls:
+                seen_urls.add(url)
+                media.append({"type": "image", "url": url, "order": img_order})
+                img_order += 1
+
+    for prop in ("og:video", "og:video:url", "twitter:player:stream"):
+        val = _html_meta(soup, prop)
+        if val:
+            url = _normalize_url(val)
+            if url and url not in seen_urls:
+                seen_urls.add(url)
+                media.append({"type": "video", "url": url, "order": vid_order})
+                vid_order += 1
+
+    # 2. <img> 标签
+    for img in soup.find_all("img"):
+        src = img.get("src", "") or img.get("data-src", "") or img.get("data-original", "")
+        url = _normalize_url(src)
+        if url and url not in seen_urls and _is_meaningful_image(url, img):
+            seen_urls.add(url)
+            media.append({"type": "image", "url": url, "order": img_order})
+            img_order += 1
+        # srcset 中的高分辨率图
+        srcset = img.get("srcset", "")
+        if srcset:
+            parts = [s.strip().split()[0] for s in srcset.split(",") if s.strip()]
+            if parts:
+                best = _normalize_url(parts[-1])  # 取最后一个（通常最大）
+                if best and best not in seen_urls and _is_meaningful_image(best):
+                    seen_urls.add(best)
+                    media.append({"type": "image", "url": best, "order": img_order})
+                    img_order += 1
+
+    # 3. <video> 和 <source> 标签
+    for video in soup.find_all("video"):
+        src = video.get("src", "")
+        url = _normalize_url(src)
+        if url and url not in seen_urls:
+            seen_urls.add(url)
+            media.append({"type": "video", "url": url, "order": vid_order})
+            vid_order += 1
+        # poster 作为封面
+        poster = video.get("poster", "")
+        poster_url = _normalize_url(poster)
+        if poster_url and poster_url not in seen_urls:
+            seen_urls.add(poster_url)
+            media.append({"type": "cover", "url": poster_url, "order": 0})
+
+    for source in soup.find_all("source"):
+        src = source.get("src", "")
+        stype = source.get("type", "")
+        url = _normalize_url(src)
+        if url and url not in seen_urls and ("video" in stype or url.lower().split("?")[0].endswith((".mp4", ".webm", ".mov"))):
+            seen_urls.add(url)
+            media.append({"type": "video", "url": url, "order": vid_order})
+            vid_order += 1
+
+    return media
+
+
+# ---------------------------------------------------------------------------
 # 通用网站提取器
 # ---------------------------------------------------------------------------
 
 async def extract_generic(url: str) -> ExtractResult | None:
-    """通用网站：trafilatura 优先，BeautifulSoup 手动解析兜底"""
+    """通用网站：trafilatura 优先，BeautifulSoup 手动解析兜底，同时提取所有媒体"""
     async with _build_client(ua=_DESKTOP_UA) as client:
         try:
             resp = await client.get(url)
@@ -628,6 +746,13 @@ async def extract_generic(url: str) -> ExtractResult | None:
 
         html = resp.text
         final_url = str(resp.url)
+
+    soup = BeautifulSoup(html, "lxml")
+    title = _html_meta(soup, "og:title") or (soup.title.string if soup.title else "") or "Unknown"
+
+    # 提取页面中的所有媒体（图片 + 视频）
+    page_media = _extract_page_media(soup, base_url=final_url)
+    media_urls = page_media if page_media else None
 
     # 策略 1: trafilatura（覆盖 95%+ 网站）
     if trafilatura:
@@ -640,23 +765,17 @@ async def extract_generic(url: str) -> ExtractResult | None:
                 favor_recall=True,
             )
             if text and len(text.strip()) > 50:
-                # 获取标题
-                soup = BeautifulSoup(html, "lxml")
-                title = _html_meta(soup, "og:title") or (soup.title.string if soup.title else "") or "Unknown"
                 return ExtractResult(
                     title=title.strip(),
                     text=_clean_text(text),
                     platform="generic",
                     final_url=final_url,
+                    media_urls=media_urls,
                 )
         except Exception as e:
             logger.debug("trafilatura 提取失败: %s", e)
 
     # 策略 2: BeautifulSoup 手动提取
-    soup = BeautifulSoup(html, "lxml")
-    title = _html_meta(soup, "og:title") or (soup.title.string if soup.title else "") or "Unknown"
-
-    # 尝试常见正文容器
     selectors = [
         "article",
         "[role='article']",
@@ -681,6 +800,7 @@ async def extract_generic(url: str) -> ExtractResult | None:
                     text=_clean_text(text),
                     platform="generic",
                     final_url=final_url,
+                    media_urls=media_urls,
                 )
 
     # 策略 3: 收集所有段落
@@ -694,6 +814,7 @@ async def extract_generic(url: str) -> ExtractResult | None:
             text=_clean_text(all_text),
             platform="generic",
             final_url=final_url,
+            media_urls=media_urls,
         )
 
     # 策略 4: body 全文
@@ -706,6 +827,7 @@ async def extract_generic(url: str) -> ExtractResult | None:
                 text=_clean_text(text),
                 platform="generic",
                 final_url=final_url,
+                media_urls=media_urls,
             )
 
     return None

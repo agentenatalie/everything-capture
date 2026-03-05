@@ -34,3 +34,16 @@ def get_items(skip: int = 0, limit: int = 100, db: Session = Depends(get_db)):
             media=media_list,
         ))
     return results
+
+import os
+import shutil
+
+@router.delete("/items/{item_id}", status_code=204)
+def delete_item(item_id: str, db: Session = Depends(get_db)):
+    item = db.query(Item).filter(Item.id == item_id).first()
+    if not item:
+        raise HTTPException(status_code=404, detail="Item not found")
+        
+    db.delete(item)
+    db.commit()
+    return None

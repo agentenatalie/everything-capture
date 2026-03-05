@@ -49,11 +49,30 @@ async def download_file(url: str, save_path: Path, referer: str = "") -> int:
 
 def get_extension(url: str, media_type: str) -> str:
     """从 URL 或类型推断文件扩展名"""
-    url_lower = url.lower().split("?")[0]
+    url_lower = url.lower()
+    
+    # 1. 针对微信等带有明确格式参数的链接
+    if "wx_fmt=gif" in url_lower:
+        return ".gif"
+    if "wx_fmt=png" in url_lower:
+        return ".png"
+    if "wx_fmt=jpeg" in url_lower or "wx_fmt=jpg" in url_lower:
+        return ".jpg"
+    if "wx_fmt=webp" in url_lower:
+        return ".webp"
+
+    # 2. 从路径匹配常见后缀名
+    path_lower = url_lower.split("?")[0]
+    for ext in (".mp4", ".webm", ".mov", ".jpg", ".jpeg", ".png", ".webp", ".gif"):
+        if path_lower.endswith(ext):
+            return ext
+
+    # 3. 容错匹配（路径里包含.gif 等）
     for ext in (".mp4", ".webm", ".mov", ".jpg", ".jpeg", ".png", ".webp", ".gif"):
         if ext in url_lower:
-            return ext
-    # 根据类型给默认后缀
+            return ".jpg" if ext == ".jpeg" else ext
+
+    # 4. 根据类型给默认后缀
     if media_type == "video":
         return ".mp4"
     return ".webp"
@@ -96,6 +115,7 @@ async def download_media_list(
                 "local_path": relative_path,
                 "file_size": file_size,
                 "display_order": order,
+                "inline_position": media.get("inline_position", -1.0),
             })
 
     return results

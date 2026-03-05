@@ -21,7 +21,9 @@ def get_items(skip: int = 0, limit: int = 100, db: Session = Depends(get_db)):
                 media_list.append(MediaResponse(
                     type=m.type,
                     url=f"/static/{m.local_path}" if m.local_path else "",
+                    original_url=m.original_url or "",
                     display_order=m.display_order,
+                    inline_position=m.inline_position if m.inline_position is not None else -1.0,
                 ))
         results.append(ItemResponse(
             id=item.id,
@@ -29,6 +31,8 @@ def get_items(skip: int = 0, limit: int = 100, db: Session = Depends(get_db)):
             source_url=item.source_url,
             title=item.title,
             canonical_text=item.canonical_text,
+            canonical_html=item.canonical_html,
+            content_blocks_json=item.content_blocks_json,
             status=item.status,
             platform=item.platform,
             media=media_list,

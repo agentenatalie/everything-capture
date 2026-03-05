@@ -1,4 +1,4 @@
-from sqlalchemy import Column, String, Integer, DateTime, ForeignKey
+from sqlalchemy import Column, String, Integer, Float, DateTime, ForeignKey
 from sqlalchemy.orm import relationship
 from database import Base
 import datetime
@@ -17,14 +17,16 @@ class Item(Base):
     title = Column(String)
     canonical_text = Column(String)
     canonical_text_length = Column(Integer)
+    canonical_html = Column(String, nullable=True) # Stored sanitized HTML from article
     platform = Column(String)
     status = Column(String, default="ready") # ready, failed
     error_reason = Column(String, nullable=True)
     notion_page_id = Column(String, nullable=True)
     obsidian_path = Column(String, nullable=True)
     debug_json = Column(String, nullable=True)
+    content_blocks_json = Column(String, nullable=True)  # JSON: [{type:text|image, content|url}]
 
-    media = relationship("Media", back_populates="item", lazy="joined")
+    media = relationship("Media", back_populates="item", cascade="all, delete-orphan", lazy="joined")
 
 
 class Media(Base):
@@ -37,5 +39,6 @@ class Media(Base):
     local_path = Column(String)                  # relative to static/
     file_size = Column(Integer, default=0)
     display_order = Column(Integer, default=0)
+    inline_position = Column(Float, default=-1.0)  # 0.0-1.0 fractional position within article body; -1 = unknown
 
     item = relationship("Item", back_populates="media")

@@ -6,7 +6,9 @@ from datetime import datetime
 class MediaResponse(BaseModel):
     type: str          # image, video, cover
     url: str           # local URL path (e.g. /static/media/...)
+    original_url: str = ""   # original remote URL (for matching content_blocks)
     display_order: int
+    inline_position: float = -1.0  # 0.0-1.0 fractional position in article body; -1 = unknown
 
     class Config:
         from_attributes = True
@@ -32,6 +34,8 @@ class ItemResponse(BaseModel):
     source_url: str
     title: str
     canonical_text: Optional[str] = None
+    canonical_html: Optional[str] = None
+    content_blocks_json: Optional[str] = None  # JSON content blocks with inline images
     status: str
     platform: str
     media: list[MediaResponse] = []

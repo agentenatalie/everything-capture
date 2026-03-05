@@ -258,6 +258,15 @@
             -webkit-backdrop-filter: saturate(220%) blur(22px);
             position: relative;
             overflow: hidden;
+            opacity: 0;
+            transform: translateY(8px) scale(0.985);
+            transition: transform 0.24s cubic-bezier(0.22, 0.9, 0.3, 1), opacity 0.2s ease;
+            will-change: transform, opacity;
+        }
+
+        .command-overlay.active .command-panel {
+            opacity: 1;
+            transform: translateY(0) scale(1);
         }
 
         .command-panel::before {
@@ -315,7 +324,7 @@
 
         .grid {
             display: grid;
-            grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+            grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
             gap: 1.4rem;
         }
 
@@ -325,6 +334,23 @@
             align-items: center;
             gap: 14px;
             margin-bottom: 1.15rem;
+        }
+
+        @media (min-width: 1024px) {
+            main {
+                width: min(1440px, 95%);
+            }
+
+            .board-toolbar,
+            .grid {
+                width: min(1340px, 100%);
+                margin-left: auto;
+                margin-right: auto;
+            }
+
+            .grid {
+                grid-template-columns: repeat(4, minmax(0, 1fr));
+            }
         }
 
         .toolbar-filters {
@@ -862,6 +888,104 @@
             margin-top: 6px;
         }
 
+        /* Article HTML Content (inline images, reserved for canonical_html rich text) */
+        .article-html {
+            color: var(--text-secondary);
+            font-size: 0.95rem;
+            line-height: 1.8;
+        }
+
+        .article-html img {
+            max-width: 100%;
+            height: auto;
+            border-radius: 10px;
+            margin: 1rem 0;
+            display: block;
+        }
+
+        .article-html p {
+            margin-bottom: 1rem;
+        }
+
+        .article-html h1,
+        .article-html h2,
+        .article-html h3,
+        .article-html h4,
+        .article-html h5,
+        .article-html h6 {
+            color: var(--text-primary);
+            margin: 1.5rem 0 0.75rem;
+        }
+
+        .article-html a {
+            color: var(--accent);
+            text-decoration: none;
+        }
+
+        .article-html a:hover {
+            text-decoration: underline;
+        }
+
+        .article-html blockquote {
+            border-left: 3px solid var(--accent);
+            padding-left: 1rem;
+            margin: 1rem 0;
+            opacity: 0.85;
+        }
+
+        .article-html pre {
+            background: rgba(0, 0, 0, 0.3);
+            padding: 1rem;
+            border-radius: 8px;
+            overflow-x: auto;
+        }
+
+        .article-html table {
+            width: 100%;
+            border-collapse: collapse;
+            margin: 1rem 0;
+        }
+
+        .article-html th,
+        .article-html td {
+            padding: 8px 12px;
+            border: 1px solid var(--card-border);
+        }
+
+        .article-html figure {
+            margin: 1rem 0;
+            text-align: center;
+        }
+
+        .article-html figcaption {
+            font-size: 0.85rem;
+            color: var(--text-secondary);
+            margin-top: 6px;
+        }
+
+        /* 通用网站 / 微信：行内图片 */
+        .inline-img-wrap {
+            margin: 1rem 0;
+            text-align: center;
+        }
+
+        .inline-img {
+            max-width: 100%;
+            max-height: 480px;
+            border-radius: 10px;
+            object-fit: contain;
+            border: 1px solid rgba(200, 210, 225, 0.5);
+            background: rgba(246, 249, 252, 0.86);
+        }
+
+        .content-para {
+            margin: 0 0 1.2rem 0;
+            line-height: 1.7;
+            font-size: 1.05rem;
+            color: #334155;
+            word-wrap: break-word;
+        }
+
         @media (max-width: 860px) {
             main {
                 padding: 1.4rem 4%;
@@ -1262,26 +1386,73 @@
             const item = itemsData[index];
             modalTitle.innerText = item.title || '无标题';
 
-            let mediaHtml = '';
-            if (item.media && item.media.length > 0) {
-                const images = item.media.filter(m => m.type === 'image').sort((a, b) => a.display_order - b.display_order);
-                const videos = item.media.filter(m => m.type === 'video');
+            const platform = normalizePlatform(item.platform || '');
+            const isCarouselPlatform = platform === 'xiaohongshu' || platform === 'douyin';
+            const videos = (item.media || []).filter(m => m.type === 'video');
 
+            if (isCarouselPlatform) {
+                // ── XHS / 抖音：图片轮播在顶部 ──────────────────────────────
+                const images = (item.media || []).filter(m => m.type === 'image').sort((a, b) => a.display_order - b.display_order);
+                let html = '';
                 if (videos.length > 0) {
-                    mediaHtml += `<div class="modal-media"><video controls preload="metadata" poster="${item.media.find(m => m.type === 'cover')?.url || ''}">
-                        <source src="${videos[0].url}" type="video/mp4">
-                    </video></div>`;
+                    const cover = (item.media || []).find(m => m.type === 'cover');
+                    html += `<div class="modal-media"><video controls preload="metadata" poster="${cover ? cover.url : ''}"><source src="${videos[0].url}" type="video/mp4"></video></div>`;
                 }
                 if (images.length > 0) {
-                    mediaHtml += `<div class="modal-media"><div class="media-gallery">${images.map(img => `<img src="${img.url}" alt="">`).join('')}</div>${images.length > 1 ? '<div class="gallery-hint">左右滑动查看更多图片</div>' : ''}</div>`;
+                    html += `<div class="modal-media"><div class="media-gallery">${images.map(img => `<img src="${img.url}" alt="">`).join('')}</div>${images.length > 1 ? '<div class="gallery-hint">← 左右滑动查看更多图片 →</div>' : ''}</div>`;
                 }
+                html += `<div style="white-space:pre-wrap">${item.canonical_text || '暂无内容'}</div>`;
+                modalContent.innerHTML = html;
+
+            } else if (item.canonical_html) {
+                // ── 模式 1: 通用网页 — 用 canonical_html 渲染（排版更佳，保留原生格式和图片位置）────────
+                let html = '';
+                if (videos.length > 0) {
+                    html += `<div class="modal-media"><video controls preload="metadata"><source src="${videos[0].url}" type="video/mp4"></video></div>`;
+                }
+                html += `<div class="article-html" style="margin-top: 0;">${item.canonical_html}</div>`;
+                modalContent.innerHTML = html;
+
+            } else if (item.content_blocks_json) {
+                // ── 模式 2: 通用网页 — 用 DOM 遍历块，图文顺序完全还原 (回退 fallback) ─────────────
+                let blocks;
+                try { blocks = JSON.parse(item.content_blocks_json); } catch (e) { blocks = null; }
+
+                if (blocks && blocks.length > 0) {
+                    let html = '';
+                    if (videos.length > 0) {
+                        html += `<div class="modal-media"><video controls preload="metadata"><source src="${videos[0].url}" type="video/mp4"></video></div>`;
+                    }
+                    blocks.forEach(block => {
+                        if (block.type === 'text' && block.content) {
+                            html += `<p class="content-para">${block.content.replace(/\n/g, '<br>')}</p>`;
+                        } else if (block.type === 'image' && block.url) {
+                            html += `<div class="inline-img-wrap"><img src="${block.url}" alt="" class="inline-img"></div>`;
+                        }
+                    });
+                    modalContent.innerHTML = html;
+                } else {
+                    // blocks parsed but empty — show text only
+                    modalContent.innerHTML = `<div style="white-space:pre-wrap">${item.canonical_text || '暂无内容'}</div>`;
+                }
+
+            } else {
+                // ── 旧记录没有 content_blocks_json：文字在前，图片在后 ───────
+                const images = (item.media || []).filter(m => m.type === 'image').sort((a, b) => a.display_order - b.display_order);
+                let html = '';
+                if (videos.length > 0) {
+                    html += `<div class="modal-media"><video controls preload="metadata"><source src="${videos[0].url}" type="video/mp4"></video></div>`;
+                }
+                html += `<div style="white-space:pre-wrap;margin-bottom:${images.length > 0 ? '1rem' : '0'}">${item.canonical_text || '暂无内容'}</div>`;
+                if (images.length > 0) {
+                    html += `<div class="modal-media"><div class="media-gallery">${images.map(img => `<img src="${img.url}" alt="">`).join('')}</div>${images.length > 1 ? '<div class="gallery-hint">← 左右滑动查看图片 →</div>' : ''}</div>`;
+                }
+                modalContent.innerHTML = html;
             }
 
-            modalContent.innerHTML = mediaHtml + `<div style="white-space:pre-wrap">${item.canonical_text || '暂无内容'}</div>`;
             modalOverlay.classList.add('active');
             document.body.style.overflow = 'hidden';
         }
-
         closeModal.onclick = () => {
             modalOverlay.classList.remove('active');
             document.body.style.overflow = '';

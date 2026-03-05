@@ -29,7 +29,9 @@ class ExtractResult:
     text: str
     platform: str
     final_url: str
-    media_urls: list[dict] | None = None  # [{type, url, order}, ...]
+    media_urls: list[dict] | None = None  # [{type, url, order, inline_position}, ...]
+    content_blocks: list[dict] | None = None  # [{type:text|image, content|url}, ...]
+    content_html: str | None = None  # Sanitized structural HTML preserving rich text
 
 
 # ---------------------------------------------------------------------------
@@ -623,8 +625,28 @@ _IGNORED_IMAGE_PATTERNS = {
 }
 
 
+def _is_meaningful_image(url: str, tag=None) -> bool:
+    """过滤掉图标、追踪像素、装饰图等"""
+    url_lower = url.lower()
+    for pat in _IGNORED_IMAGE_PATTERNS:
+        if pat in url_lower:
+            return False
+    # 检查尺寸属性（过滤小于 50px 的图片）
+    if tag:
+        w = tag.get("width", "") or ""
+        h = tag.get("height", "") or ""
+        try:
+            if w and int(str(w).replace("px", "")) < 50:
+                return False
+            if h and int(str(h).replace("px", "")) < 50:
+                return False
+        except (ValueError, TypeError):
+            pass
+    return True
+
+
 def _extract_page_media(soup: BeautifulSoup, base_url: str = "") -> list[dict]:
-    """从任意 HTML 页面提取有意义的图片和视频 URL"""
+    """从任意 HTML 页面提取有意义的图片和视频 URL，并计算每张图在正文中的相对位置"""
     media = []
     seen_urls = set()
     img_order = 0
@@ -646,33 +668,43 @@ def _extract_page_media(soup: BeautifulSoup, base_url: str = "") -> list[dict]:
             return ""
         return src
 
-    def _is_meaningful_image(url: str, tag=None) -> bool:
-        """过滤掉图标、追踪像素、装饰图等"""
-        url_lower = url.lower()
-        for pat in _IGNORED_IMAGE_PATTERNS:
-            if pat in url_lower:
-                return False
-        # 检查尺寸属性（过滤小于 50px 的图片）
-        if tag:
-            w = tag.get("width", "") or ""
-            h = tag.get("height", "") or ""
-            try:
-                if w and int(str(w).replace("px", "")) < 50:
-                    return False
-                if h and int(str(h).replace("px", "")) < 50:
-                    return False
-            except (ValueError, TypeError):
-                pass
-        return True
+    # 找到 article body 节点，用于计算图片在正文中的相对位置
+    # 优先级: article > main > .rich_media_content > #js_content > body
+    _body_node = (
+        soup.find("article")
+        or soup.find("main")
+        or soup.select_one(".rich_media_content")
+        or soup.select_one("#js_content")
+        or soup.find("body")
+    )
+    _body_html = str(_body_node) if _body_node else ""
+    _body_len = len(_body_html) if _body_html else 1  # 避免除零
 
-    # 1. OG/meta 图片和视频
+    def _inline_position(url: str) -> float:
+        """在正文 HTML 中搜索该图片 URL 的位置，返回 0.0-1.0；找不到则返回 -1"""
+        if not _body_html or not url:
+            return -1.0
+        # 只搜索 URL 的主要部分（去掉查询参数，因为 srcset / data-src 可能有差异）
+        url_key = url.split("?")[0].split("/")[-1]  # 取最后一段路径
+        if len(url_key) < 8:  # 太短的 key 容易误匹配
+            url_key = url.split("?")[0]
+        idx = _body_html.find(url_key)
+        if idx == -1:
+            # 尝试更宽泛的搜索（取 URL 末尾 40 字符）
+            url_key_long = url.split("?")[0][-40:]
+            idx = _body_html.find(url_key_long)
+        if idx == -1:
+            return -1.0
+        return round(idx / _body_len, 4)
+
+    # 1. OG/meta 图片（这些不在正文内，inline_position = -1）
     for prop in ("og:image", "og:image:url", "twitter:image"):
         val = _html_meta(soup, prop)
         if val:
             url = _normalize_url(val)
             if url and url not in seen_urls:
                 seen_urls.add(url)
-                media.append({"type": "image", "url": url, "order": img_order})
+                media.append({"type": "image", "url": url, "order": img_order, "inline_position": -1.0})
                 img_order += 1
 
     for prop in ("og:video", "og:video:url", "twitter:player:stream"):
@@ -681,16 +713,16 @@ def _extract_page_media(soup: BeautifulSoup, base_url: str = "") -> list[dict]:
             url = _normalize_url(val)
             if url and url not in seen_urls:
                 seen_urls.add(url)
-                media.append({"type": "video", "url": url, "order": vid_order})
+                media.append({"type": "video", "url": url, "order": vid_order, "inline_position": -1.0})
                 vid_order += 1
 
-    # 2. <img> 标签
+    # 2. <img> 标签 —— 计算真实的 inline_position
     for img in soup.find_all("img"):
         src = img.get("src", "") or img.get("data-src", "") or img.get("data-original", "")
         url = _normalize_url(src)
         if url and url not in seen_urls and _is_meaningful_image(url, img):
             seen_urls.add(url)
-            media.append({"type": "image", "url": url, "order": img_order})
+            media.append({"type": "image", "url": url, "order": img_order, "inline_position": _inline_position(url)})
             img_order += 1
         # srcset 中的高分辨率图
         srcset = img.get("srcset", "")
@@ -700,7 +732,7 @@ def _extract_page_media(soup: BeautifulSoup, base_url: str = "") -> list[dict]:
                 best = _normalize_url(parts[-1])  # 取最后一个（通常最大）
                 if best and best not in seen_urls and _is_meaningful_image(best):
                     seen_urls.add(best)
-                    media.append({"type": "image", "url": best, "order": img_order})
+                    media.append({"type": "image", "url": best, "order": img_order, "inline_position": _inline_position(best)})
                     img_order += 1
 
     # 3. <video> 和 <source> 标签
@@ -709,14 +741,14 @@ def _extract_page_media(soup: BeautifulSoup, base_url: str = "") -> list[dict]:
         url = _normalize_url(src)
         if url and url not in seen_urls:
             seen_urls.add(url)
-            media.append({"type": "video", "url": url, "order": vid_order})
+            media.append({"type": "video", "url": url, "order": vid_order, "inline_position": -1.0})
             vid_order += 1
         # poster 作为封面
         poster = video.get("poster", "")
         poster_url = _normalize_url(poster)
         if poster_url and poster_url not in seen_urls:
             seen_urls.add(poster_url)
-            media.append({"type": "cover", "url": poster_url, "order": 0})
+            media.append({"type": "cover", "url": poster_url, "order": 0, "inline_position": -1.0})
 
     for source in soup.find_all("source"):
         src = source.get("src", "")
@@ -724,10 +756,253 @@ def _extract_page_media(soup: BeautifulSoup, base_url: str = "") -> list[dict]:
         url = _normalize_url(src)
         if url and url not in seen_urls and ("video" in stype or url.lower().split("?")[0].endswith((".mp4", ".webm", ".mov"))):
             seen_urls.add(url)
-            media.append({"type": "video", "url": url, "order": vid_order})
+            media.append({"type": "video", "url": url, "order": vid_order, "inline_position": -1.0})
             vid_order += 1
 
     return media
+
+
+# ---------------------------------------------------------------------------
+# 文章内容块提取（通用）— 保留图文相对顺序
+# ---------------------------------------------------------------------------
+
+_BLOCK_LEVEL_TAGS = {"p", "h1", "h2", "h3", "h4", "h5", "h6", "blockquote", "pre", "li",
+                     "td", "th", "dt", "dd", "figcaption", "caption"}
+_SKIP_TAGS = {"script", "style", "nav", "footer", "header", "noscript", "iframe",
+              "button", "form", "aside", "figure"}
+
+
+def _extract_article_blocks(soup: BeautifulSoup, base_url: str = "") -> list[dict]:
+    """
+    遍历文章 DOM，返回有序的内容块列表：
+    [
+        {"type": "text",  "content": "段落文字..."},
+        {"type": "image", "url": "https://..."},
+        ...
+    ]
+    图片出现的位置与原网页完全一致。
+    """
+    from urllib.parse import urlparse as _urlparse
+
+    def _norm(src: str) -> str:
+        if not src:
+            return ""
+        src = src.strip()
+        if src.startswith(("data:", "blob:")):
+            return ""
+        if src.startswith("//"):
+            return "https:" + src
+        if src.startswith("/") and base_url:
+            p = _urlparse(base_url)
+            return f"{p.scheme}://{p.netloc}{src}"
+        if not src.startswith("http"):
+            return ""
+        return src
+
+    def _img_url(tag) -> str:
+        src = tag.get("src", "") or tag.get("data-src", "") or tag.get("data-original", "") or tag.get("data-lazy-src", "")
+        url = _norm(src)
+        if not url:
+            # Try srcset — take the largest
+            srcset = tag.get("srcset", "")
+            if srcset:
+                parts = [s.strip().split()[0] for s in srcset.split(",") if s.strip()]
+                if parts:
+                    url = _norm(parts[-1])
+        return url
+
+    # Locate article root — prefer semantic containers over generic body
+    article_root = (
+        soup.find("article")
+        or soup.select_one("[role='article']")
+        or soup.select_one(".rich_media_content")   # WeChat
+        or soup.select_one("#js_content")            # WeChat
+        or soup.select_one(".post-content")
+        or soup.select_one(".article-content")
+        or soup.select_one(".entry-content")
+        or soup.select_one(".story-body")
+        or soup.find("main")
+        or soup.find("body")
+    )
+    if not article_root:
+        return []
+
+    blocks: list[dict] = []
+    pending_text: list[str] = []
+
+    def flush():
+        combined = "\n\n".join(t.strip() for t in pending_text if t.strip())
+        if combined:
+            blocks.append({"type": "text", "content": combined})
+        pending_text.clear()
+
+    def walk(node):
+        from bs4 import NavigableString, Tag
+        if isinstance(node, NavigableString):
+            txt = str(node)
+            if txt.strip():
+                pending_text.append(txt.strip())
+            return
+
+        if not isinstance(node, Tag):
+            return
+
+        tag_name = (node.name or "").lower()
+
+        if tag_name in _SKIP_TAGS:
+            return
+
+        if tag_name == "img":
+            url = _img_url(node)
+            if url and _is_meaningful_image(url, node):
+                flush()
+                blocks.append({"type": "image", "url": url})
+            return
+
+        if tag_name in _BLOCK_LEVEL_TAGS:
+            # Collect the text of the entire block — but check for nested images first
+            has_img = bool(node.find("img"))
+            if has_img:
+                # Recurse to preserve image ordering within complex blocks
+                for child in node.children:
+                    walk(child)
+                flush()
+            else:
+                text = node.get_text(separator=" ", strip=True)
+                if text:
+                    flush()
+                    blocks.append({"type": "text", "content": text})
+            return
+
+        # div / section / span / etc. — recurse into children
+        for child in node.children:
+            walk(child)
+
+    walk(article_root)
+    flush()
+
+    # Deduplicate consecutive identical image URLs
+    deduped = []
+    last_img_url = None
+    for b in blocks:
+        if b["type"] == "image":
+            if b["url"] == last_img_url:
+                continue
+            last_img_url = b["url"]
+        else:
+            last_img_url = None
+        deduped.append(b)
+
+    return deduped
+
+
+# ---------------------------------------------------------------------------
+# 文章 HTML 提取（保留图片位置）
+# ---------------------------------------------------------------------------
+
+_SAFE_TAGS = {
+    "p", "h1", "h2", "h3", "h4", "h5", "h6",
+    "img", "figure", "figcaption", "picture", "source",
+    "video", "audio",
+    "ul", "ol", "li",
+    "blockquote", "pre", "code",
+    "table", "thead", "tbody", "tr", "th", "td",
+    "a", "strong", "b", "em", "i", "u", "s",
+    "br", "hr", "div", "span", "section",
+}
+
+_SAFE_ATTRS = {
+    "img": {"src", "data-src", "data-original", "alt", "width", "height", "srcset"},
+    "a": {"href"},
+    "video": {"src", "poster", "controls"},
+    "source": {"src", "type"},
+    "td": {"colspan", "rowspan"},
+    "th": {"colspan", "rowspan"},
+}
+
+
+def _extract_article_html(soup: BeautifulSoup, base_url: str = "") -> str | None:
+    """从 HTML 中提取文章区域, 保留 <img> 位置和丰富的格式, 返回清洁 HTML"""
+    from copy import deepcopy
+
+    # 找到文章容器
+    selectors = [
+        "#js_content",           # 微信公众号
+        ".rich_media_content",   # 微信公众号
+        "article",
+        "[role='article']",
+        ".article-content",
+        ".post-content",
+        ".entry-content",
+        ".content",
+        "#content",
+        "main",
+        ".story-body",
+    ]
+
+    container = None
+    for sel in selectors:
+        node = soup.select_one(sel)
+        if node:
+            text = node.get_text(strip=True)
+            if len(text) > 30:
+                container = deepcopy(node)
+                break
+
+    if not container:
+        return None
+
+    # 移除不需要的标签
+    for tag in container.find_all(["script", "style", "nav", "footer", "header",
+                                    "noscript", "iframe", "form", "button",
+                                    "aside", "svg", "input", "textarea"]):
+        tag.decompose()
+
+    # 清洁容器自身的属性（移除 style="visibility:hidden" 等）
+    container.attrs = {}
+
+    # 清洁标签和属性
+    for tag in container.find_all(True):
+        tag_name = tag.name.lower()
+        if tag_name not in _SAFE_TAGS:
+            tag.unwrap()  # 保留子节点, 移除标签
+            continue
+        # 清理属性 — 只保留安全属性
+        allowed = _SAFE_ATTRS.get(tag_name, set())
+        attrs_to_remove = [k for k in tag.attrs if k not in allowed]
+        for attr in attrs_to_remove:
+            del tag[attr]
+
+    from urllib.parse import urlparse as _urlparse
+    # 处理 img 标签: 规范化 URL
+    for img in container.find_all("img"):
+        src = img.get("src", "") or img.get("data-src", "") or img.get("data-original", "")
+        if src:
+            if src.startswith("//"):
+                src = "https:" + src
+            elif src.startswith("/") and base_url:
+                parsed = _urlparse(base_url)
+                src = f"{parsed.scheme}://{parsed.netloc}{src}"
+            img["src"] = src
+            # 移除 data-* 属性
+            for attr in list(img.attrs):
+                if attr.startswith("data-"):
+                    del img[attr]
+        else:
+            img.decompose()
+
+    # 移除空的 div/span/section（避免页面顶部大量空白）
+    changed = True
+    while changed:
+        changed = False
+        for tag in container.find_all(["div", "span", "section"]):
+            if not tag.get_text(strip=True) and not tag.find(["img", "video"]):
+                tag.decompose()
+                changed = True
+
+    result = str(container)
+    result = re.sub(r"\n{3,}", "\n\n", result)
+    return result.strip() if len(result) > 50 else None
 
 
 # ---------------------------------------------------------------------------
@@ -735,7 +1010,7 @@ def _extract_page_media(soup: BeautifulSoup, base_url: str = "") -> list[dict]:
 # ---------------------------------------------------------------------------
 
 async def extract_generic(url: str) -> ExtractResult | None:
-    """通用网站：trafilatura 优先，BeautifulSoup 手动解析兜底，同时提取所有媒体"""
+    """通用网站：DOM 块提取保留图文顺序，trafilatura 作为文本质量兜底"""
     async with _build_client(ua=_DESKTOP_UA) as client:
         try:
             resp = await client.get(url)
@@ -750,11 +1025,40 @@ async def extract_generic(url: str) -> ExtractResult | None:
     soup = BeautifulSoup(html, "lxml")
     title = _html_meta(soup, "og:title") or (soup.title.string if soup.title else "") or "Unknown"
 
-    # 提取页面中的所有媒体（图片 + 视频）
-    page_media = _extract_page_media(soup, base_url=final_url)
-    media_urls = page_media if page_media else None
+    # ── 主路径：DOM 遍历，保留图文顺序 ──────────────────────────────────
+    content_blocks = _extract_article_blocks(soup, base_url=final_url)
 
-    # 策略 1: trafilatura（覆盖 95%+ 网站）
+    # 从 blocks 中拼接出 canonical_text（不再依赖 trafilatura，避免坐标错位）
+    blocks_text = "\n\n".join(
+        b["content"] for b in content_blocks if b["type"] == "text" and b.get("content", "").strip()
+    )
+
+    # 从 blocks 中提取图片列表（用于下载）
+    block_images = [
+        {"type": "image", "url": b["url"], "order": i, "inline_position": -1.0}
+        for i, b in enumerate(b for b in content_blocks if b["type"] == "image")
+    ]
+
+    # 提取非内容图片（OG meta、视频等）
+    page_media = _extract_page_media(soup, base_url=final_url)
+    # 合并：优先用 block_images（有真实位置），再加 OG 图和视频
+    block_urls = {m["url"] for m in block_images}
+    extra_media = [m for m in page_media if m["url"] not in block_urls]
+    media_urls = block_images + extra_media if (block_images or extra_media) else None
+
+    # ── 如果 DOM 解析到了足够文字，直接返回 ────────────────────────────
+    if len(blocks_text.strip()) > 50:
+        return ExtractResult(
+            title=title.strip(),
+            text=_clean_text(blocks_text),
+            platform="generic",
+            final_url=final_url,
+            media_urls=media_urls,
+            content_blocks=content_blocks if content_blocks else None,
+            content_html=_extract_article_html(soup, base_url=final_url),
+        )
+
+    # ── 兜底 1：trafilatura ─────────────────────────────────────────────
     if trafilatura:
         try:
             text = trafilatura.extract(
@@ -771,23 +1075,17 @@ async def extract_generic(url: str) -> ExtractResult | None:
                     platform="generic",
                     final_url=final_url,
                     media_urls=media_urls,
+                    content_blocks=content_blocks if content_blocks else None,
+                    content_html=_extract_article_html(soup, base_url=final_url),
                 )
         except Exception as e:
             logger.debug("trafilatura 提取失败: %s", e)
 
-    # 策略 2: BeautifulSoup 手动提取
+    # ── 兜底 2: BeautifulSoup 手动提取 ─────────────────────────────────
     selectors = [
-        "article",
-        "[role='article']",
-        ".article-content",
-        ".post-content",
-        ".entry-content",
-        ".content",
-        "#content",
-        "main",
-        ".story-body",
-        "#js_content",           # 微信公众号
-        ".rich_media_content",   # 微信公众号
+        "article", "[role='article']", ".article-content", ".post-content",
+        ".entry-content", ".content", "#content", "main", ".story-body",
+        "#js_content", ".rich_media_content",
     ]
 
     for sel in selectors:
@@ -801,6 +1099,8 @@ async def extract_generic(url: str) -> ExtractResult | None:
                     platform="generic",
                     final_url=final_url,
                     media_urls=media_urls,
+                    content_blocks=content_blocks if content_blocks else None,
+                    content_html=_extract_article_html(soup, base_url=final_url),
                 )
 
     # 策略 3: 收集所有段落

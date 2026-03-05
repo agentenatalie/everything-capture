@@ -70,6 +70,8 @@ async def extract_page(request: ExtractRequest, db: Session = Depends(get_db)):
                 media_list=result.media_urls,
                 referer=referer,
             )
+            # Build original_url → local_url map for substituting into content_blocks
+            url_map: dict[str, str] = {}
             for dl in downloaded:
                 media_record = Media(
                     item_id=new_item.id,
@@ -78,8 +80,42 @@ async def extract_page(request: ExtractRequest, db: Session = Depends(get_db)):
                     local_path=dl["local_path"],
                     file_size=dl["file_size"],
                     display_order=dl["display_order"],
+                    inline_position=dl.get("inline_position", -1.0),
                 )
                 db.add(media_record)
+                url_map[dl["original_url"]] = f"/static/{dl['local_path']}"
+
+            # Save content_blocks_json with local URLs substituted in
+            if result.content_blocks:
+                import json as _json
+                final_blocks = []
+                for block in result.content_blocks:
+                    if block["type"] == "image":
+                        local_url = url_map.get(block["url"])
+                        if local_url:  # Only include images that were successfully downloaded
+                            final_blocks.append({"type": "image", "url": local_url})
+                    else:
+                        final_blocks.append(block)
+                if final_blocks:
+                    new_item.content_blocks_json = _json.dumps(final_blocks, ensure_ascii=False)
+                    db.add(new_item)
+
+            # Build and save canonical_html with replaced image URLs
+            if result.content_html:
+                from bs4 import BeautifulSoup
+                soup = BeautifulSoup(result.content_html, "html.parser")
+                for img in soup.find_all("img"):
+                    src = img.get("src", "")
+                    # Match normalized URL to url_map
+                    local_url = url_map.get(src)
+                    if local_url:
+                        img["src"] = local_url
+                    else:
+                        img.decompose()  # Remove if it wasn't downloaded
+                
+                new_item.canonical_html = str(soup)
+                db.add(new_item)
+
             db.commit()
             media_count = len(downloaded)
             logger.info("已下载 %d 个媒体文件 (item: %s)", media_count, new_item.id)

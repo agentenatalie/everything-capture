@@ -29,6 +29,7 @@ def get_items(skip: int = 0, limit: int = 100, db: Session = Depends(get_db)):
             source_url=item.source_url,
             title=item.title,
             canonical_text=item.canonical_text,
+            canonical_html=getattr(item, 'canonical_html', None),
             status=item.status,
             platform=item.platform,
             media=media_list,

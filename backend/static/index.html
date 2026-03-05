@@ -496,6 +496,81 @@
             color: var(--text-secondary);
             margin-top: 6px;
         }
+
+        /* Article HTML Content (inline images) */
+        .article-html {
+            color: var(--text-secondary);
+            font-size: 0.95rem;
+            line-height: 1.8;
+        }
+
+        .article-html img {
+            max-width: 100%;
+            height: auto;
+            border-radius: 10px;
+            margin: 1rem 0;
+            display: block;
+        }
+
+        .article-html p {
+            margin-bottom: 1rem;
+        }
+
+        .article-html h1,
+        .article-html h2,
+        .article-html h3,
+        .article-html h4,
+        .article-html h5,
+        .article-html h6 {
+            color: var(--text-primary);
+            margin: 1.5rem 0 0.75rem;
+        }
+
+        .article-html a {
+            color: var(--accent);
+            text-decoration: none;
+        }
+
+        .article-html a:hover {
+            text-decoration: underline;
+        }
+
+        .article-html blockquote {
+            border-left: 3px solid var(--accent);
+            padding-left: 1rem;
+            margin: 1rem 0;
+            opacity: 0.85;
+        }
+
+        .article-html pre {
+            background: rgba(0, 0, 0, 0.3);
+            padding: 1rem;
+            border-radius: 8px;
+            overflow-x: auto;
+        }
+
+        .article-html table {
+            width: 100%;
+            border-collapse: collapse;
+            margin: 1rem 0;
+        }
+
+        .article-html th,
+        .article-html td {
+            padding: 8px 12px;
+            border: 1px solid var(--card-border);
+        }
+
+        .article-html figure {
+            margin: 1rem 0;
+            text-align: center;
+        }
+
+        .article-html figcaption {
+            font-size: 0.85rem;
+            color: var(--text-secondary);
+            margin-top: 6px;
+        }
     </style>
 </head>
 
@@ -671,6 +746,17 @@
             const item = itemsData[index];
             modalTitle.innerText = item.title || '无标题';
 
+            const isSocialMedia = ['xiaohongshu', 'douyin'].includes(item.platform);
+
+            // 模式 1: 通用网页 — 用 canonical_html 渲染（图片在原位）
+            if (!isSocialMedia && item.canonical_html) {
+                modalContent.innerHTML = `<div class="article-html">${item.canonical_html}</div>`;
+                modalOverlay.classList.add('active');
+                document.body.style.overflow = 'hidden';
+                return;
+            }
+
+            // 模式 2: 社交媒体 — 轮播/播放器在上，文字在下
             let mediaHtml = '';
             if (item.media && item.media.length > 0) {
                 const images = item.media.filter(m => m.type === 'image').sort((a, b) => a.display_order - b.display_order);

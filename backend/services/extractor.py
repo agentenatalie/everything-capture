@@ -30,6 +30,7 @@ class ExtractResult:
     platform: str
     final_url: str
     media_urls: list[dict] | None = None  # [{type, url, order}, ...]
+    content_html: str | None = None       # 保留图片位置的 HTML（通用网页用）
 
 
 # ---------------------------------------------------------------------------
@@ -754,6 +755,19 @@ async def extract_generic(url: str) -> ExtractResult | None:
     page_media = _extract_page_media(soup, base_url=final_url)
     media_urls = page_media if page_media else None
 
+    # 提取保留图片位置的文章 HTML
+    article_html = _extract_article_html(soup, base_url=final_url)
+
+    def _make_result(text: str) -> ExtractResult:
+        return ExtractResult(
+            title=title.strip(),
+            text=_clean_text(text),
+            platform="generic",
+            final_url=final_url,
+            media_urls=media_urls,
+            content_html=article_html,
+        )
+
     # 策略 1: trafilatura（覆盖 95%+ 网站）
     if trafilatura:
         try:
@@ -765,13 +779,7 @@ async def extract_generic(url: str) -> ExtractResult | None:
                 favor_recall=True,
             )
             if text and len(text.strip()) > 50:
-                return ExtractResult(
-                    title=title.strip(),
-                    text=_clean_text(text),
-                    platform="generic",
-                    final_url=final_url,
-                    media_urls=media_urls,
-                )
+                return _make_result(text)
         except Exception as e:
             logger.debug("trafilatura 提取失败: %s", e)
 
@@ -795,13 +803,7 @@ async def extract_generic(url: str) -> ExtractResult | None:
         if node:
             text = node.get_text(separator="\n", strip=True)
             if len(text) > 50:
-                return ExtractResult(
-                    title=title.strip(),
-                    text=_clean_text(text),
-                    platform="generic",
-                    final_url=final_url,
-                    media_urls=media_urls,
-                )
+                return _make_result(text)
 
     # 策略 3: 收集所有段落
     paragraphs = soup.find_all(["p", "h1", "h2", "h3", "h4", "h5", "h6", "li", "blockquote"])
@@ -809,28 +811,126 @@ async def extract_generic(url: str) -> ExtractResult | None:
         p.get_text(strip=True) for p in paragraphs if p.get_text(strip=True) and len(p.get_text(strip=True)) > 5
     )
     if len(all_text) > 50:
-        return ExtractResult(
-            title=title.strip(),
-            text=_clean_text(all_text),
-            platform="generic",
-            final_url=final_url,
-            media_urls=media_urls,
-        )
+        return _make_result(all_text)
 
     # 策略 4: body 全文
     body = soup.find("body")
     if body:
         text = body.get_text(separator="\n", strip=True)
         if len(text) > 30:
-            return ExtractResult(
-                title=title.strip(),
-                text=_clean_text(text),
-                platform="generic",
-                final_url=final_url,
-                media_urls=media_urls,
-            )
+            return _make_result(text)
 
     return None
+
+
+# ---------------------------------------------------------------------------
+# 文章 HTML 提取（保留图片位置）
+# ---------------------------------------------------------------------------
+
+_SAFE_TAGS = {
+    "p", "h1", "h2", "h3", "h4", "h5", "h6",
+    "img", "figure", "figcaption", "picture", "source",
+    "video", "audio",
+    "ul", "ol", "li",
+    "blockquote", "pre", "code",
+    "table", "thead", "tbody", "tr", "th", "td",
+    "a", "strong", "b", "em", "i", "u", "s",
+    "br", "hr", "div", "span", "section",
+}
+
+_SAFE_ATTRS = {
+    "img": {"src", "data-src", "data-original", "alt", "width", "height", "srcset"},
+    "a": {"href"},
+    "video": {"src", "poster", "controls"},
+    "source": {"src", "type"},
+    "td": {"colspan", "rowspan"},
+    "th": {"colspan", "rowspan"},
+}
+
+
+def _extract_article_html(soup: BeautifulSoup, base_url: str = "") -> str | None:
+    """从 HTML 中提取文章区域, 保留 <img> 位置, 返回清洁 HTML"""
+    from copy import deepcopy
+
+    # 找到文章容器
+    selectors = [
+        "#js_content",           # 微信公众号
+        ".rich_media_content",   # 微信公众号
+        "article",
+        "[role='article']",
+        ".article-content",
+        ".post-content",
+        ".entry-content",
+        ".content",
+        "#content",
+        "main",
+        ".story-body",
+    ]
+
+    container = None
+    for sel in selectors:
+        node = soup.select_one(sel)
+        if node:
+            text = node.get_text(strip=True)
+            if len(text) > 30:
+                container = deepcopy(node)
+                break
+
+    if not container:
+        return None
+
+    # 移除不需要的标签
+    for tag in container.find_all(["script", "style", "nav", "footer", "header",
+                                    "noscript", "iframe", "form", "button",
+                                    "aside", "svg", "input", "textarea"]):
+        tag.decompose()
+
+    # 清洁容器自身的属性（移除 style="visibility:hidden" 等）
+    container.attrs = {}
+
+    # 清洁标签和属性
+    for tag in container.find_all(True):
+        tag_name = tag.name.lower()
+        if tag_name not in _SAFE_TAGS:
+            tag.unwrap()  # 保留子节点, 移除标签
+            continue
+        # 清理属性 — 只保留安全属性
+        allowed = _SAFE_ATTRS.get(tag_name, set())
+        attrs_to_remove = [k for k in tag.attrs if k not in allowed]
+        for attr in attrs_to_remove:
+            del tag[attr]
+
+    # 处理 img 标签: 规范化 URL
+    for img in container.find_all("img"):
+        src = img.get("src", "") or img.get("data-src", "") or img.get("data-original", "")
+        if src:
+            if src.startswith("//"):
+                src = "https:" + src
+            elif src.startswith("/") and base_url:
+                parsed = urlparse(base_url)
+                src = f"{parsed.scheme}://{parsed.netloc}{src}"
+            img["src"] = src
+            # 移除 data-* 属性
+            for attr in list(img.attrs):
+                if attr.startswith("data-"):
+                    del img[attr]
+        else:
+            img.decompose()
+
+    # 移除空的 div/span/section（避免页面顶部大量空白）
+    changed = True
+    while changed:
+        changed = False
+        for tag in container.find_all(["div", "span", "section"]):
+            # 如果标签内没有有意义的内容（文字或子元素），则移除
+            if not tag.get_text(strip=True) and not tag.find(["img", "video"]):
+                tag.decompose()
+                changed = True
+
+    result = str(container)
+    # 移除过多空行
+    result = re.sub(r"\n{3,}", "\n\n", result)
+    return result.strip() if len(result) > 50 else None
 
 
 # ---------------------------------------------------------------------------

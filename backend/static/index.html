@@ -1209,7 +1209,16 @@
             if (!item.media || item.media.length === 0) return null;
             const images = item.media.filter(m => m.type === 'image');
             const covers = item.media.filter(m => m.type === 'cover');
-            return images[0] || covers[0] || null;
+
+            // 优先选择封面图 (Cover 通常是静态的)
+            if (covers.length > 0) return covers[0];
+
+            // 其次选择非 GIF 的图片
+            const staticImages = images.filter(m => !m.url.toLowerCase().endsWith('.gif'));
+            if (staticImages.length > 0) return staticImages[0];
+
+            // 最后没办法了再选第一张图 (可能是 GIF)
+            return images[0] || null;
         }
 
         function normalizePlatform(platform) {
@@ -1312,17 +1321,14 @@
 
                 // 生成媒体缩略图
                 let thumbnailHtml = '';
-                if (item.media && item.media.length > 0) {
+                const thumb = getItemThumbnail(item);
+                if (thumb) {
                     const images = item.media.filter(m => m.type === 'image');
-                    const covers = item.media.filter(m => m.type === 'cover');
                     const videos = item.media.filter(m => m.type === 'video');
-                    const thumb = images[0] || covers[0];
-                    if (thumb) {
-                        let badge = '';
-                        if (images.length > 1) badge = `<span class="media-badge">${images.length} 张图片</span>`;
-                        else if (videos.length > 0) badge = `<span class="media-badge">▶ 视频</span>`;
-                        thumbnailHtml = `<div class="card-media"><img src="${thumb.url}" loading="lazy" alt="">${badge}</div>`;
-                    }
+                    let badge = '';
+                    if (images.length > 1) badge = `<span class="media-badge">${images.length} 张图片</span>`;
+                    else if (videos.length > 0) badge = `<span class="media-badge">▶ 视频</span>`;
+                    thumbnailHtml = `<div class="card-media"><img src="${thumb.url}" loading="lazy" alt="">${badge}</div>`;
                 }
 
                 return `

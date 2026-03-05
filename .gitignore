@@ -1,0 +1,14 @@
+# Database
+backend/items.db
+
+# Media uploads/downloads
+backend/static/media/
+
+# Python
+backend/venv/
+**/__pycache__/
+*.py[cod]
+*$py.class
+
+# OS
+.DS_Store

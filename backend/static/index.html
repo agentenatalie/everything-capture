@@ -8,15 +8,16 @@
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
     <style>
         :root {
-            --bg-color: #0f172a;
-            --card-bg: rgba(30, 41, 59, 0.7);
-            --card-border: rgba(255, 255, 255, 0.1);
-            --text-primary: #f8fafc;
-            --text-secondary: #94a3b8;
-            --accent: #3b82f6;
-            --accent-hover: #60a5fa;
-            --success: #10b981;
-            --error: #ef4444;
+            --bg-color: #ffffff;
+            --surface-bg: #f7f7f5;
+            --card-bg: #ffffff;
+            --card-border: #e9e9e7;
+            --text-primary: #191919;
+            --text-secondary: #787774;
+            --accent: #191919;
+            --accent-hover: #000000;
+            --success: #191919;
+            --error: #4f4f4d;
         }
 
         * {
@@ -27,7 +28,7 @@
         }
 
         body {
-            background-color: var(--bg-color);
+            background-color: var(--surface-bg);
             color: var(--text-primary);
             min-height: 100vh;
             overflow-x: hidden;
@@ -43,16 +44,15 @@
             height: 100vh;
             z-index: -1;
             overflow: hidden;
-            background: radial-gradient(circle at 15% 50%, rgba(59, 130, 246, 0.15), transparent 25%),
-                radial-gradient(circle at 85% 30%, rgba(16, 185, 129, 0.15), transparent 25%);
+            background: transparent;
         }
 
         .blob {
             position: absolute;
-            background: linear-gradient(to right, #3b82f6, #8b5cf6);
+            background: #ececea;
             border-radius: 50%;
-            filter: blur(80px);
-            opacity: 0.4;
+            filter: blur(90px);
+            opacity: 0.5;
             animation: float 20s infinite alternate cubic-bezier(0.4, 0, 0.2, 1);
         }
 
@@ -69,7 +69,7 @@
             bottom: -50px;
             right: -50px;
             animation-delay: -5s;
-            background: linear-gradient(to right, #10b981, #3b82f6);
+            background: #e0e0dc;
         }
 
         @keyframes float {
@@ -89,7 +89,7 @@
             justify-content: space-between;
             align-items: center;
             border-bottom: 1px solid var(--card-border);
-            background: rgba(15, 23, 42, 0.5);
+            background: rgba(255, 255, 255, 0.88);
             backdrop-filter: blur(12px);
             -webkit-backdrop-filter: blur(12px);
             position: sticky;
@@ -100,9 +100,7 @@
         .logo {
             font-size: 1.5rem;
             font-weight: 700;
-            background: linear-gradient(to right, #fff, #94a3b8);
-            -webkit-background-clip: text;
-            -webkit-text-fill-color: transparent;
+            color: var(--text-primary);
             display: flex;
             align-items: center;
             gap: 12px;
@@ -111,7 +109,8 @@
         .logo-icon {
             width: 32px;
             height: 32px;
-            background: linear-gradient(135deg, #3b82f6, #8b5cf6);
+            background: #111111;
+            color: #ffffff;
             border-radius: 8px;
             display: grid;
             place-items: center;
@@ -132,7 +131,7 @@
             padding: 10px 16px;
             border-radius: 10px;
             border: 1px solid var(--card-border);
-            background: rgba(15, 23, 42, 0.8);
+            background: var(--bg-color);
             color: var(--text-primary);
             font-size: 0.9rem;
             outline: none;
@@ -149,9 +148,9 @@
 
         .extract-btn {
             padding: 10px 24px;
-            border: none;
+            border: 1px solid #111111;
             border-radius: 10px;
-            background: linear-gradient(135deg, #3b82f6, #8b5cf6);
+            background: #111111;
             color: #fff;
             font-size: 0.9rem;
             font-weight: 600;
@@ -162,7 +161,7 @@
 
         .extract-btn:hover:not(:disabled) {
             transform: translateY(-1px);
-            box-shadow: 0 4px 15px rgba(59, 130, 246, 0.4);
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.25);
         }
 
         .extract-btn:disabled {
@@ -192,14 +191,14 @@
         }
 
         .toast.success {
-            background: rgba(16, 185, 129, 0.15);
-            border: 1px solid rgba(16, 185, 129, 0.3);
+            background: rgba(0, 0, 0, 0.06);
+            border: 1px solid rgba(0, 0, 0, 0.16);
             color: var(--success);
         }
 
         .toast.error {
-            background: rgba(239, 68, 68, 0.15);
-            border: 1px solid rgba(239, 68, 68, 0.3);
+            background: rgba(0, 0, 0, 0.04);
+            border: 1px solid rgba(0, 0, 0, 0.14);
             color: var(--error);
         }
 
@@ -248,15 +247,15 @@
             left: 0;
             width: 100%;
             height: 4px;
-            background: linear-gradient(90deg, #3b82f6, #8b5cf6);
+            background: #111111;
             opacity: 0;
             transition: opacity 0.3s;
         }
 
         .card:hover {
             transform: translateY(-5px);
-            box-shadow: 0 20px 40px -10px rgba(0, 0, 0, 0.5);
-            border-color: rgba(255, 255, 255, 0.2);
+            box-shadow: 0 14px 30px -16px rgba(0, 0, 0, 0.32);
+            border-color: #d9d9d6;
         }
 
         .card:hover::before {
@@ -286,9 +285,9 @@
             border-radius: 6px;
             font-size: 0.75rem;
             font-weight: 600;
-            background: rgba(16, 185, 129, 0.1);
-            color: var(--success);
-            border: 1px solid rgba(16, 185, 129, 0.2);
+            background: rgba(16, 185, 129, 0.12);
+            color: #059669;
+            border: 1px solid rgba(16, 185, 129, 0.28);
             white-space: nowrap;
         }
 
@@ -337,19 +336,18 @@
 
         /* Loading Skeleton */
         .skeleton {
-            background: linear-gradient(90deg, rgba(255, 255, 255, 0.05) 25%, rgba(255, 255, 255, 0.1) 50%, rgba(255, 255, 255, 0.05) 75%);
-            background-size: 200% 100%;
-            animation: shimmer 1.5s infinite;
+            background: #efefed;
+            animation: pulse 1.2s ease-in-out infinite;
             border-radius: 4px;
         }
 
-        @keyframes shimmer {
+        @keyframes pulse {
             0% {
-                background-position: 200% 0;
+                opacity: 0.7;
             }
 
             100% {
-                background-position: -200% 0;
+                opacity: 1;
             }
         }
 
@@ -360,7 +358,7 @@
             left: 0;
             width: 100%;
             height: 100%;
-            background: rgba(0, 0, 0, 0.6);
+            background: rgba(17, 17, 17, 0.3);
             backdrop-filter: blur(5px);
             -webkit-backdrop-filter: blur(5px);
             z-index: 100;
@@ -432,25 +430,6 @@
             white-space: pre-wrap;
         }
 
-        .delete-btn {
-            background: none;
-            border: none;
-            font-size: 1.1rem;
-            cursor: pointer;
-            opacity: 0.6;
-            transition: all 0.2s;
-            padding: 4px;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-        }
-
-        .delete-btn:hover {
-            opacity: 1;
-            transform: scale(1.1);
-            filter: drop-shadow(0 2px 4px rgba(239, 68, 68, 0.3));
-        }
-
         /* Card Media Thumbnail */
         .card-media {
             width: 100%;
@@ -458,7 +437,7 @@
             border-radius: 10px;
             overflow: hidden;
             position: relative;
-            background: rgba(0, 0, 0, 0.2);
+            background: #f1f1ef;
         }
 
         .card-media img {
@@ -512,81 +491,6 @@
         .modal-media .gallery-hint {
             text-align: center;
             font-size: 0.8rem;
-            color: var(--text-secondary);
-            margin-top: 6px;
-        }
-
-        /* Article HTML Content (inline images) */
-        .article-html {
-            color: var(--text-secondary);
-            font-size: 0.95rem;
-            line-height: 1.8;
-        }
-
-        .article-html img {
-            max-width: 100%;
-            height: auto;
-            border-radius: 10px;
-            margin: 1rem 0;
-            display: block;
-        }
-
-        .article-html p {
-            margin-bottom: 1rem;
-        }
-
-        .article-html h1,
-        .article-html h2,
-        .article-html h3,
-        .article-html h4,
-        .article-html h5,
-        .article-html h6 {
-            color: var(--text-primary);
-            margin: 1.5rem 0 0.75rem;
-        }
-
-        .article-html a {
-            color: var(--accent);
-            text-decoration: none;
-        }
-
-        .article-html a:hover {
-            text-decoration: underline;
-        }
-
-        .article-html blockquote {
-            border-left: 3px solid var(--accent);
-            padding-left: 1rem;
-            margin: 1rem 0;
-            opacity: 0.85;
-        }
-
-        .article-html pre {
-            background: rgba(0, 0, 0, 0.3);
-            padding: 1rem;
-            border-radius: 8px;
-            overflow-x: auto;
-        }
-
-        .article-html table {
-            width: 100%;
-            border-collapse: collapse;
-            margin: 1rem 0;
-        }
-
-        .article-html th,
-        .article-html td {
-            padding: 8px 12px;
-            border: 1px solid var(--card-border);
-        }
-
-        .article-html figure {
-            margin: 1rem 0;
-            text-align: center;
-        }
-
-        .article-html figcaption {
-            font-size: 0.85rem;
             color: var(--text-secondary);
             margin-top: 6px;
         }
@@ -710,7 +614,7 @@
                 renderGrid(itemsData);
             } catch (error) {
                 stats.innerText = '加载失败';
-                grid.innerHTML = '<div style="color:#ef4444;text-align:center;grid-column:1/-1;">无法连接到后端 API 😢</div>';
+                grid.innerHTML = '<div style="color:var(--text-secondary);text-align:center;grid-column:1/-1;">无法连接到后端 API 😢</div>';
             }
         }
 
@@ -752,51 +656,19 @@
                                 <span>🗓 ${formatDate(item.created_at)}</span>
                                 <span>📝 ${length} 字</span>
                             </div>
-                            <div style="display: flex; gap: 15px; align-items: center;">
-                                <button onclick="deleteItem('${item.id}', event)" class="delete-btn" title="删除">🗑️</button>
-                                <a href="${item.source_url}" target="_blank" class="source-link" onclick="event.stopPropagation()">
-                                    原文 ↗
-                                </a>
-                            </div>
+                            <a href="${item.source_url}" target="_blank" class="source-link" onclick="event.stopPropagation()">
+                                原文 ↗
+                            </a>
                         </div>
                     </div>
                 `;
             }).join('');
         }
 
-        async function deleteItem(id, event) {
-            event.stopPropagation();
-            if (!confirm('确定要删除这条内容吗？删除后不可恢复。')) return;
-
-            try {
-                const response = await fetch(`/api/items/${id}`, { method: 'DELETE' });
-                if (response.ok) {
-                    showToast('已删除', 'success');
-                    fetchItems();
-                } else {
-                    const data = await response.json();
-                    showToast('删除失败: ' + (data.detail || '未知错误'), 'error');
-                }
-            } catch (error) {
-                showToast('❌ 网络错误：' + error.message, 'error');
-            }
-        }
-
         function openModal(index) {
             const item = itemsData[index];
             modalTitle.innerText = item.title || '无标题';
 
-            const isSocialMedia = ['xiaohongshu', 'douyin'].includes(item.platform);
-
-            // 模式 1: 通用网页 — 用 canonical_html 渲染（图片在原位）
-            if (!isSocialMedia && item.canonical_html) {
-                modalContent.innerHTML = `<div class="article-html">${item.canonical_html}</div>`;
-                modalOverlay.classList.add('active');
-                document.body.style.overflow = 'hidden';
-                return;
-            }
-
-            // 模式 2: 社交媒体 — 轮播/播放器在上，文字在下
             let mediaHtml = '';
             if (item.media && item.media.length > 0) {
                 const images = item.media.filter(m => m.type === 'image').sort((a, b) => a.display_order - b.display_order);

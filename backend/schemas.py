@@ -32,7 +32,6 @@ class ItemResponse(BaseModel):
     source_url: str
     title: str
     canonical_text: Optional[str] = None
-    canonical_html: Optional[str] = None
     status: str
     platform: str
     media: list[MediaResponse] = []

@@ -16,7 +16,6 @@ class Item(Base):
     final_url = Column(String)
     title = Column(String)
     canonical_text = Column(String)
-    canonical_html = Column(String, nullable=True)  # 保留图片位置的 HTML
     canonical_text_length = Column(Integer)
     platform = Column(String)
     status = Column(String, default="ready") # ready, failed

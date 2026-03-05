@@ -1,0 +1,610 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Everything Grabber - 收录看板</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --bg-color: #0f172a;
+            --card-bg: rgba(30, 41, 59, 0.7);
+            --card-border: rgba(255, 255, 255, 0.1);
+            --text-primary: #f8fafc;
+            --text-secondary: #94a3b8;
+            --accent: #3b82f6;
+            --accent-hover: #60a5fa;
+            --success: #10b981;
+            --error: #ef4444;
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+            font-family: 'Inter', -apple-system, sans-serif;
+        }
+
+        body {
+            background-color: var(--bg-color);
+            color: var(--text-primary);
+            min-height: 100vh;
+            overflow-x: hidden;
+            position: relative;
+        }
+
+        /* Animated Background */
+        .bg-shapes {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100vw;
+            height: 100vh;
+            z-index: -1;
+            overflow: hidden;
+            background: radial-gradient(circle at 15% 50%, rgba(59, 130, 246, 0.15), transparent 25%),
+                radial-gradient(circle at 85% 30%, rgba(16, 185, 129, 0.15), transparent 25%);
+        }
+
+        .blob {
+            position: absolute;
+            background: linear-gradient(to right, #3b82f6, #8b5cf6);
+            border-radius: 50%;
+            filter: blur(80px);
+            opacity: 0.4;
+            animation: float 20s infinite alternate cubic-bezier(0.4, 0, 0.2, 1);
+        }
+
+        .blob-1 {
+            width: 400px;
+            height: 400px;
+            top: -100px;
+            left: -100px;
+        }
+
+        .blob-2 {
+            width: 350px;
+            height: 350px;
+            bottom: -50px;
+            right: -50px;
+            animation-delay: -5s;
+            background: linear-gradient(to right, #10b981, #3b82f6);
+        }
+
+        @keyframes float {
+            0% {
+                transform: translate(0, 0) scale(1);
+            }
+
+            100% {
+                transform: translate(100px, 50px) scale(1.1);
+            }
+        }
+
+        /* Layout */
+        header {
+            padding: 2rem 5%;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            border-bottom: 1px solid var(--card-border);
+            background: rgba(15, 23, 42, 0.5);
+            backdrop-filter: blur(12px);
+            -webkit-backdrop-filter: blur(12px);
+            position: sticky;
+            top: 0;
+            z-index: 10;
+        }
+
+        .logo {
+            font-size: 1.5rem;
+            font-weight: 700;
+            background: linear-gradient(to right, #fff, #94a3b8);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+
+        .logo-icon {
+            width: 32px;
+            height: 32px;
+            background: linear-gradient(135deg, #3b82f6, #8b5cf6);
+            border-radius: 8px;
+            display: grid;
+            place-items: center;
+            font-size: 1.2rem;
+        }
+
+        /* Extract Bar */
+        .extract-bar {
+            display: flex;
+            gap: 10px;
+            flex: 1;
+            max-width: 600px;
+            margin: 0 2rem;
+        }
+
+        .extract-bar input {
+            flex: 1;
+            padding: 10px 16px;
+            border-radius: 10px;
+            border: 1px solid var(--card-border);
+            background: rgba(15, 23, 42, 0.8);
+            color: var(--text-primary);
+            font-size: 0.9rem;
+            outline: none;
+            transition: border-color 0.3s;
+        }
+
+        .extract-bar input:focus {
+            border-color: var(--accent);
+        }
+
+        .extract-bar input::placeholder {
+            color: var(--text-secondary);
+        }
+
+        .extract-btn {
+            padding: 10px 24px;
+            border: none;
+            border-radius: 10px;
+            background: linear-gradient(135deg, #3b82f6, #8b5cf6);
+            color: #fff;
+            font-size: 0.9rem;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s;
+            white-space: nowrap;
+        }
+
+        .extract-btn:hover:not(:disabled) {
+            transform: translateY(-1px);
+            box-shadow: 0 4px 15px rgba(59, 130, 246, 0.4);
+        }
+
+        .extract-btn:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+        }
+
+        /* Toast */
+        .toast {
+            position: fixed;
+            top: 80px;
+            right: 20px;
+            padding: 14px 24px;
+            border-radius: 12px;
+            font-size: 0.9rem;
+            font-weight: 500;
+            z-index: 200;
+            transform: translateX(120%);
+            transition: transform 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+            max-width: 400px;
+            backdrop-filter: blur(12px);
+            -webkit-backdrop-filter: blur(12px);
+        }
+
+        .toast.show {
+            transform: translateX(0);
+        }
+
+        .toast.success {
+            background: rgba(16, 185, 129, 0.15);
+            border: 1px solid rgba(16, 185, 129, 0.3);
+            color: var(--success);
+        }
+
+        .toast.error {
+            background: rgba(239, 68, 68, 0.15);
+            border: 1px solid rgba(239, 68, 68, 0.3);
+            color: var(--error);
+        }
+
+        .stats {
+            color: var(--text-secondary);
+            font-size: 0.9rem;
+            background: var(--card-bg);
+            padding: 6px 16px;
+            border-radius: 20px;
+            border: 1px solid var(--card-border);
+        }
+
+        main {
+            padding: 3rem 5%;
+            max-width: 1400px;
+            margin: 0 auto;
+        }
+
+        .grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+            gap: 1.5rem;
+        }
+
+        /* Card Design */
+        .card {
+            background: var(--card-bg);
+            border: 1px solid var(--card-border);
+            border-radius: 16px;
+            padding: 1.5rem;
+            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+            backdrop-filter: blur(12px);
+            -webkit-backdrop-filter: blur(12px);
+            display: flex;
+            flex-direction: column;
+            gap: 1rem;
+            position: relative;
+            overflow: hidden;
+            cursor: pointer;
+        }
+
+        .card::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 4px;
+            background: linear-gradient(90deg, #3b82f6, #8b5cf6);
+            opacity: 0;
+            transition: opacity 0.3s;
+        }
+
+        .card:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 20px 40px -10px rgba(0, 0, 0, 0.5);
+            border-color: rgba(255, 255, 255, 0.2);
+        }
+
+        .card:hover::before {
+            opacity: 1;
+        }
+
+        .card-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+            gap: 1rem;
+        }
+
+        .title {
+            font-weight: 600;
+            font-size: 1.1rem;
+            line-height: 1.4;
+            color: var(--text-primary);
+            display: -webkit-box;
+            -webkit-line-clamp: 2;
+            -webkit-box-orient: vertical;
+            overflow: hidden;
+        }
+
+        .status {
+            padding: 4px 8px;
+            border-radius: 6px;
+            font-size: 0.75rem;
+            font-weight: 600;
+            background: rgba(16, 185, 129, 0.1);
+            color: var(--success);
+            border: 1px solid rgba(16, 185, 129, 0.2);
+            white-space: nowrap;
+        }
+
+        .preview {
+            color: var(--text-secondary);
+            font-size: 0.9rem;
+            line-height: 1.5;
+            display: -webkit-box;
+            -webkit-line-clamp: 3;
+            -webkit-box-orient: vertical;
+            overflow: hidden;
+            flex-grow: 1;
+        }
+
+        .footer {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-top: auto;
+            border-top: 1px solid var(--card-border);
+            padding-top: 1rem;
+        }
+
+        .meta {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            font-size: 0.8rem;
+            color: var(--text-secondary);
+        }
+
+        .source-link {
+            color: var(--accent);
+            text-decoration: none;
+            font-size: 0.85rem;
+            font-weight: 500;
+            display: flex;
+            align-items: center;
+            gap: 4px;
+            transition: color 0.2s;
+        }
+
+        .source-link:hover {
+            color: var(--accent-hover);
+        }
+
+        /* Loading Skeleton */
+        .skeleton {
+            background: linear-gradient(90deg, rgba(255, 255, 255, 0.05) 25%, rgba(255, 255, 255, 0.1) 50%, rgba(255, 255, 255, 0.05) 75%);
+            background-size: 200% 100%;
+            animation: shimmer 1.5s infinite;
+            border-radius: 4px;
+        }
+
+        @keyframes shimmer {
+            0% {
+                background-position: 200% 0;
+            }
+
+            100% {
+                background-position: -200% 0;
+            }
+        }
+
+        /* Modal */
+        .modal-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.6);
+            backdrop-filter: blur(5px);
+            -webkit-backdrop-filter: blur(5px);
+            z-index: 100;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            opacity: 0;
+            pointer-events: none;
+            transition: opacity 0.3s;
+        }
+
+        .modal-overlay.active {
+            opacity: 1;
+            pointer-events: auto;
+        }
+
+        .modal {
+            background: var(--bg-color);
+            width: 90%;
+            max-width: 800px;
+            max-height: 85vh;
+            border-radius: 20px;
+            border: 1px solid var(--card-border);
+            box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5);
+            display: flex;
+            flex-direction: column;
+            transform: translateY(20px) scale(0.95);
+            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+        }
+
+        .modal-overlay.active .modal {
+            transform: translateY(0) scale(1);
+        }
+
+        .modal-header {
+            padding: 1.5rem;
+            border-bottom: 1px solid var(--card-border);
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+        }
+
+        .modal-title {
+            font-size: 1.25rem;
+            font-weight: 600;
+            line-height: 1.4;
+            padding-right: 2rem;
+        }
+
+        .close-btn {
+            background: none;
+            border: none;
+            color: var(--text-secondary);
+            font-size: 1.5rem;
+            cursor: pointer;
+            transition: color 0.2s;
+        }
+
+        .close-btn:hover {
+            color: var(--text-primary);
+        }
+
+        .modal-body {
+            padding: 1.5rem;
+            overflow-y: auto;
+            color: var(--text-secondary);
+            font-size: 0.95rem;
+            line-height: 1.6;
+            white-space: pre-wrap;
+        }
+    </style>
+</head>
+
+<body>
+    <div class="bg-shapes">
+        <div class="blob blob-1"></div>
+        <div class="blob blob-2"></div>
+    </div>
+
+    <header>
+        <div class="logo">
+            <div class="logo-icon">✦</div>
+            Everything Grabber
+        </div>
+        <div class="extract-bar">
+            <input type="text" id="urlInput" placeholder="粘贴链接… (小红书/抖音/X/任意网站)" />
+            <button class="extract-btn" id="extractBtn" onclick="extractURL()">抓取</button>
+        </div>
+        <div class="stats" id="stats">加载中...</div>
+    </header>
+
+    <div class="toast" id="toast"></div>
+
+    <main>
+        <div class="grid" id="grid">
+            <!-- Skeletons -->
+            <div class="card">
+                <div class="skeleton" style="height:24px;width:80%;margin-bottom:1rem;"></div>
+                <div class="skeleton" style="height:60px;width:100%;margin-bottom:1rem;"></div>
+                <div class="skeleton" style="height:20px;width:40%;"></div>
+            </div>
+            <div class="card">
+                <div class="skeleton" style="height:24px;width:90%;margin-bottom:1rem;"></div>
+                <div class="skeleton" style="height:60px;width:100%;margin-bottom:1rem;"></div>
+                <div class="skeleton" style="height:20px;width:50%;"></div>
+            </div>
+            <div class="card">
+                <div class="skeleton" style="height:24px;width:70%;margin-bottom:1rem;"></div>
+                <div class="skeleton" style="height:60px;width:100%;margin-bottom:1rem;"></div>
+                <div class="skeleton" style="height:20px;width:30%;"></div>
+            </div>
+        </div>
+    </main>
+
+    <div class="modal-overlay" id="modalOverlay">
+        <div class="modal">
+            <div class="modal-header">
+                <h2 class="modal-title" id="modalTitle">标题</h2>
+                <button class="close-btn" id="closeModal">×</button>
+            </div>
+            <div class="modal-body" id="modalContent">内容加载中...</div>
+        </div>
+    </div>
+
+    <script>
+        const grid = document.getElementById('grid');
+        const stats = document.getElementById('stats');
+        const modalOverlay = document.getElementById('modalOverlay');
+        const modalTitle = document.getElementById('modalTitle');
+        const modalContent = document.getElementById('modalContent');
+        const closeModal = document.getElementById('closeModal');
+        const urlInput = document.getElementById('urlInput');
+        const extractBtn = document.getElementById('extractBtn');
+        const toast = document.getElementById('toast');
+
+        let itemsData = [];
+
+        function showToast(msg, type) {
+            toast.textContent = msg;
+            toast.className = 'toast ' + type + ' show';
+            setTimeout(() => { toast.classList.remove('show'); }, 4000);
+        }
+
+        async function extractURL() {
+            const url = urlInput.value.trim();
+            if (!url) { showToast('请输入链接', 'error'); return; }
+            if (!url.startsWith('http')) { showToast('请输入有效的 http/https 链接', 'error'); return; }
+
+            extractBtn.disabled = true;
+            extractBtn.textContent = '抓取中…';
+            try {
+                const resp = await fetch('/api/extract', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ url })
+                });
+                const data = await resp.json();
+                if (resp.ok) {
+                    showToast(`✅ 收录成功：${data.title} (${data.text_length} 字，平台：${data.platform})`, 'success');
+                    urlInput.value = '';
+                    fetchItems();
+                } else {
+                    showToast(`❌ 失败：${data.detail || '未知错误'}`, 'error');
+                }
+            } catch (e) {
+                showToast('❌ 网络错误：' + e.message, 'error');
+            } finally {
+                extractBtn.disabled = false;
+                extractBtn.textContent = '抓取';
+            }
+        }
+
+        urlInput.addEventListener('keydown', e => { if (e.key === 'Enter') extractURL(); });
+
+        function formatDate(dateStr) {
+            const date = new Date(dateStr);
+            return date.toLocaleDateString('zh-CN', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+        }
+
+        async function fetchItems() {
+            try {
+                const response = await fetch('/api/items?limit=50');
+                if (!response.ok) throw new Error('API Error');
+                itemsData = await response.json();
+
+                stats.innerText = `已收录 ${itemsData.length} 篇文章`;
+                renderGrid(itemsData);
+            } catch (error) {
+                stats.innerText = '加载失败';
+                grid.innerHTML = '<div style="color:#ef4444;text-align:center;grid-column:1/-1;">无法连接到后端 API 😢</div>';
+            }
+        }
+
+        function renderGrid(items) {
+            if (items.length === 0) {
+                grid.innerHTML = '<div style="color:var(--text-secondary);text-align:center;grid-column:1/-1;padding:3rem;">暂无收录内容，请在 App 中抓取。</div>';
+                return;
+            }
+
+            grid.innerHTML = items.map((item, index) => {
+                const textPreview = item.canonical_text ? item.canonical_text.substring(0, 150) + '...' : '无正文内容';
+                const length = item.canonical_text ? item.canonical_text.length : 0;
+
+                return `
+                    <div class="card" onclick="openModal(${index})">
+                        <div class="card-header">
+                            <h3 class="title">${item.title || '无标题'}</h3>
+                            <span class="status">解析成功</span>
+                        </div>
+                        <div class="preview">${textPreview}</div>
+                        <div class="footer">
+                            <div class="meta">
+                                <span>🗓 ${formatDate(item.created_at)}</span>
+                                <span>📝 ${length} 字</span>
+                            </div>
+                            <a href="${item.source_url}" target="_blank" class="source-link" onclick="event.stopPropagation()">
+                                原文 ↗
+                            </a>
+                        </div>
+                    </div>
+                `;
+            }).join('');
+        }
+
+        function openModal(index) {
+            const item = itemsData[index];
+            modalTitle.innerText = item.title || '无标题';
+            modalContent.innerText = item.canonical_text || '暂无内容';
+            modalOverlay.classList.add('active');
+            document.body.style.overflow = 'hidden';
+        }
+
+        closeModal.onclick = () => {
+            modalOverlay.classList.remove('active');
+            document.body.style.overflow = '';
+        };
+
+        modalOverlay.onclick = (e) => {
+            if (e.target === modalOverlay) closeModal.onclick();
+        };
+
+        // Fetch on load
+        fetchItems();
+    </script>
+</body>
+
+</html>

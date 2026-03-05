@@ -2,6 +2,15 @@ from pydantic import BaseModel
 from typing import Optional
 from datetime import datetime
 
+
+class MediaResponse(BaseModel):
+    type: str          # image, video, cover
+    url: str           # local URL path (e.g. /static/media/...)
+    display_order: int
+
+    class Config:
+        from_attributes = True
+
 class ClientInfo(BaseModel):
     platform: str
 
@@ -25,6 +34,7 @@ class ItemResponse(BaseModel):
     canonical_text: Optional[str] = None
     status: str
     platform: str
+    media: list[MediaResponse] = []
     
     class Config:
         from_attributes = True
@@ -45,3 +55,4 @@ class ExtractResponse(BaseModel):
     status: str
     platform: str
     text_length: int
+    media_count: int = 0

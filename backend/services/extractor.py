@@ -29,6 +29,7 @@ class ExtractResult:
     text: str
     platform: str
     final_url: str
+    media_urls: list[dict] | None = None  # [{type, url, order}, ...]
 
 
 # ---------------------------------------------------------------------------
@@ -131,6 +132,7 @@ async def extract_xiaohongshu(url: str) -> ExtractResult | None:
             text=result["text"],
             platform="xiaohongshu",
             final_url=final_url,
+            media_urls=result.get("media_urls"),
         )
 
     # 策略 2: OG meta 标签
@@ -229,9 +231,30 @@ def _extract_xhs_note(note: dict) -> dict | None:
         full += "\n\n" + tags
 
     full = full.strip()
-    if len(full) > 20:
-        return {"title": title or "Unknown", "text": full}
-    return None
+    if len(full) <= 20:
+        return None
+
+    # 提取图片 URL
+    media_urls = []
+    image_list = note.get("imageList", []) or note.get("image_list", [])
+    for i, img in enumerate(image_list):
+        if not isinstance(img, dict):
+            continue
+        # 优先用 urlDefault > url > infoList 中最大尺寸
+        img_url = img.get("urlDefault", "") or img.get("url", "")
+        if not img_url:
+            info_list = img.get("infoList", []) or img.get("info_list", [])
+            if info_list and isinstance(info_list, list):
+                # 取最后一个（通常分辨率最高）
+                last = info_list[-1] if info_list else {}
+                img_url = last.get("url", "") if isinstance(last, dict) else ""
+        if img_url:
+            # 补全协议
+            if img_url.startswith("//"):
+                img_url = "https:" + img_url
+            media_urls.append({"type": "image", "url": img_url, "order": i})
+
+    return {"title": title or "Unknown", "text": full, "media_urls": media_urls or None}
 
 
 def _extract_balanced_json(html: str, start: int) -> str | None:
@@ -291,6 +314,7 @@ async def extract_douyin(url: str) -> ExtractResult | None:
             text=router_result["text"],
             platform="douyin",
             final_url=final_url,
+            media_urls=router_result.get("media_urls"),
         )
 
     # 策略 2: <meta name="description"> (抖音经常在这里放完整描述)
@@ -401,6 +425,23 @@ def _parse_douyin_router_data(html: str, fallback_title: str = "") -> dict | Non
             if isinstance(te, dict) and te.get("hashtag_name")
         ]
 
+        # 提取视频/封面媒体 URL
+        media_urls = []
+        video_data = item.get("video", {})
+        if isinstance(video_data, dict):
+            # 视频播放地址
+            play_addr = video_data.get("play_addr", {})
+            if isinstance(play_addr, dict):
+                url_list = play_addr.get("url_list", [])
+                if url_list:
+                    media_urls.append({"type": "video", "url": url_list[0], "order": 0})
+            # 封面图
+            cover = video_data.get("cover", {}) or video_data.get("origin_cover", {})
+            if isinstance(cover, dict):
+                cover_urls = cover.get("url_list", [])
+                if cover_urls:
+                    media_urls.append({"type": "cover", "url": cover_urls[0], "order": 0})
+
         # 组装完整文本
         parts = []
         video_title = fallback_title or desc.split("\n")[0][:60]
@@ -415,7 +456,11 @@ def _parse_douyin_router_data(html: str, fallback_title: str = "") -> dict | Non
             parts.append("\n" + " ".join(hashtags))
 
         full_text = "\n".join(parts)
-        return {"title": video_title, "text": _clean_text(full_text)}
+        return {
+            "title": video_title,
+            "text": _clean_text(full_text),
+            "media_urls": media_urls or None,
+        }
 
     return None
 

@@ -431,6 +431,71 @@
             line-height: 1.6;
             white-space: pre-wrap;
         }
+
+        /* Card Media Thumbnail */
+        .card-media {
+            width: 100%;
+            height: 180px;
+            border-radius: 10px;
+            overflow: hidden;
+            position: relative;
+            background: rgba(0, 0, 0, 0.2);
+        }
+
+        .card-media img {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+        }
+
+        .card-media .media-badge {
+            position: absolute;
+            bottom: 8px;
+            right: 8px;
+            padding: 3px 8px;
+            border-radius: 6px;
+            font-size: 0.7rem;
+            font-weight: 600;
+            background: rgba(0, 0, 0, 0.7);
+            color: #fff;
+            backdrop-filter: blur(4px);
+        }
+
+        /* Modal Media Gallery */
+        .modal-media {
+            margin-bottom: 1rem;
+        }
+
+        .modal-media .media-gallery {
+            display: flex;
+            gap: 10px;
+            overflow-x: auto;
+            padding-bottom: 8px;
+            scroll-snap-type: x mandatory;
+        }
+
+        .modal-media .media-gallery img {
+            max-height: 360px;
+            max-width: 100%;
+            border-radius: 10px;
+            object-fit: contain;
+            scroll-snap-align: start;
+            flex-shrink: 0;
+        }
+
+        .modal-media video {
+            width: 100%;
+            max-height: 400px;
+            border-radius: 10px;
+            background: #000;
+        }
+
+        .modal-media .gallery-hint {
+            text-align: center;
+            font-size: 0.8rem;
+            color: var(--text-secondary);
+            margin-top: 6px;
+        }
     </style>
 </head>
 
@@ -519,7 +584,8 @@
                 });
                 const data = await resp.json();
                 if (resp.ok) {
-                    showToast(`✅ 收录成功：${data.title} (${data.text_length} 字，平台：${data.platform})`, 'success');
+                    const mediaInfo = data.media_count > 0 ? `，${data.media_count} 个媒体` : '';
+                    showToast(`✅ 收录成功：${data.title} (${data.text_length} 字${mediaInfo}，平台：${data.platform})`, 'success');
                     urlInput.value = '';
                     fetchItems();
                 } else {
@@ -564,8 +630,24 @@
                 const textPreview = item.canonical_text ? item.canonical_text.substring(0, 150) + '...' : '无正文内容';
                 const length = item.canonical_text ? item.canonical_text.length : 0;
 
+                // 生成媒体缩略图
+                let thumbnailHtml = '';
+                if (item.media && item.media.length > 0) {
+                    const images = item.media.filter(m => m.type === 'image');
+                    const covers = item.media.filter(m => m.type === 'cover');
+                    const videos = item.media.filter(m => m.type === 'video');
+                    const thumb = images[0] || covers[0];
+                    if (thumb) {
+                        let badge = '';
+                        if (images.length > 1) badge = `<span class="media-badge">${images.length} 张图片</span>`;
+                        else if (videos.length > 0) badge = `<span class="media-badge">▶ 视频</span>`;
+                        thumbnailHtml = `<div class="card-media"><img src="${thumb.url}" loading="lazy" alt="">${badge}</div>`;
+                    }
+                }
+
                 return `
                     <div class="card" onclick="openModal(${index})">
+                        ${thumbnailHtml}
                         <div class="card-header">
                             <h3 class="title">${item.title || '无标题'}</h3>
                             <span class="status">解析成功</span>
@@ -588,7 +670,23 @@
         function openModal(index) {
             const item = itemsData[index];
             modalTitle.innerText = item.title || '无标题';
-            modalContent.innerText = item.canonical_text || '暂无内容';
+
+            let mediaHtml = '';
+            if (item.media && item.media.length > 0) {
+                const images = item.media.filter(m => m.type === 'image').sort((a, b) => a.display_order - b.display_order);
+                const videos = item.media.filter(m => m.type === 'video');
+
+                if (videos.length > 0) {
+                    mediaHtml += `<div class="modal-media"><video controls preload="metadata" poster="${item.media.find(m => m.type === 'cover')?.url || ''}">
+                        <source src="${videos[0].url}" type="video/mp4">
+                    </video></div>`;
+                }
+                if (images.length > 0) {
+                    mediaHtml += `<div class="modal-media"><div class="media-gallery">${images.map(img => `<img src="${img.url}" alt="">`).join('')}</div>${images.length > 1 ? '<div class="gallery-hint">← 左右滑动查看更多图片 →</div>' : ''}</div>`;
+                }
+            }
+
+            modalContent.innerHTML = mediaHtml + `<div style="white-space:pre-wrap">${item.canonical_text || '暂无内容'}</div>`;
             modalOverlay.classList.add('active');
             document.body.style.overflow = 'hidden';
         }

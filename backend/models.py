@@ -1,4 +1,5 @@
-from sqlalchemy import Column, String, Integer, DateTime
+from sqlalchemy import Column, String, Integer, DateTime, ForeignKey
+from sqlalchemy.orm import relationship
 from database import Base
 import datetime
 import uuid
@@ -22,3 +23,19 @@ class Item(Base):
     notion_page_id = Column(String, nullable=True)
     obsidian_path = Column(String, nullable=True)
     debug_json = Column(String, nullable=True)
+
+    media = relationship("Media", back_populates="item", lazy="joined")
+
+
+class Media(Base):
+    __tablename__ = "media"
+
+    id = Column(String, primary_key=True, index=True, default=generate_uuid)
+    item_id = Column(String, ForeignKey("items.id"), nullable=False, index=True)
+    type = Column(String, nullable=False)        # image, video, cover
+    original_url = Column(String)
+    local_path = Column(String)                  # relative to static/
+    file_size = Column(Integer, default=0)
+    display_order = Column(Integer, default=0)
+
+    item = relationship("Item", back_populates="media")

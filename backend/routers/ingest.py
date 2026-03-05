@@ -1,9 +1,13 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 from database import get_db
-from models import Item
+from models import Item, Media
 from schemas import IngestRequest, IngestResponse, ExtractRequest, ExtractResponse
 from services.extractor import extract_content
+from services.downloader import download_media_list
+import logging
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(
     prefix="/api",
@@ -57,12 +61,36 @@ async def extract_page(request: ExtractRequest, db: Session = Depends(get_db)):
         db.commit()
         db.refresh(new_item)
 
+        # 下载媒体文件（图片/视频）
+        media_count = 0
+        if result.media_urls:
+            referer = result.final_url or request.url
+            downloaded = await download_media_list(
+                item_id=new_item.id,
+                media_list=result.media_urls,
+                referer=referer,
+            )
+            for dl in downloaded:
+                media_record = Media(
+                    item_id=new_item.id,
+                    type=dl["type"],
+                    original_url=dl["original_url"],
+                    local_path=dl["local_path"],
+                    file_size=dl["file_size"],
+                    display_order=dl["display_order"],
+                )
+                db.add(media_record)
+            db.commit()
+            media_count = len(downloaded)
+            logger.info("已下载 %d 个媒体文件 (item: %s)", media_count, new_item.id)
+
         return ExtractResponse(
             item_id=new_item.id,
             title=result.title,
             status="ready",
             platform=result.platform,
             text_length=len(result.text),
+            media_count=media_count,
         )
     except HTTPException:
         raise

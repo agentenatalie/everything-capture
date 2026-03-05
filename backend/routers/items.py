@@ -4,6 +4,11 @@ from database import get_db
 from models import Item
 from schemas import ItemResponse, MediaResponse
 from typing import List
+import shutil
+import os
+import logging
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(
     prefix="/api",
@@ -35,3 +40,26 @@ def get_items(skip: int = 0, limit: int = 100, db: Session = Depends(get_db)):
             media=media_list,
         ))
     return results
+
+@router.delete("/items/{item_id}")
+def delete_item(item_id: str, db: Session = Depends(get_db)):
+    from models import Media
+    item = db.query(Item).filter(Item.id == item_id).first()
+    if not item:
+        raise HTTPException(status_code=404, detail="Item not found")
+
+    # 删除磁盘上的媒体文件夹
+    media_dir = os.path.join("static", "media", item_id)
+    if os.path.exists(media_dir):
+        try:
+            shutil.rmtree(media_dir)
+            logger.info(f"已删除媒体文件夹: {media_dir}")
+        except Exception as e:
+            logger.error(f"删除媒体文件夹失败 {media_dir}: {e}")
+
+    # 删除数据库记录
+    db.query(Media).filter(Media.item_id == item_id).delete()
+    db.delete(item)
+    db.commit()
+
+    return {"message": "Success", "id": item_id}

@@ -432,6 +432,25 @@
             white-space: pre-wrap;
         }
 
+        .delete-btn {
+            background: none;
+            border: none;
+            font-size: 1.1rem;
+            cursor: pointer;
+            opacity: 0.6;
+            transition: all 0.2s;
+            padding: 4px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .delete-btn:hover {
+            opacity: 1;
+            transform: scale(1.1);
+            filter: drop-shadow(0 2px 4px rgba(239, 68, 68, 0.3));
+        }
+
         /* Card Media Thumbnail */
         .card-media {
             width: 100%;
@@ -733,13 +752,34 @@
                                 <span>🗓 ${formatDate(item.created_at)}</span>
                                 <span>📝 ${length} 字</span>
                             </div>
-                            <a href="${item.source_url}" target="_blank" class="source-link" onclick="event.stopPropagation()">
-                                原文 ↗
-                            </a>
+                            <div style="display: flex; gap: 15px; align-items: center;">
+                                <button onclick="deleteItem('${item.id}', event)" class="delete-btn" title="删除">🗑️</button>
+                                <a href="${item.source_url}" target="_blank" class="source-link" onclick="event.stopPropagation()">
+                                    原文 ↗
+                                </a>
+                            </div>
                         </div>
                     </div>
                 `;
             }).join('');
+        }
+
+        async function deleteItem(id, event) {
+            event.stopPropagation();
+            if (!confirm('确定要删除这条内容吗？删除后不可恢复。')) return;
+
+            try {
+                const response = await fetch(`/api/items/${id}`, { method: 'DELETE' });
+                if (response.ok) {
+                    showToast('已删除', 'success');
+                    fetchItems();
+                } else {
+                    const data = await response.json();
+                    showToast('删除失败: ' + (data.detail || '未知错误'), 'error');
+                }
+            } catch (error) {
+                showToast('❌ 网络错误：' + error.message, 'error');
+            }
         }
 
         function openModal(index) {

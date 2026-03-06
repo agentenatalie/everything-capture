@@ -14,6 +14,20 @@
 - List rows now render as independent aligned cards with fixed right-column structure and active-state emphasis instead of clipped hover scaling inside one large container.
 - Verified the HTML parses and the inline script compiles successfully after the DOM and interaction changes.
 
+# Restore Inline Web Images
+
+- [x] Restore web article rendering so images stay in content flow instead of falling back to detached gallery placement
+- [x] Keep the recent UI refresh, but fix detail modal logic so normal website entries prefer the original structured image order
+- [x] Add a safer fallback for broken extracted HTML/block data so repeated or missing inline images do not destroy the reading layout
+- [x] Verify representative generic/web entries still show thumbnails and detail images after the renderer change
+
+## Review
+
+- Detail modal now restores website entries through a dedicated renderer that prefers structured content blocks, falls back to stored article HTML, and only uses a generated inline layout when the saved inline data is clearly broken.
+- Repeated-image edge cases are now detected before rendering, so malformed extracted HTML no longer causes one duplicated image to replace the full article layout.
+- The modal title is explicitly refreshed again, and article HTML now forces normal whitespace so the newer reading-surface styles do not distort original paragraph and image flow.
+- Verified against current local item data that generic/web entries now route through the intended renderer paths instead of always collapsing into the detached text-plus-gallery fallback.
+
 # Command Palette Refresh
 
 - [x] Replace the existing simplified Command K layout with the preferred search-header and suggestion-list composition

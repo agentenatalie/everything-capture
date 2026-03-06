@@ -12,6 +12,67 @@ SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
 Base = declarative_base()
 
+
+def init_search_index():
+    with engine.begin() as connection:
+        connection.exec_driver_sql(
+            """
+            CREATE VIRTUAL TABLE IF NOT EXISTS items_fts USING fts5(
+                item_id UNINDEXED,
+                title,
+                content,
+                source_url,
+                tokenize = 'trigram'
+            )
+            """
+        )
+        connection.exec_driver_sql(
+            """
+            CREATE TRIGGER IF NOT EXISTS items_ai AFTER INSERT ON items BEGIN
+                INSERT INTO items_fts (item_id, title, content, source_url)
+                VALUES (
+                    new.id,
+                    coalesce(new.title, ''),
+                    coalesce(new.canonical_text, ''),
+                    coalesce(new.source_url, '')
+                );
+            END
+            """
+        )
+        connection.exec_driver_sql(
+            """
+            CREATE TRIGGER IF NOT EXISTS items_ad AFTER DELETE ON items BEGIN
+                DELETE FROM items_fts WHERE item_id = old.id;
+            END
+            """
+        )
+        connection.exec_driver_sql(
+            """
+            CREATE TRIGGER IF NOT EXISTS items_au AFTER UPDATE OF title, canonical_text, source_url ON items BEGIN
+                DELETE FROM items_fts WHERE item_id = old.id;
+                INSERT INTO items_fts (item_id, title, content, source_url)
+                VALUES (
+                    new.id,
+                    coalesce(new.title, ''),
+                    coalesce(new.canonical_text, ''),
+                    coalesce(new.source_url, '')
+                );
+            END
+            """
+        )
+        connection.exec_driver_sql("DELETE FROM items_fts")
+        connection.exec_driver_sql(
+            """
+            INSERT INTO items_fts (item_id, title, content, source_url)
+            SELECT
+                id,
+                coalesce(title, ''),
+                coalesce(canonical_text, ''),
+                coalesce(source_url, '')
+            FROM items
+            """
+        )
+
 def get_db():
     db = SessionLocal()
     try:

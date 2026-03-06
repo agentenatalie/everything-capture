@@ -67,6 +67,7 @@ def _build_client(ua: str = _DESKTOP_UA, timeout: float = 20) -> httpx.AsyncClie
 _PLATFORM_RULES: list[tuple[str, list[str]]] = [
     ("xiaohongshu", ["xiaohongshu.com", "xhslink.com", "xhs.cn"]),
     ("douyin", ["douyin.com", "iesdouyin.com"]),
+    ("wechat", ["mp.weixin.qq.com", "weixin.qq.com"]),
     ("twitter", ["twitter.com", "x.com", "t.co"]),
 ]
 

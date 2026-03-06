@@ -1,13 +1,14 @@
 from fastapi import FastAPI
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
-from database import engine, Base
+from database import engine, Base, init_search_index
 from routers import ingest, items, connect, settings
 import os
 from paths import STATIC_DIR
 
 # Create SQLite database tables
 Base.metadata.create_all(bind=engine)
+init_search_index()
 
 app = FastAPI(title="Everything Grabber API", version="1.0.0")
 

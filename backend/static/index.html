@@ -367,6 +367,55 @@
             white-space: nowrap;
         }
 
+        .suggestion-copy {
+            padding: 10px 12px 14px;
+            color: #64748b;
+            font-size: 0.82rem;
+            line-height: 1.55;
+        }
+
+        .suggestion-copy strong {
+            color: #0f172a;
+            font-weight: 700;
+        }
+
+        .command-results {
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+            padding-top: 4px;
+        }
+
+        .command-result-body {
+            display: flex;
+            flex-direction: column;
+            gap: 3px;
+            min-width: 0;
+        }
+
+        .command-result-title {
+            font-size: 0.86rem;
+            font-weight: 650;
+            color: #0f172a;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+
+        .command-result-snippet {
+            font-size: 0.78rem;
+            color: #64748b;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+
+        .suggestion-empty {
+            padding: 12px 16px 4px;
+            font-size: 0.8rem;
+            color: #94a3b8;
+        }
+
         @keyframes suggestion-spin {
             to {
                 transform: rotate(360deg);
@@ -1018,6 +1067,14 @@
             background: #ffffff;
         }
 
+        .reader-toolbar-left {
+            display: flex;
+            align-items: center;
+            gap: 14px;
+            min-width: 0;
+            flex: 1;
+        }
+
         .reader-toolbar-right {
             display: inline-flex;
             align-items: center;
@@ -1286,6 +1343,7 @@
             color: var(--text-secondary);
             font-size: 0.95rem;
             line-height: 1.8;
+            white-space: normal;
         }
 
         .article-html img {
@@ -1487,20 +1545,23 @@
                         d="M229.66,218.34l-50.07-50.06a88.11,88.11,0,1,0-11.31,11.31l50.06,50.07a8,8,0,0,0,11.32-11.32ZM40,112a72,72,0,1,1,72,72A72.08,72.08,0,0,1,40,112Z">
                     </path>
                 </svg>
-                <input type="text" id="urlInput" placeholder="输入命令或粘贴链接..." class="command-input" />
+                <input type="text" id="urlInput" placeholder="粘贴链接导入，或输入关键词搜索" class="command-input" />
                 <span class="command-esc">ESC</span>
             </div>
             <div class="command-suggestions">
                 <div class="suggestions-title">Suggestions</div>
-                <button class="suggestion-item" id="extractBtn" type="button" onclick="extractURL()">
+                <div class="suggestion-copy" id="commandHelpText">
+                    输入 <strong>链接</strong> 会直接导入，输入 <strong>文字</strong> 会搜索已保存内容。
+                </div>
+                <button class="suggestion-item" id="extractBtn" type="button" onclick="runCommandAction()">
                     <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" fill="currentColor"
                         viewBox="0 0 256 256" aria-hidden="true">
                         <path
                             d="M224,128a8,8,0,0,1-8,8H136v80a8,8,0,0,1-16,0V136H40a8,8,0,0,1,0-16h80V40a8,8,0,0,1,16,0v80h80A8,8,0,0,1,224,128Z">
                         </path>
                     </svg>
-                    <span id="extractBtnLabel">添加新链接</span>
-                    <span class="suggestion-meta">ENTER</span>
+                    <span id="extractBtnLabel">粘贴链接或输入关键词</span>
+                    <span class="suggestion-meta" id="extractBtnMeta">ENTER</span>
                 </button>
                 <button class="suggestion-item" id="clipboardBtn" type="button" onclick="importFromClipboard()">
                     <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" fill="currentColor"
@@ -1511,6 +1572,7 @@
                     </svg>
                     <span id="clipboardBtnLabel">从剪贴板导入</span>
                 </button>
+                <div class="command-results" id="commandResults"></div>
             </div>
         </div>
     </div>
@@ -1536,13 +1598,13 @@
                 </button>
             </div>
             <div class="toolbar-filters">
-                <input id="filterInput" class="filter-input" type="text" placeholder="筛选" />
+                <input id="filterInput" class="filter-input" type="text" placeholder="搜索标题、正文、链接" />
                 <select id="platformFilter" class="platform-select" aria-label="筛选平台">
                     <option value="all">全部</option>
+                    <option value="wechat">公众号</option>
                     <option value="douyin">抖音</option>
                     <option value="xiaohongshu">小红书</option>
-                    <option value="generic">网站</option>
-                    <option value="x">X</option>
+                    <option value="web">网页</option>
                 </select>
             </div>
         </div>
@@ -1569,7 +1631,10 @@
     <div class="modal-overlay" id="modalOverlay">
         <div class="modal">
             <div class="reader-toolbar">
-                <div class="modal-status-dots" id="readerStatusDots" aria-label="知识库同步状态"></div>
+                <div class="reader-toolbar-left">
+                    <h2 class="modal-title" id="modalTitle">标题</h2>
+                    <div class="modal-status-dots" id="readerStatusDots" aria-label="知识库同步状态"></div>
+                </div>
                 <div class="reader-toolbar-right">
                     <span class="reader-action" id="toggleFullscreenBtn" role="button" tabindex="0" aria-label="全屏阅读">
                         <svg viewBox="0 0 24 24" fill="none" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
@@ -1694,6 +1759,7 @@
         const modalOverlay = document.getElementById('modalOverlay');
         const modalShell = modalOverlay.querySelector('.modal');
         const commandOverlay = document.getElementById('commandOverlay');
+        const modalTitle = document.getElementById('modalTitle');
         const modalContent = document.getElementById('modalContent');
         const modalFooter = document.getElementById('modalFooter');
         const readerStatusDots = document.getElementById('readerStatusDots');
@@ -1701,9 +1767,12 @@
         const toggleFullscreenBtn = document.getElementById('toggleFullscreenBtn');
         const urlInput = document.getElementById('urlInput');
         const extractBtnLabel = document.getElementById('extractBtnLabel');
+        const extractBtnMeta = document.getElementById('extractBtnMeta');
         const clipboardBtn = document.getElementById('clipboardBtn');
         const clipboardBtnLabel = document.getElementById('clipboardBtnLabel');
         const extractBtn = document.getElementById('extractBtn');
+        const commandHelpText = document.getElementById('commandHelpText');
+        const commandResults = document.getElementById('commandResults');
         const toast = document.getElementById('toast');
         const filterInput = document.getElementById('filterInput');
         const platformFilter = document.getElementById('platformFilter');
@@ -1728,8 +1797,16 @@
         let itemsData = [];
         let currentView = 'gallery';
         let filteredEntries = [];
+        let commandSearchResults = [];
         let currentOpenItemId = null;
         let isModalFullscreen = false;
+        let latestVisibleCount = 0;
+        let latestReturnedCount = 0;
+        let latestTotalCount = 0;
+        let librarySearchTimer = null;
+        let commandSearchTimer = null;
+        let libraryRequestId = 0;
+        let commandRequestId = 0;
 
         // Settings Logic
         function setNotionStatus(data) {
@@ -2000,6 +2077,7 @@
 
         function openCommandPalette() {
             commandOverlay.classList.add('active');
+            updateCommandPaletteState();
             requestAnimationFrame(() => {
                 urlInput.focus();
                 urlInput.select();
@@ -2027,6 +2105,7 @@
                     return;
                 }
                 urlInput.value = text;
+                updateCommandPaletteState();
                 urlInput.focus();
                 urlInput.select();
                 showToast('已导入剪贴板内容', 'success');
@@ -2050,13 +2129,298 @@
             stats.textContent = message;
         }
 
-        function setStatsSummary(total, visible, hasFilter) {
+        function setStatsSummary(total, visible, returned, hasFilter) {
             stats.classList.remove('is-plain');
             if (hasFilter) {
+                if (visible > returned) {
+                    stats.innerHTML = `已收录 <strong>${total}</strong> 篇 <span class="stats-secondary">匹配 <strong>${visible}</strong> 篇，当前显示最新 <strong>${returned}</strong> 篇</span>`;
+                    return;
+                }
                 stats.innerHTML = `已收录 <strong>${total}</strong> 篇 <span class="stats-secondary">显示 <strong>${visible}</strong> 篇</span>`;
                 return;
             }
-            stats.innerHTML = `已收录 <strong>${total}</strong> 篇文章`;
+            if (total > returned) {
+                stats.innerHTML = `已收录 <strong>${total}</strong> 篇 <span class="stats-secondary">当前显示最新 <strong>${returned}</strong> 篇</span>`;
+                return;
+            }
+            stats.innerHTML = `已收录 <strong>${total}</strong> 篇内容`;
+        }
+
+        function escapeHtml(value) {
+            return String(value || '')
+                .replaceAll('&', '&amp;')
+                .replaceAll('<', '&lt;')
+                .replaceAll('>', '&gt;')
+                .replaceAll('"', '&quot;')
+                .replaceAll("'", '&#39;');
+        }
+
+        function escapeAttribute(value) {
+            return escapeHtml(value).replaceAll('`', '&#96;');
+        }
+
+        function truncateText(value, maxLength) {
+            if (!value) return '';
+            return value.length > maxLength ? `${value.slice(0, maxLength)}…` : value;
+        }
+
+        function isLikelyUrl(value) {
+            if (!value) return false;
+            try {
+                const candidate = new URL(value);
+                return candidate.protocol === 'http:' || candidate.protocol === 'https:';
+            } catch (error) {
+                return false;
+            }
+        }
+
+        function getActiveSearchParams(limit = 200, qOverride = null) {
+            const params = new URLSearchParams();
+            const keyword = (qOverride ?? filterInput.value).trim();
+            const platform = platformFilter.value;
+            params.set('limit', String(limit));
+            if (keyword) params.set('q', keyword);
+            if (platform !== 'all') params.set('platform', platform);
+            return params;
+        }
+
+        function scheduleLibrarySearch() {
+            window.clearTimeout(librarySearchTimer);
+            librarySearchTimer = window.setTimeout(() => {
+                fetchItems();
+            }, 180);
+        }
+
+        function scheduleCommandSearch(query) {
+            window.clearTimeout(commandSearchTimer);
+            commandSearchTimer = window.setTimeout(() => {
+                fetchCommandResults(query);
+            }, 150);
+        }
+
+        function clearCommandResults() {
+            commandRequestId += 1;
+            commandSearchResults = [];
+            commandResults.innerHTML = '';
+        }
+
+        function uniquePreserveOrder(values) {
+            const seen = new Set();
+            return values.filter((value) => {
+                const normalized = String(value || '').trim();
+                if (!normalized || seen.has(normalized)) return false;
+                seen.add(normalized);
+                return true;
+            });
+        }
+
+        function getItemImages(item) {
+            return (item.media || [])
+                .filter((media) => media.type === 'image' && media.url)
+                .sort((a, b) => a.display_order - b.display_order);
+        }
+
+        function extractImageUrlsFromHtml(html) {
+            return Array.from(
+                String(html || '').matchAll(/<img[^>]+src=["']([^"']+)["'][^>]*>/gi),
+                (match) => match[1]
+            );
+        }
+
+        function hasSuspiciousRepeatedImages(imageUrls, mediaImageUrls) {
+            const nonEmptyImageUrls = imageUrls.filter(Boolean);
+            const uniqueInlineImages = uniquePreserveOrder(nonEmptyImageUrls);
+            const uniqueMediaImages = uniquePreserveOrder(mediaImageUrls);
+            return nonEmptyImageUrls.length > 1 && uniqueInlineImages.length === 1 && uniqueMediaImages.length > 1;
+        }
+
+        function parseContentBlocks(item) {
+            if (!item.content_blocks_json) return null;
+            try {
+                const blocks = JSON.parse(item.content_blocks_json);
+                return Array.isArray(blocks) ? blocks : null;
+            } catch (error) {
+                return null;
+            }
+        }
+
+        function renderStructuredBlocks(blocks) {
+            return blocks.map((block) => {
+                if (block.type === 'text' && block.content) {
+                    return `<p class="content-para">${escapeHtml(block.content).replace(/\n/g, '<br>')}</p>`;
+                }
+                if (block.type === 'image' && block.url) {
+                    return `<div class="inline-img-wrap"><img src="${escapeAttribute(block.url)}" alt="" class="inline-img"></div>`;
+                }
+                return '';
+            }).join('');
+        }
+
+        function buildInlineMediaFallback(item) {
+            const paragraphs = String(item.canonical_text || '暂无内容')
+                .split(/\n{2,}/)
+                .map((paragraph) => paragraph.trim())
+                .filter(Boolean);
+            const imageUrls = uniquePreserveOrder(getItemImages(item).map((image) => image.url));
+
+            if (!paragraphs.length) paragraphs.push('暂无内容');
+            if (!imageUrls.length) {
+                return `<div style="white-space:pre-wrap">${escapeHtml(item.canonical_text || '暂无内容').replace(/\n/g, '<br>')}</div>`;
+            }
+
+            const imageAnchors = new Map();
+            imageUrls.forEach((url, index) => {
+                const anchorIndex = Math.min(
+                    paragraphs.length - 1,
+                    Math.floor(((index + 1) * paragraphs.length) / (imageUrls.length + 1))
+                );
+                const bucket = imageAnchors.get(anchorIndex) || [];
+                bucket.push(url);
+                imageAnchors.set(anchorIndex, bucket);
+            });
+
+            let html = '';
+            paragraphs.forEach((paragraph, index) => {
+                html += `<p class="content-para">${escapeHtml(paragraph).replace(/\n/g, '<br>')}</p>`;
+                const anchoredImages = imageAnchors.get(index) || [];
+                anchoredImages.forEach((url) => {
+                    html += `<div class="inline-img-wrap"><img src="${escapeAttribute(url)}" alt="" class="inline-img"></div>`;
+                });
+            });
+            return html;
+        }
+
+        function renderWebArticle(item, videos) {
+            const mediaImageUrls = getItemImages(item).map((image) => image.url);
+            const blocks = parseContentBlocks(item);
+            let bodyHtml = '';
+
+            if (blocks && blocks.length > 0) {
+                const blockImageUrls = blocks
+                    .filter((block) => block.type === 'image' && block.url)
+                    .map((block) => block.url);
+                const hasTextBlocks = blocks.some((block) => block.type === 'text' && block.content && block.content.trim());
+                if (hasTextBlocks && !hasSuspiciousRepeatedImages(blockImageUrls, mediaImageUrls)) {
+                    bodyHtml = renderStructuredBlocks(blocks);
+                }
+            }
+
+            if (!bodyHtml && item.canonical_html) {
+                const htmlImageUrls = extractImageUrlsFromHtml(item.canonical_html);
+                if (!hasSuspiciousRepeatedImages(htmlImageUrls, mediaImageUrls)) {
+                    bodyHtml = `<div class="article-html" style="margin-top: 0;">${item.canonical_html}</div>`;
+                }
+            }
+
+            if (!bodyHtml) {
+                bodyHtml = buildInlineMediaFallback(item);
+            }
+
+            let html = '';
+            if (videos.length > 0) {
+                html += `<div class="modal-media"><video controls preload="metadata"><source src="${escapeAttribute(videos[0].url)}" type="video/mp4"></video></div>`;
+            }
+            html += bodyHtml;
+            return html;
+        }
+
+        function updateCommandPaletteState() {
+            const value = urlInput.value.trim();
+            const platformLabel = platformFilter.options[platformFilter.selectedIndex]?.textContent || '全部';
+
+            if (!value) {
+                extractBtn.disabled = true;
+                extractBtnLabel.textContent = '粘贴链接或输入关键词';
+                extractBtnMeta.textContent = 'ENTER';
+                commandHelpText.innerHTML = '输入 <strong>链接</strong> 会直接导入，输入 <strong>文字</strong> 会搜索已保存内容。';
+                clearCommandResults();
+                return;
+            }
+
+            extractBtn.disabled = false;
+            if (isLikelyUrl(value)) {
+                extractBtnLabel.textContent = '导入这个链接';
+                extractBtnMeta.textContent = 'ENTER';
+                commandHelpText.innerHTML = '识别为 <strong>链接</strong>，按 Enter 会直接导入到 Everything Capture。';
+                clearCommandResults();
+                return;
+            }
+
+            extractBtnLabel.textContent = `搜索资料库 “${truncateText(value, 18)}”`;
+            extractBtnMeta.textContent = `${platformLabel} · ENTER`;
+            commandHelpText.innerHTML = `识别为 <strong>搜索词</strong>，会在 title、content、source_url 中全文搜索，并按最新时间排序。`;
+            scheduleCommandSearch(value);
+        }
+
+        async function fetchCommandResults(query) {
+            const trimmedQuery = (query || '').trim();
+            if (!trimmedQuery || isLikelyUrl(trimmedQuery)) {
+                clearCommandResults();
+                return;
+            }
+
+            const requestId = ++commandRequestId;
+            commandResults.innerHTML = '<div class="suggestion-empty">搜索中...</div>';
+            try {
+                const response = await fetch(`/api/items?${getActiveSearchParams(6, trimmedQuery).toString()}`);
+                if (!response.ok) throw new Error('API Error');
+                const results = await response.json();
+                if (requestId !== commandRequestId) return;
+                commandSearchResults = results;
+                if (!results.length) {
+                    commandResults.innerHTML = '<div class="suggestion-empty">没有找到匹配内容</div>';
+                    return;
+                }
+
+                commandResults.innerHTML = results.map((item) => {
+                    const snippet = truncateText(item.canonical_text || item.source_url || '无正文内容', 44);
+                    return `
+                        <button class="suggestion-item" type="button" onclick="openCommandResult('${item.id}')">
+                            <div class="command-result-body">
+                                <span class="command-result-title">${escapeHtml(item.title || '无标题')}</span>
+                                <span class="command-result-snippet">${escapeHtml(snippet)}</span>
+                            </div>
+                            <span class="suggestion-meta">${platformDisplayLabel(item)} · ${formatDate(item.created_at)}</span>
+                        </button>
+                    `;
+                }).join('');
+            } catch (error) {
+                if (requestId !== commandRequestId) return;
+                commandResults.innerHTML = '<div class="suggestion-empty">搜索失败，请稍后重试</div>';
+            }
+        }
+
+        function applyCommandSearch() {
+            const query = urlInput.value.trim();
+            if (!query) {
+                showToast('请输入关键词', 'error');
+                return;
+            }
+            filterInput.value = query;
+            fetchItems();
+            closeCommandPalette();
+        }
+
+        function runCommandAction() {
+            const value = urlInput.value.trim();
+            if (!value) {
+                showToast('请输入链接或关键词', 'error');
+                return;
+            }
+            if (isLikelyUrl(value)) {
+                extractURL();
+                return;
+            }
+            applyCommandSearch();
+        }
+
+        function openCommandResult(itemId) {
+            const item = commandSearchResults.find((entry) => entry.id === itemId);
+            if (!item) return;
+            filterInput.value = urlInput.value.trim();
+            fetchItems();
+            closeCommandPalette();
+            openModalByItem(item);
         }
 
         async function extractURL() {
@@ -2078,6 +2442,8 @@
                     const mediaInfo = data.media_count > 0 ? `，${data.media_count} 个媒体` : '';
                     showToast(`收录成功：${data.title} (${data.text_length} 字${mediaInfo}，平台：${data.platform})`, 'success');
                     urlInput.value = '';
+                    clearCommandResults();
+                    updateCommandPaletteState();
                     closeCommandPalette();
                     fetchItems();
                 } else {
@@ -2088,11 +2454,17 @@
             } finally {
                 extractBtn.disabled = false;
                 extractBtn.classList.remove('is-loading');
-                extractBtnLabel.textContent = '添加新链接';
+                updateCommandPaletteState();
             }
         }
 
-        urlInput.addEventListener('keydown', e => { if (e.key === 'Enter') extractURL(); });
+        urlInput.addEventListener('input', updateCommandPaletteState);
+        urlInput.addEventListener('keydown', e => {
+            if (e.key === 'Enter') {
+                e.preventDefault();
+                runCommandAction();
+            }
+        });
         commandOverlay.addEventListener('click', e => {
             if (e.target === commandOverlay) closeCommandPalette();
         });
@@ -2153,44 +2525,46 @@
             return images[0] || null;
         }
 
-        function normalizePlatform(platform) {
+        function normalizePlatform(platform, sourceUrl = '') {
             const value = (platform || '').toLowerCase();
             if (value.includes('douyin') || value.includes('抖音') || value.includes('tiktok')) return 'douyin';
             if (value.includes('xiaohongshu') || value.includes('小红书') || value.includes('rednote') || value === 'xhs') return 'xiaohongshu';
+            if (value.includes('wechat') || value.includes('weixin') || sourceUrl.includes('mp.weixin.qq.com') || sourceUrl.includes('weixin.qq.com')) return 'wechat';
             if (value === 'x' || value.includes('twitter')) return 'x';
-            if (value === 'general' || value === 'web' || value === 'site') return 'general';
+            if (value === 'general' || value === 'generic' || value === 'web' || value === 'site') return 'web';
             return value;
         }
 
-        function applyFilter() {
-            const keyword = filterInput.value.trim().toLowerCase();
-            const selectedPlatform = platformFilter.value;
-            filteredEntries = itemsData
-                .map((item, index) => ({ item, index }))
-                .filter(({ item }) => {
-                    const platform = normalizePlatform(item.platform || '');
-                    const matchPlatform = selectedPlatform === 'all' || platform === selectedPlatform;
-                    if (!matchPlatform) return false;
-                    if (!keyword) return true;
-                    const title = (item.title || '').toLowerCase();
-                    const text = (item.canonical_text || '').toLowerCase();
-                    const rawPlatform = (item.platform || '').toLowerCase();
-                    return title.includes(keyword) || text.includes(keyword) || rawPlatform.includes(keyword);
-                });
-
-            const hasKeyword = !!keyword;
-            const hasPlatformFilter = selectedPlatform !== 'all';
-            setStatsSummary(itemsData.length, filteredEntries.length, hasKeyword || hasPlatformFilter);
-
-            renderItems(filteredEntries);
+        function platformDisplayLabel(item) {
+            const platform = normalizePlatform(item.platform || '', (item.source_url || '').toLowerCase());
+            if (platform === 'web') return 'web';
+            return platform || 'web';
         }
 
         async function fetchItems() {
+            const requestId = ++libraryRequestId;
             try {
-                const response = await fetch('/api/items?limit=50');
+                const response = await fetch(`/api/items?${getActiveSearchParams(200).toString()}`);
                 if (!response.ok) throw new Error('API Error');
-                itemsData = await response.json();
-                applyFilter();
+                const totalCount = Number(response.headers.get('X-Total-Count') || '0');
+                const visibleCount = Number(response.headers.get('X-Visible-Count') || '0');
+                const returnedCount = Number(response.headers.get('X-Returned-Count') || '0');
+                const nextItems = await response.json();
+                if (requestId !== libraryRequestId) return;
+                itemsData = nextItems;
+                filteredEntries = itemsData;
+                latestTotalCount = totalCount;
+                latestVisibleCount = visibleCount;
+                latestReturnedCount = returnedCount || itemsData.length;
+                const hasKeyword = !!filterInput.value.trim();
+                const hasPlatformFilter = platformFilter.value !== 'all';
+                setStatsSummary(
+                    latestTotalCount || itemsData.length,
+                    latestVisibleCount || itemsData.length,
+                    latestReturnedCount || itemsData.length,
+                    hasKeyword || hasPlatformFilter
+                );
+                renderItems(filteredEntries);
             } catch (error) {
                 setStatsMessage('加载失败');
                 grid.className = 'grid';
@@ -2201,13 +2575,15 @@
         function renderItems(entries) {
             if (entries.length === 0) {
                 grid.className = currentView === 'gallery' ? 'grid' : 'list-view';
-                grid.innerHTML = '<div class="empty-state">暂无收录内容，请在 App 中添加。</div>';
+                grid.innerHTML = filterInput.value.trim() || platformFilter.value !== 'all'
+                    ? '<div class="empty-state">没有找到匹配内容，请换个关键词或平台试试。</div>'
+                    : '<div class="empty-state">暂无收录内容，请在 App 中添加。</div>';
                 return;
             }
 
             if (currentView === 'list') {
                 grid.className = 'list-view';
-                grid.innerHTML = entries.map(({ item, index }) => {
+                grid.innerHTML = entries.map((item) => {
                     const textPreview = item.canonical_text ? item.canonical_text.substring(0, 120) + '...' : '无正文内容';
                     const length = item.canonical_text ? item.canonical_text.length : 0;
                     const thumb = getItemThumbnail(item);
@@ -2216,7 +2592,7 @@
                         ? `<div class="list-thumb"><img src="${thumb.url}" loading="lazy" alt=""></div>`
                         : `<div class="list-thumb"></div>`;
                     return `
-                        <div class="list-row${activeClass}" onclick="openModal(${index})">
+                        <div class="list-row${activeClass}" onclick="openModalById('${item.id}')">
                             <div class="list-main">
                                 ${thumbHtml}
                                 <div class="list-content">
@@ -2228,7 +2604,7 @@
                             </div>
                             <div class="list-side">
                                 <div class="list-meta">
-                                    <span class="list-stat">${item.platform || 'web'}</span>
+                                    <span class="list-stat">${platformDisplayLabel(item)}</span>
                                     <span class="list-stat">${formatDate(item.created_at)}</span>
                                     <span class="list-stat">${length} 字</span>
                                 </div>
@@ -2247,7 +2623,7 @@
             }
 
             grid.className = 'grid';
-            grid.innerHTML = entries.map(({ item, index }) => {
+            grid.innerHTML = entries.map((item) => {
                 const textPreview = item.canonical_text ? item.canonical_text.substring(0, 150) + '...' : '无正文内容';
                 const length = item.canonical_text ? item.canonical_text.length : 0;
                 const activeClass = currentOpenItemId === item.id ? ' is-active' : '';
@@ -2265,7 +2641,7 @@
                 }
 
                 return `
-                    <div class="card${activeClass}" onclick="openModal(${index})">
+                    <div class="card${activeClass}" onclick="openModalById('${item.id}')">
                         ${thumbnailHtml}
                         <div class="card-header">
                             <h3 class="title">${item.title || '无标题'}</h3>
@@ -2298,8 +2674,11 @@
             renderItems(filteredEntries);
         }
 
-        filterInput.addEventListener('input', applyFilter);
-        platformFilter.addEventListener('change', applyFilter);
+        filterInput.addEventListener('input', scheduleLibrarySearch);
+        platformFilter.addEventListener('change', () => {
+            updateCommandPaletteState();
+            fetchItems();
+        });
         galleryViewBtn.addEventListener('click', () => setView('gallery'));
         listViewBtn.addEventListener('click', () => setView('list'));
 
@@ -2321,11 +2700,17 @@
             }
         }
 
-        function openModal(index) {
-            const item = itemsData[index];
+        function openModalById(itemId) {
+            const item = itemsData.find((entry) => entry.id === itemId);
+            if (!item) return;
+            openModalByItem(item);
+        }
+
+        function openModalByItem(item) {
             currentOpenItemId = item.id;
             renderItems(filteredEntries);
             setModalFullscreen(false);
+            modalTitle.innerText = item.title || '无标题';
             readerStatusDots.innerHTML = `
                 <span class="knowledge-dot notion ${item.notion_page_id ? 'is-ready' : 'is-idle'}" title="Notion${item.notion_page_id ? '已同步' : '未同步'}"></span>
                 <span class="knowledge-dot obsidian ${item.obsidian_path ? 'is-ready' : 'is-idle'}" title="Obsidian${item.obsidian_path ? '已同步' : '未同步'}"></span>
@@ -2348,50 +2733,9 @@
                 html += `<div style="white-space:pre-wrap">${item.canonical_text || '暂无内容'}</div>`;
                 modalContent.innerHTML = html;
 
-            } else if (item.canonical_html) {
-                // ── 模式 1: 通用网页 — 用 canonical_html 渲染（排版更佳，保留原生格式和图片位置）────────
-                let html = '';
-                if (videos.length > 0) {
-                    html += `<div class="modal-media"><video controls preload="metadata"><source src="${videos[0].url}" type="video/mp4"></video></div>`;
-                }
-                html += `<div class="article-html" style="margin-top: 0;">${item.canonical_html}</div>`;
-                modalContent.innerHTML = html;
-
-            } else if (item.content_blocks_json) {
-                // ── 模式 2: 通用网页 — 用 DOM 遍历块，图文顺序完全还原 (回退 fallback) ─────────────
-                let blocks;
-                try { blocks = JSON.parse(item.content_blocks_json); } catch (e) { blocks = null; }
-
-                if (blocks && blocks.length > 0) {
-                    let html = '';
-                    if (videos.length > 0) {
-                        html += `<div class="modal-media"><video controls preload="metadata"><source src="${videos[0].url}" type="video/mp4"></video></div>`;
-                    }
-                    blocks.forEach(block => {
-                        if (block.type === 'text' && block.content) {
-                            html += `<p class="content-para">${block.content.replace(/\n/g, '<br>')}</p>`;
-                        } else if (block.type === 'image' && block.url) {
-                            html += `<div class="inline-img-wrap"><img src="${block.url}" alt="" class="inline-img"></div>`;
-                        }
-                    });
-                    modalContent.innerHTML = html;
-                } else {
-                    // blocks parsed but empty — show text only
-                    modalContent.innerHTML = `<div style="white-space:pre-wrap">${item.canonical_text || '暂无内容'}</div>`;
-                }
-
             } else {
-                // ── 旧记录没有 content_blocks_json：文字在前，图片在后 ───────
-                const images = (item.media || []).filter(m => m.type === 'image').sort((a, b) => a.display_order - b.display_order);
-                let html = '';
-                if (videos.length > 0) {
-                    html += `<div class="modal-media"><video controls preload="metadata"><source src="${videos[0].url}" type="video/mp4"></video></div>`;
-                }
-                html += `<div style="white-space:pre-wrap;margin-bottom:${images.length > 0 ? '1rem' : '0'}">${item.canonical_text || '暂无内容'}</div>`;
-                if (images.length > 0) {
-                    html += `<div class="modal-media"><div class="media-gallery">${images.map(img => `<img src="${img.url}" alt="">`).join('')}</div>${images.length > 1 ? '<div class="gallery-hint">← 左右滑动查看图片 →</div>' : ''}</div>`;
-                }
-                modalContent.innerHTML = html;
+                // ── 通用网页 / 微信：优先恢复原始图文流，再按稳妥策略回退 ──────────────
+                modalContent.innerHTML = renderWebArticle(item, videos);
             }
 
             modalFooter.innerHTML = `
@@ -2417,10 +2761,15 @@
                         if (target === 'notion' && data.notion_page_id) currentItem.notion_page_id = data.notion_page_id;
                         if (target === 'obsidian' && data.obsidian_path) currentItem.obsidian_path = data.obsidian_path;
                     }
-                    applyFilter();
-                    const refreshedIndex = itemsData.findIndex(item => item.id === id);
-                    if (currentOpenItemId === id && refreshedIndex >= 0) {
-                        openModal(refreshedIndex);
+                    const commandItem = commandSearchResults.find((item) => item.id === id);
+                    if (commandItem) {
+                        if (target === 'notion' && data.notion_page_id) commandItem.notion_page_id = data.notion_page_id;
+                        if (target === 'obsidian' && data.obsidian_path) commandItem.obsidian_path = data.obsidian_path;
+                    }
+                    renderItems(filteredEntries);
+                    const refreshedItem = itemsData.find(item => item.id === id) || commandSearchResults.find(item => item.id === id);
+                    if (currentOpenItemId === id && refreshedItem) {
+                        openModalByItem(refreshedItem);
                     }
                     if (target === 'notion' && data.target_object) {
                         const targetLabel = data.target_object === 'database' ? 'Database' : 'Page';
@@ -2486,6 +2835,7 @@
 
         // Fetch on load
         fetchItems();
+        updateCommandPaletteState();
 
         // Check URL for OAuth callback results
         const urlParams = new URLSearchParams(window.location.search);

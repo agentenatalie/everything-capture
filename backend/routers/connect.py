@@ -23,12 +23,20 @@ import json
 import mimetypes
 from pathlib import Path
 from urllib.parse import urlparse, urlunparse, quote
+from datetime import UTC
+from zoneinfo import ZoneInfo
 from bs4 import BeautifulSoup, NavigableString, Tag
 
 NOTION_VERSION = "2025-09-03"
 NOTION_RICH_TEXT_LIMIT = 2000
 NOTION_CHILDREN_LIMIT = 100
 OBSIDIAN_MEDIA_FOLDER = "EverythingCapture_Media"
+DISPLAY_TIMEZONE = ZoneInfo("America/New_York")
+NOTION_SYNC_PROPERTY_SPECS = {
+    "Date": {"type": "rich_text", "rich_text": {}},
+    "Source": {"type": "url", "url": {}},
+    "Platform": {"type": "rich_text", "rich_text": {}},
+}
 
 _NOTION_ID_RE = re.compile(r"([0-9a-fA-F]{32}|[0-9a-fA-F]{8}(?:-[0-9a-fA-F]{4}){3}-[0-9a-fA-F]{12})")
 
@@ -68,6 +76,15 @@ def _notion_headers(token: str, *, json_body: bool = True) -> dict[str, str]:
 def _truncate_text(value: str | None, limit: int, fallback: str = "") -> str:
     text = (value or fallback or "").strip()
     return text[:limit] if text else fallback
+
+
+def _format_item_datetime(value) -> str:
+    if value is None:
+        return ""
+    if value.tzinfo is None:
+        value = value.replace(tzinfo=UTC)
+    localized = value.astimezone(DISPLAY_TIMEZONE)
+    return localized.strftime("%m/%d %H:%M")
 
 
 def _split_rich_text_chunks(text: str, limit: int = NOTION_RICH_TEXT_LIMIT) -> list[str]:
@@ -329,10 +346,36 @@ def _html_structured_blocks(item: Item) -> list[dict]:
 
 def _get_structured_blocks(item: Item) -> list[dict]:
     blocks = _load_content_blocks(item)
-    if blocks:
-        return blocks
     html_blocks = _html_structured_blocks(item)
-    return html_blocks if html_blocks else _fallback_structured_blocks(item)
+    if not blocks:
+        return html_blocks if html_blocks else _fallback_structured_blocks(item)
+    if not html_blocks:
+        return blocks
+
+    media_types = {"image", "video", "cover"}
+
+    def summarize(candidate_blocks: list[dict]) -> dict[str, bool]:
+        types = {str(block.get("type") or "") for block in candidate_blocks}
+        non_empty_types = {block_type for block_type in types if block_type}
+        return {
+            "text_only": bool(non_empty_types) and non_empty_types.issubset({"text", "paragraph"}),
+            "has_media": any(block.get("type") in media_types for block in candidate_blocks),
+            "has_rich_structure": any(
+                block.get("type") not in {"text", "paragraph", *media_types}
+                for block in candidate_blocks
+            ),
+        }
+
+    block_summary = summarize(blocks)
+    html_summary = summarize(html_blocks)
+
+    if block_summary["text_only"] and (html_summary["has_media"] or html_summary["has_rich_structure"]):
+        return html_blocks
+    if not block_summary["has_media"] and html_summary["has_media"]:
+        return html_blocks
+    if not block_summary["has_rich_structure"] and html_summary["has_rich_structure"]:
+        return html_blocks
+    return blocks
 
 
 def _media_lookup(item: Item) -> dict[str, object]:
@@ -724,7 +767,7 @@ def _obsidian_note_matches_item(note_content: str, item: Item) -> bool:
 def _build_obsidian_note(item: Item, media_references: dict[str, str]) -> str:
     structured_blocks = _get_structured_blocks(item)
     yaml_frontmatter = (
-        f"---\nitem_id: {item.id}\nsource: {item.source_url}\nplatform: {item.platform}\ndate: {item.created_at.isoformat()}\n---\n\n"
+        f"---\nitem_id: {item.id}\nsource: {item.source_url}\nplatform: {item.platform}\ndate: {_format_item_datetime(item.created_at)}\n---\n\n"
     )
     title = item.title or f"Capture {item.id}"
     parts = [yaml_frontmatter, f"# {title}\n\n"]
@@ -813,7 +856,83 @@ def _data_source_target_from_payload(data_source: dict) -> dict:
         "title": _notion_title_plain_text(data_source.get("title", [])),
         "title_property_name": title_property_name,
         "database_id": (data_source.get("parent") or {}).get("database_id"),
+        "properties": data_source.get("properties", {}),
     }
+
+
+async def _ensure_notion_sync_properties(
+    client: httpx.AsyncClient,
+    headers: dict[str, str],
+    notion_target: dict,
+) -> dict:
+    if notion_target.get("object") != "data_source":
+        return notion_target
+
+    existing_properties = notion_target.get("properties") or {}
+    properties_to_add = {
+        name: schema
+        for name, schema in NOTION_SYNC_PROPERTY_SPECS.items()
+        if name not in existing_properties
+    }
+
+    if properties_to_add:
+        response = await client.patch(
+            f"https://api.notion.com/v1/data_sources/{notion_target['id']}",
+            headers=headers,
+            json={"properties": properties_to_add},
+            timeout=30.0,
+        )
+        if response.status_code != 200:
+            logger.error("Failed to ensure Notion sync properties for %s: %s", notion_target["id"], response.text)
+            raise HTTPException(status_code=500, detail=f"Notion data source update failed: {response.text}")
+        notion_target = _data_source_target_from_payload(response.json())
+
+    notion_target["sync_property_names"] = {
+        "date": "Date",
+        "source": "Source",
+        "platform": "Platform",
+    }
+    return notion_target
+
+
+def _build_notion_page_properties(item: Item, notion_target: dict) -> dict:
+    properties = {
+        notion_target["title_property_name"]: {
+            "title": [
+                {
+                    "text": {
+                        "content": _truncate_text(item.title, NOTION_RICH_TEXT_LIMIT, "Untitled")
+                    }
+                }
+            ]
+        }
+    }
+
+    sync_property_names = notion_target.get("sync_property_names") or {}
+    if sync_property_names.get("date"):
+        properties[sync_property_names["date"]] = {
+            "rich_text": [
+                {
+                    "type": "text",
+                    "text": {"content": _format_item_datetime(item.created_at)},
+                }
+            ]
+        }
+    if sync_property_names.get("source"):
+        properties[sync_property_names["source"]] = {
+            "url": _clean_optional_string(item.source_url)
+        }
+    if sync_property_names.get("platform"):
+        properties[sync_property_names["platform"]] = {
+            "rich_text": [
+                {
+                    "type": "text",
+                    "text": {"content": _truncate_text(item.platform, NOTION_RICH_TEXT_LIMIT, "")},
+                }
+            ]
+        }
+
+    return properties
 
 async def _resolve_single_child_database_target(
     client: httpx.AsyncClient,
@@ -1190,26 +1309,16 @@ async def sync_to_notion(item_id: str, db: Session = Depends(get_db)):
                 settings.notion_database_id = notion_target["id"]
                 db.commit()
 
+            notion_target = await _ensure_notion_sync_properties(client, notion_headers, notion_target)
             children = await _build_notion_children(client, notion_headers, item)
             first_batch = children[:NOTION_CHILDREN_LIMIT]
             remaining_children = children[NOTION_CHILDREN_LIMIT:]
-            title_content = _truncate_text(item.title, NOTION_RICH_TEXT_LIMIT, "Untitled")
 
             if notion_target["object"] in {"database", "data_source"}:
                 parent_type = "database_id" if notion_target["object"] == "database" else "data_source_id"
                 payload = {
                     "parent": { "type": parent_type, parent_type: notion_target["id"] },
-                    "properties": {
-                        notion_target["title_property_name"]: {
-                            "title": [
-                                {
-                                    "text": {
-                                        "content": title_content
-                                    }
-                                }
-                            ]
-                        }
-                    },
+                    "properties": _build_notion_page_properties(item, notion_target),
                     "children": first_batch
                 }
             else:
@@ -1220,7 +1329,7 @@ async def sync_to_notion(item_id: str, db: Session = Depends(get_db)):
                             "title": [
                                 {
                                     "text": {
-                                        "content": title_content
+                                        "content": _truncate_text(item.title, NOTION_RICH_TEXT_LIMIT, "Untitled")
                                     }
                                 }
                             ]

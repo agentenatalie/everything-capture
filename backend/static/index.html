@@ -2325,16 +2325,73 @@
             }
         }
 
+        function summarizeStructuredBlocks(blocks) {
+            const types = new Set((blocks || []).map((block) => String(block?.type || '')).filter(Boolean));
+            const mediaTypes = new Set(['image', 'video', 'cover']);
+            return {
+                hasText: (blocks || []).some((block) => {
+                    const content = String(block?.content || block?.markdown || '').trim();
+                    return (block?.type === 'text' || block?.type === 'paragraph') && content;
+                }),
+                textOnly: types.size > 0 && Array.from(types).every((type) => type === 'text' || type === 'paragraph'),
+                hasMedia: (blocks || []).some((block) => mediaTypes.has(block?.type)),
+                hasRichStructure: (blocks || []).some((block) => {
+                    const type = String(block?.type || '');
+                    return type && type !== 'text' && type !== 'paragraph' && !mediaTypes.has(type);
+                }),
+            };
+        }
+
         function renderStructuredBlocks(blocks) {
             return blocks.map((block) => {
-                if (block.type === 'text' && block.content) {
-                    return `<p class="content-para">${escapeHtml(block.content).replace(/\n/g, '<br>')}</p>`;
+                const content = String(block.markdown || block.content || '').trim();
+                if ((block.type === 'text' || block.type === 'paragraph') && content) {
+                    return `<p class="content-para">${escapeHtml(content).replace(/\n/g, '<br>')}</p>`;
+                }
+                if (block.type === 'heading_1' && content) {
+                    return `<h1 class="content-title">${escapeHtml(content)}</h1>`;
+                }
+                if (block.type === 'heading_2' && content) {
+                    return `<h2 class="content-subtitle">${escapeHtml(content)}</h2>`;
+                }
+                if (block.type === 'heading_3' && content) {
+                    return `<h3 class="content-subtitle" style="font-size:1.05rem;">${escapeHtml(content)}</h3>`;
+                }
+                if (block.type === 'bulleted_list_item' && content) {
+                    return `<p class="content-para">• ${escapeHtml(content)}</p>`;
+                }
+                if (block.type === 'numbered_list_item' && content) {
+                    return `<p class="content-para">1. ${escapeHtml(content)}</p>`;
+                }
+                if (block.type === 'quote' && content) {
+                    return `<blockquote class="note-quote">${escapeHtml(content).replace(/\n/g, '<br>')}</blockquote>`;
+                }
+                if (block.type === 'code' && content) {
+                    return `<pre class="preview-code"><code>${escapeHtml(content)}</code></pre>`;
+                }
+                if (block.type === 'divider') {
+                    return '<hr class="divider-line">';
                 }
                 if (block.type === 'image' && block.url) {
                     return `<div class="inline-img-wrap"><img src="${escapeAttribute(block.url)}" alt="" class="inline-img"></div>`;
                 }
                 return '';
             }).join('');
+        }
+
+        function shouldPreferCanonicalHtml(item, blocks, mediaImageUrls) {
+            if (!item.canonical_html) return false;
+            if (!blocks || !blocks.length) return true;
+
+            const summary = summarizeStructuredBlocks(blocks);
+            const htmlImageUrls = extractImageUrlsFromHtml(item.canonical_html);
+            const htmlHasRichFormatting = /<(h[1-6]|blockquote|ul|ol|pre|code|figure)\b/i.test(item.canonical_html);
+
+            if (summary.textOnly && (htmlImageUrls.length > 0 || htmlHasRichFormatting)) return true;
+            if (!summary.hasMedia && htmlImageUrls.length > 0) return true;
+            if (!summary.hasRichStructure && htmlHasRichFormatting) return true;
+            if (hasSuspiciousRepeatedImages(htmlImageUrls, mediaImageUrls)) return false;
+            return false;
         }
 
         function buildInlineMediaFallback(item) {
@@ -2376,12 +2433,12 @@
             const blocks = parseContentBlocks(item);
             let bodyHtml = '';
 
-            if (blocks && blocks.length > 0) {
+            if (blocks && blocks.length > 0 && !shouldPreferCanonicalHtml(item, blocks, mediaImageUrls)) {
                 const blockImageUrls = blocks
                     .filter((block) => block.type === 'image' && block.url)
                     .map((block) => block.url);
-                const hasTextBlocks = blocks.some((block) => block.type === 'text' && block.content && block.content.trim());
-                if (hasTextBlocks && !hasSuspiciousRepeatedImages(blockImageUrls, mediaImageUrls)) {
+                const summary = summarizeStructuredBlocks(blocks);
+                if (summary.hasText && !hasSuspiciousRepeatedImages(blockImageUrls, mediaImageUrls)) {
                     bodyHtml = renderStructuredBlocks(blocks);
                 }
             }

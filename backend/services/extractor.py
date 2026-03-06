@@ -771,6 +771,7 @@ _BLOCK_LEVEL_TAGS = {"p", "h1", "h2", "h3", "h4", "h5", "h6", "blockquote", "pre
                      "td", "th", "dt", "dd", "figcaption", "caption"}
 _SKIP_TAGS = {"script", "style", "nav", "footer", "header", "noscript", "iframe",
               "button", "form", "aside", "figure"}
+_RECURSIVE_CONTAINER_TAGS = {"div", "section", "article", "main", "picture", "a", "span"}
 
 
 def _extract_article_blocks(soup: BeautifulSoup, base_url: str = "") -> list[dict]:
@@ -873,6 +874,16 @@ def _extract_article_blocks(soup: BeautifulSoup, base_url: str = "") -> list[dic
                 if text:
                     flush()
                     blocks.append({"type": "text", "content": text})
+            return
+
+        if tag_name in _RECURSIVE_CONTAINER_TAGS:
+            for child in node.children:
+                walk(child)
+            return
+
+        if node.find(["img", "picture", "figure"], recursive=True):
+            for child in node.children:
+                walk(child)
             return
 
         # div / section / span / etc. — recurse into children

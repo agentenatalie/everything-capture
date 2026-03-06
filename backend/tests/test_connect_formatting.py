@@ -18,7 +18,7 @@ from routers.connect import (  # noqa: E402
     _format_item_datetime,
     _get_structured_blocks,
 )
-from services.extractor import _extract_article_blocks  # noqa: E402
+from services.extractor import _extract_article_blocks, _extract_article_html  # noqa: E402
 
 
 class HtmlFallbackFormattingTests(unittest.TestCase):
@@ -100,6 +100,35 @@ class HtmlFallbackFormattingTests(unittest.TestCase):
         )
         self.assertEqual(blocks[2]["url"], "/static/media/first.png")
 
+    def test_html_fallback_keeps_images_inside_paragraph_wrappers(self) -> None:
+        item = Item(
+            id="item-inline-image",
+            title="Paragraph Wrapped Image",
+            source_url="https://example.com/article",
+            final_url="https://example.com/article",
+            platform="generic",
+            canonical_text="Intro\n\nOutro",
+            canonical_html=(
+                "<article>"
+                "<p>Intro</p>"
+                '<p><img src="/static/media/first.png" alt="inline image" /></p>'
+                "<p>Outro</p>"
+                "</article>"
+            ),
+            created_at=datetime.datetime(2026, 3, 6, 12, 0, 0),
+        )
+
+        blocks = _get_structured_blocks(item)
+
+        self.assertEqual(
+            blocks,
+            [
+                {"type": "paragraph", "content": "Intro", "markdown": "Intro"},
+                {"type": "image", "url": "/static/media/first.png"},
+                {"type": "paragraph", "content": "Outro", "markdown": "Outro"},
+            ],
+        )
+
     def test_obsidian_note_keeps_inline_image_and_markdown(self) -> None:
         item = self.make_item()
 
@@ -178,6 +207,43 @@ class HtmlFallbackFormattingTests(unittest.TestCase):
                 {"type": "text", "content": "Outro"},
             ],
         )
+
+    def test_extractor_prefers_new_content_container_over_site_shell(self) -> None:
+        soup = BeautifulSoup(
+            (
+                "<html><body>"
+                "<h1>眼馋苹果刚发布的液态玻璃效果？藏师傅教你提示词一键实现</h1>"
+                "<div id='h5-menu-panel'>站点导航 首页 AI资讯 APP 下载 热门搜索 大模型 人工智能</div>"
+                "<div id='app'>"
+                "<div class='changebutton'>正文</div>"
+                "<div class='changebutton'>资源拓展</div>"
+                "<div class='newContent' id='content1'>"
+                "<p>小编PS：亲测提示词，UI效果是可以完全复现的，但是水纹的动态效果没能复现成功。</p>"
+                "<p><img src='https://cdn.example.com/inline.jpg' alt='inline'></p>"
+                "<p>这里藏师傅也是一上午探索了一下如何将液态玻璃效果融入到网页生成的提示词里面。</p>"
+                "</div>"
+                "<div class='newContent' id='content2'><p>资源拓展</p><p>cursor</p></div>"
+                "</div>"
+                "<div>底部下载栏 IOS下载 安卓下载 微信群</div>"
+                "</body></html>"
+            ),
+            "html.parser",
+        )
+
+        blocks = _extract_article_blocks(soup, "https://example.com/article")
+        html = _extract_article_html(soup, "https://example.com/article")
+        text_content = "\n".join(block["content"] for block in blocks if block["type"] == "text")
+
+        self.assertIn("小编PS：亲测提示词", text_content)
+        self.assertIn("如何将液态玻璃效果融入到网页生成的提示词里面", text_content)
+        self.assertNotIn("站点导航", text_content)
+        self.assertNotIn("热门搜索", text_content)
+        self.assertNotIn("底部下载栏", text_content)
+        self.assertIsNotNone(html)
+        self.assertIn("小编PS：亲测提示词", html)
+        self.assertIn("https://cdn.example.com/inline.jpg", html)
+        self.assertNotIn("站点导航", html)
+        self.assertNotIn("资源拓展", html)
 
 
 if __name__ == "__main__":

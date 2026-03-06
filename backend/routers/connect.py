@@ -321,6 +321,38 @@ def _html_structured_blocks(item: Item) -> list[dict]:
                 continue
 
             if tag_name == "p":
+                if child.find("img", recursive=True):
+                    text_before = []
+                    for grandchild in child.children:
+                        if isinstance(grandchild, NavigableString):
+                            inline_text = re.sub(r"\s+", " ", str(grandchild).replace("\xa0", " ")).strip()
+                            if inline_text:
+                                text_before.append(inline_text)
+                            continue
+                        if not isinstance(grandchild, Tag):
+                            continue
+                        if grandchild.name == "img" or grandchild.find("img", recursive=True):
+                            if text_before:
+                                text_content = " ".join(text_before).strip()
+                                append_text_block("paragraph", text_content, text_content)
+                                text_before.clear()
+                            if grandchild.name == "img":
+                                src = _normalize_media_url(
+                                    grandchild.get("src") or grandchild.get("data-src") or grandchild.get("data-original"),
+                                    item.final_url or item.source_url,
+                                )
+                                if src:
+                                    blocks.append({"type": "image", "url": src})
+                            else:
+                                walk(grandchild)
+                            continue
+                        content, markdown = _text_block_payload(grandchild)
+                        if content:
+                            text_before.append(markdown or content)
+                    if text_before:
+                        text_content = " ".join(text_before).strip()
+                        append_text_block("paragraph", text_content, text_content)
+                    continue
                 content, markdown = _text_block_payload(child)
                 append_text_block("paragraph", content, markdown)
                 continue
@@ -371,6 +403,8 @@ def _get_structured_blocks(item: Item) -> list[dict]:
 
     if block_summary["text_only"] and (html_summary["has_media"] or html_summary["has_rich_structure"]):
         return html_blocks
+    if block_summary["has_media"] and not html_summary["has_media"]:
+        return blocks
     if not block_summary["has_media"] and html_summary["has_media"]:
         return html_blocks
     if not block_summary["has_rich_structure"] and html_summary["has_rich_structure"]:

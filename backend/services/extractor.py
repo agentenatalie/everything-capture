@@ -813,19 +813,7 @@ def _extract_article_blocks(soup: BeautifulSoup, base_url: str = "") -> list[dic
                     url = _norm(parts[-1])
         return url
 
-    # Locate article root — prefer semantic containers over generic body
-    article_root = (
-        soup.find("article")
-        or soup.select_one("[role='article']")
-        or soup.select_one(".rich_media_content")   # WeChat
-        or soup.select_one("#js_content")            # WeChat
-        or soup.select_one(".post-content")
-        or soup.select_one(".article-content")
-        or soup.select_one(".entry-content")
-        or soup.select_one(".story-body")
-        or soup.find("main")
-        or soup.find("body")
-    )
+    article_root = _find_article_root(soup) or soup.find("body")
     if not article_root:
         return []
 
@@ -932,34 +920,63 @@ _SAFE_ATTRS = {
     "th": {"colspan", "rowspan"},
 }
 
+_ARTICLE_ROOT_SELECTORS = [
+    "#content1",
+    ".newContent",
+    "#js_content",
+    ".rich_media_content",
+    "article",
+    "[role='article']",
+    ".article-content",
+    ".post-content",
+    ".entry-content",
+    ".article-body",
+    ".articleBody",
+    ".content",
+    "#content",
+    "main",
+    ".story-body",
+]
+
+
+def _find_article_root(soup: BeautifulSoup):
+    """Pick the most likely article container while avoiding site shell containers."""
+    best_node = None
+    best_len = 0
+    high_confidence_selectors = {
+        "#content1",
+        ".newContent",
+        "#js_content",
+        ".rich_media_content",
+        "article",
+        "[role='article']",
+    }
+
+    for selector in _ARTICLE_ROOT_SELECTORS:
+        for node in soup.select(selector):
+            text = node.get_text(" ", strip=True)
+            text_len = len(text)
+            minimum_text_len = 1 if selector in high_confidence_selectors else 20
+            if text_len < minimum_text_len:
+                continue
+            if best_node is None:
+                best_node = node
+                best_len = text_len
+            if selector in high_confidence_selectors:
+                return node
+            if text_len > best_len:
+                best_node = node
+                best_len = text_len
+
+    return best_node
+
 
 def _extract_article_html(soup: BeautifulSoup, base_url: str = "") -> str | None:
     """从 HTML 中提取文章区域, 保留 <img> 位置和丰富的格式, 返回清洁 HTML"""
     from copy import deepcopy
 
-    # 找到文章容器
-    selectors = [
-        "#js_content",           # 微信公众号
-        ".rich_media_content",   # 微信公众号
-        "article",
-        "[role='article']",
-        ".article-content",
-        ".post-content",
-        ".entry-content",
-        ".content",
-        "#content",
-        "main",
-        ".story-body",
-    ]
-
-    container = None
-    for sel in selectors:
-        node = soup.select_one(sel)
-        if node:
-            text = node.get_text(strip=True)
-            if len(text) > 30:
-                container = deepcopy(node)
-                break
+    source_container = _find_article_root(soup)
+    container = deepcopy(source_container) if source_container else None
 
     if not container:
         return None
@@ -1094,26 +1111,19 @@ async def extract_generic(url: str) -> ExtractResult | None:
             logger.debug("trafilatura 提取失败: %s", e)
 
     # ── 兜底 2: BeautifulSoup 手动提取 ─────────────────────────────────
-    selectors = [
-        "article", "[role='article']", ".article-content", ".post-content",
-        ".entry-content", ".content", "#content", "main", ".story-body",
-        "#js_content", ".rich_media_content",
-    ]
-
-    for sel in selectors:
-        node = soup.select_one(sel)
-        if node:
-            text = node.get_text(separator="\n", strip=True)
-            if len(text) > 50:
-                return ExtractResult(
-                    title=title.strip(),
-                    text=_clean_text(text),
-                    platform="generic",
-                    final_url=final_url,
-                    media_urls=media_urls,
-                    content_blocks=content_blocks if content_blocks else None,
-                    content_html=_extract_article_html(soup, base_url=final_url),
-                )
+    fallback_root = _find_article_root(soup)
+    if fallback_root:
+        text = fallback_root.get_text(separator="\n", strip=True)
+        if len(text) > 50:
+            return ExtractResult(
+                title=title.strip(),
+                text=_clean_text(text),
+                platform="generic",
+                final_url=final_url,
+                media_urls=media_urls,
+                content_blocks=content_blocks if content_blocks else None,
+                content_html=_extract_article_html(soup, base_url=final_url),
+            )
 
     # 策略 3: 收集所有段落
     paragraphs = soup.find_all(["p", "h1", "h2", "h3", "h4", "h5", "h6", "li", "blockquote"])

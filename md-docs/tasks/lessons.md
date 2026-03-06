@@ -15,3 +15,4 @@
 - 这个项目的 Notion 集成需要兼容新版 `data_source` 模型，不能再假设所有可写集合都通过旧 `database.properties` 暴露 title property。
 - 如果用户要求固定展示时间格式，不能依赖远端产品的本地化显示；要把格式化后的字符串明确写入可控字段，并用真实远端读回验证。
 - 这个项目不能把“提取成功”和“展示成功”分开看；只要 `content_blocks_json` 退化成纯文本，就必须让前端详情、Notion、Obsidian 一起回退到 `canonical_html`，否则会出现数据里有图但所有出口都没图的回归。
+- 对移动站/H5 详情页，正文容器常常是 `#content1`、`.newContent` 这类业务节点；通用提取不能只靠 `article/main/body`，否则会把菜单、搜索弹窗、底部下载栏一起吞进正文。

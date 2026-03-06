@@ -1072,6 +1072,17 @@
                     <button class="view-btn" id="listViewBtn" type="button">列表</button>
                 </div>
                 <div class="stats" id="stats">加载中...</div>
+                <button id="settingsBtn" class="view-btn"
+                    style="display: flex; align-items: center; justify-content: center; width: 34px; height: 34px; padding: 0;"
+                    title="集成设置">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                        stroke-linecap="round" stroke-linejoin="round">
+                        <path
+                            d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z">
+                        </path>
+                        <circle cx="12" cy="12" r="3"></circle>
+                    </svg>
+                </button>
             </div>
             <div class="toolbar-filters">
                 <input id="filterInput" class="filter-input" type="text" placeholder="筛选" />
@@ -1114,6 +1125,83 @@
         </div>
     </div>
 
+    <!-- Settings Modal -->
+    <div class="modal-overlay" id="settingsOverlay">
+        <div class="modal" style="max-width: 500px;">
+            <div class="modal-header">
+                <h2 class="modal-title">集成设置</h2>
+                <button class="close-btn" id="closeSettingsModal">×</button>
+            </div>
+            <div class="modal-body" style="display: flex; flex-direction: column; gap: 15px;">
+                <div class="settings-group">
+                    <h3 style="margin-bottom: 10px; font-size: 1.05rem; color: var(--text-primary);">Notion 集成</h3>
+                    <div style="margin-bottom: 8px;">
+                        <label style="display: block; font-size: 0.85rem; margin-bottom: 4px;">Client ID (OAuth)</label>
+                        <input type="text" id="notionClientId" class="filter-input" style="width: 100%;"
+                            placeholder="e.g. fd23..." />
+                    </div>
+                    <div style="margin-bottom: 8px;">
+                        <label style="display: block; font-size: 0.85rem; margin-bottom: 4px;">Client Secret
+                            (OAuth)</label>
+                        <input type="password" id="notionClientSecret" class="filter-input" style="width: 100%;"
+                            placeholder="secret_..." />
+                    </div>
+                    <div style="margin-bottom: 8px;">
+                        <label style="display: block; font-size: 0.85rem; margin-bottom: 4px;">Redirect URI</label>
+                        <input type="text" id="notionRedirectUri" class="filter-input" style="width: 100%;"
+                            placeholder="http://localhost:8000/api/connect/notion/oauth/callback" />
+                    </div>
+                    <div style="margin-bottom: 8px;">
+                        <label style="display: block; font-size: 0.85rem; margin-bottom: 4px;">API Token (Auto-filled by
+                            OAuth)</label>
+                        <input type="password" id="notionApiToken" class="filter-input"
+                            style="width: 100%; background: #f5f7fa;" placeholder="Not connected" disabled />
+                    </div>
+                    <div style="margin-top: 10px; margin-bottom: 10px;">
+                        <button id="connectNotionBtn" class="extract-btn"
+                            style="width: 100%; background: #000; color: #fff;">Connect to Notion</button>
+                    </div>
+                    <div>
+                        <label style="display: block; font-size: 0.85rem; margin-bottom: 4px;">Database ID</label>
+                        <input type="text" id="notionDbId" class="filter-input" style="width: 100%;"
+                            placeholder="e.g. 1234abcd..." />
+                    </div>
+                </div>
+
+                <hr style="border: 0; border-top: 1px solid rgba(133, 148, 173, 0.18);">
+
+                <div class="settings-group">
+                    <h3 style="margin-bottom: 10px; font-size: 1.05rem; color: var(--text-primary);">Obsidian 集成</h3>
+                    <div style="margin-bottom: 8px;">
+                        <label style="display: block; font-size: 0.85rem; margin-bottom: 4px;">REST API URL</label>
+                        <input type="text" id="obsidianApiUrl" class="filter-input" style="width: 100%;"
+                            placeholder="http://127.0.0.1:27123" />
+                    </div>
+                    <div>
+                        <label style="display: block; font-size: 0.85rem; margin-bottom: 4px;">API Key</label>
+                        <input type="password" id="obsidianApiKey" class="filter-input" style="width: 100%;"
+                            placeholder="Your API Key" />
+                    </div>
+                </div>
+
+                <hr style="border: 0; border-top: 1px solid rgba(133, 148, 173, 0.18);">
+
+                <div class="settings-group">
+                    <h3 style="margin-bottom: 10px; font-size: 1.05rem; color: var(--text-primary);">自动同步策略 (抓取后自动执行)
+                    </h3>
+                    <select id="autoSyncTarget" class="platform-select" style="width: 100%;">
+                        <option value="none">停用</option>
+                        <option value="notion">仅 Notion</option>
+                        <option value="obsidian">仅 Obsidian</option>
+                        <option value="both">由于 Notion 和 Obsidian (推荐)</option>
+                    </select>
+                </div>
+
+                <button id="saveSettingsBtn" class="extract-btn" style="margin-top: 10px; width: 100%;">保存设置</button>
+            </div>
+        </div>
+    </div>
+
     <script>
         const grid = document.getElementById('grid');
         const stats = document.getElementById('stats');
@@ -1129,12 +1217,115 @@
         const platformFilter = document.getElementById('platformFilter');
         const galleryViewBtn = document.getElementById('galleryViewBtn');
         const listViewBtn = document.getElementById('listViewBtn');
+
+        // Settings elements
+        const settingsBtn = document.getElementById('settingsBtn');
+        const settingsOverlay = document.getElementById('settingsOverlay');
+        const closeSettingsModal = document.getElementById('closeSettingsModal');
+        const btnSaveSettings = document.getElementById('saveSettingsBtn');
+
         const iconCalendar = '<svg class="inline-icon" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M7 3v3M17 3v3M4 9h16M6.5 5h11A1.5 1.5 0 0 1 19 6.5v11A1.5 1.5 0 0 1 17.5 19h-11A1.5 1.5 0 0 1 5 17.5v-11A1.5 1.5 0 0 1 6.5 5Z" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>';
         const iconText = '<svg class="inline-icon" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M5 7.5h14M5 12h14M5 16.5h9" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>';
 
         let itemsData = [];
         let currentView = 'gallery';
         let filteredEntries = [];
+        let currentOpenItemId = null;
+
+        // Settings Logic
+        async function loadSettings() {
+            try {
+                const res = await fetch('/api/settings');
+                if (res.ok) {
+                    const data = await res.json();
+                    if (data.notion_api_token) document.getElementById('notionApiToken').value = data.notion_api_token;
+                    if (data.notion_client_id) document.getElementById('notionClientId').value = data.notion_client_id;
+                    if (data.notion_client_secret) document.getElementById('notionClientSecret').value = data.notion_client_secret;
+                    if (data.notion_redirect_uri) document.getElementById('notionRedirectUri').value = data.notion_redirect_uri;
+                    if (data.notion_database_id) document.getElementById('notionDbId').value = data.notion_database_id;
+                    if (data.obsidian_rest_api_url) document.getElementById('obsidianApiUrl').value = data.obsidian_rest_api_url;
+                    if (data.obsidian_api_key) document.getElementById('obsidianApiKey').value = data.obsidian_api_key;
+                    if (data.auto_sync_target) document.getElementById('autoSyncTarget').value = data.auto_sync_target;
+                }
+            } catch (e) {
+                console.error("Failed to load settings", e);
+            }
+        }
+
+        settingsBtn.onclick = () => {
+            settingsOverlay.classList.add('active');
+            loadSettings();
+        };
+
+        closeSettingsModal.onclick = () => {
+            settingsOverlay.classList.remove('active');
+        };
+
+        btnSaveSettings.onclick = async () => {
+            const payload = {
+                notion_client_id: document.getElementById('notionClientId').value || null,
+                notion_client_secret: document.getElementById('notionClientSecret').value || null,
+                notion_redirect_uri: document.getElementById('notionRedirectUri').value || null,
+                notion_database_id: document.getElementById('notionDbId').value || null,
+                obsidian_rest_api_url: document.getElementById('obsidianApiUrl').value || null,
+                obsidian_api_key: document.getElementById('obsidianApiKey').value || null,
+                auto_sync_target: document.getElementById('autoSyncTarget').value
+            };
+            btnSaveSettings.disabled = true;
+            btnSaveSettings.innerText = "保存中...";
+            try {
+                const res = await fetch('/api/settings', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+                if (res.ok) {
+                    showToast('设置已保存', 'success');
+                    settingsOverlay.classList.remove('active');
+                } else {
+                    showToast('保存设置失败', 'error');
+                }
+            } catch (e) {
+                showToast('保存出错: ' + e.message, 'error');
+            } finally {
+                btnSaveSettings.disabled = false;
+                btnSaveSettings.innerText = "保存设置";
+            }
+        };
+
+        document.getElementById('connectNotionBtn').onclick = async () => {
+            const btn = document.getElementById('connectNotionBtn');
+            btn.disabled = true;
+            btn.innerText = "Connecting...";
+            try {
+                // First save the current OAuth credentials so the backend knows them
+                const payload = {
+                    notion_client_id: document.getElementById('notionClientId').value || null,
+                    notion_client_secret: document.getElementById('notionClientSecret').value || null,
+                    notion_redirect_uri: document.getElementById('notionRedirectUri').value || null
+                };
+                await fetch('/api/settings', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+
+                const res = await fetch('/api/connect/notion/oauth/url');
+                if (res.ok) {
+                    const data = await res.json();
+                    window.location.href = data.url;
+                } else {
+                    const data = await res.json();
+                    showToast('无法获取授权链接: ' + (data.detail || '检查配置'), 'error');
+                    btn.disabled = false;
+                    btn.innerText = "Connect to Notion";
+                }
+            } catch (e) {
+                showToast('请求出错: ' + e.message, 'error');
+                btn.disabled = false;
+                btn.innerText = "Connect to Notion";
+            }
+        };
 
         function openCommandPalette() {
             commandOverlay.classList.add('active');
@@ -1456,9 +1647,40 @@
                 modalContent.innerHTML = html;
             }
 
+            // After existing content is rendered, append the sync buttons to whatever was inserted
+            const buttonsHtml = `
+            <div style="margin-top: 2rem; padding-top: 1rem; border-top: 1px solid rgba(133, 148, 173, 0.18); display: flex; gap: 10px; flex-wrap: wrap;">
+                <button onclick="syncItem('${item.id}', 'notion')" class="extract-btn" style="background: rgba(255, 255, 255, 0.7); color: #333; border: 1px solid #d1d9e4;">同步至 Notion</button>
+                <button onclick="syncItem('${item.id}', 'obsidian')" class="extract-btn" style="background: rgba(255, 255, 255, 0.7); color: #333; border: 1px solid #d1d9e4;">同步至 Obsidian</button>
+                <button onclick="downloadZip('${item.id}')" class="extract-btn" style="background: rgba(255, 255, 255, 0.7); color: #333; border: 1px solid #d1d9e4;">下载 ZIP</button>
+            </div>`;
+
+            modalContent.innerHTML += buttonsHtml;
+
             modalOverlay.classList.add('active');
             document.body.style.overflow = 'hidden';
+            currentOpenItemId = item.id;
         }
+
+        async function syncItem(id, target) {
+            showToast(`正在后台同步至 ${target}...`, 'info');
+            try {
+                const res = await fetch(`/api/connect/${target}/sync/${id}`, { method: 'POST' });
+                const data = await res.json();
+                if (res.ok) {
+                    showToast(`同步成功 (ID: ${data[`${target}_page_id`] || data.obsidian_path || '已同步'})`, 'success');
+                } else {
+                    showToast(`同步失败: ${data.detail}`, 'error');
+                }
+            } catch (e) {
+                showToast(`同步出错: ${e.message}`, 'error');
+            }
+        }
+
+        function downloadZip(id) {
+            window.location.href = `/api/items/${id}/export/zip`;
+        }
+
         closeModal.onclick = () => {
             modalOverlay.classList.remove('active');
             document.body.style.overflow = '';
@@ -1467,9 +1689,25 @@
         modalOverlay.onclick = (e) => {
             if (e.target === modalOverlay) closeModal.onclick();
         };
+        settingsOverlay.onclick = (e) => {
+            if (e.target === settingsOverlay) closeSettingsModal.onclick();
+        };
 
         // Fetch on load
         fetchItems();
+
+        // Check URL for OAuth callback results
+        const urlParams = new URLSearchParams(window.location.search);
+        const notionAuth = urlParams.get('notion_auth');
+        if (notionAuth === 'success') {
+            setTimeout(() => showToast('Notion Authentication Successful!', 'success'), 500);
+            // Clean up URL
+            window.history.replaceState({}, document.title, window.location.pathname);
+        } else if (notionAuth === 'failed') {
+            const errorStr = urlParams.get('error') || 'Unknown error';
+            setTimeout(() => showToast(`Notion Authentication Failed: ${errorStr}`, 'error'), 500);
+            window.history.replaceState({}, document.title, window.location.pathname);
+        }
     </script>
 </body>
 

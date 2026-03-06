@@ -1,7 +1,7 @@
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status, BackgroundTasks
 from sqlalchemy.orm import Session
-from database import get_db
-from models import Item, Media
+from database import get_db, SessionLocal
+from models import Item, Media, Settings
 from schemas import IngestRequest, IngestResponse, ExtractRequest, ExtractResponse
 from services.extractor import extract_content
 from services.downloader import download_media_list
@@ -14,8 +14,38 @@ router = APIRouter(
     tags=["ingest"]
 )
 
+import asyncio
+from routers.connect import sync_to_notion, sync_to_obsidian
+
+def background_auto_sync(item_id: str):
+    db = SessionLocal()
+    try:
+        settings = db.query(Settings).first()
+        if not settings or settings.auto_sync_target == "none":
+            return
+            
+        target = settings.auto_sync_target
+        
+        # sync_to_notion and sync_to_obsidian are async methods, we need to run them
+        # in the background task loop
+        async def run_sync():
+            if target in ["notion", "both"]:
+                try:
+                    await sync_to_notion(item_id, db)
+                except Exception as e:
+                    logger.error(f"Auto-sync to Notion failed for {item_id}: {e}")
+            if target in ["obsidian", "both"]:
+                try:
+                    await sync_to_obsidian(item_id, db)
+                except Exception as e:
+                    logger.error(f"Auto-sync to Obsidian failed for {item_id}: {e}")
+                    
+        asyncio.run(run_sync())
+    finally:
+        db.close()
+
 @router.post("/ingest", response_model=IngestResponse, status_code=status.HTTP_201_CREATED)
-def ingest_page(request: IngestRequest, db: Session = Depends(get_db)):
+def ingest_page(request: IngestRequest, background_tasks: BackgroundTasks, db: Session = Depends(get_db)):
     try:
         new_item = Item(
             source_url=request.source_url,
@@ -30,6 +60,8 @@ def ingest_page(request: IngestRequest, db: Session = Depends(get_db)):
         db.commit()
         db.refresh(new_item)
         
+        background_tasks.add_task(background_auto_sync, new_item.id)
+        
         return IngestResponse(item_id=new_item.id, status="ready")
     except Exception as e:
         db.rollback()
@@ -37,7 +69,7 @@ def ingest_page(request: IngestRequest, db: Session = Depends(get_db)):
 
 
 @router.post("/extract", response_model=ExtractResponse, status_code=status.HTTP_201_CREATED)
-async def extract_page(request: ExtractRequest, db: Session = Depends(get_db)):
+async def extract_page(request: ExtractRequest, background_tasks: BackgroundTasks, db: Session = Depends(get_db)):
     """服务端提取：传入 URL，后端抓取内容并存储"""
     try:
         result = await extract_content(request.url)
@@ -119,6 +151,8 @@ async def extract_page(request: ExtractRequest, db: Session = Depends(get_db)):
             db.commit()
             media_count = len(downloaded)
             logger.info("已下载 %d 个媒体文件 (item: %s)", media_count, new_item.id)
+
+        background_tasks.add_task(background_auto_sync, new_item.id)
 
         return ExtractResponse(
             item_id=new_item.id,

@@ -51,3 +51,67 @@ def delete_item(item_id: str, db: Session = Depends(get_db)):
     db.delete(item)
     db.commit()
     return None
+
+import io
+import zipfile
+import re
+from fastapi.responses import StreamingResponse
+
+@router.get("/items/{item_id}/export/zip")
+def export_item_zip(item_id: str, db: Session = Depends(get_db)):
+    item = db.query(Item).filter(Item.id == item_id).first()
+    if not item:
+        raise HTTPException(status_code=404, detail="Item not found")
+        
+    zip_buffer = io.BytesIO()
+    
+    with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zf:
+        safe_title = re.sub(r'[\\/:*?"<>|]', '_', item.title or f"Capture_{item.id}")[:100]
+        
+        # 1. Add all media files to a media/ folder in the zip
+        media_map = {} # original url -> relative zip path
+        for m in item.media:
+            if m.local_path:
+                local_file_path = os.path.join("static", m.local_path)
+                if os.path.exists(local_file_path):
+                    filename = os.path.basename(m.local_path)
+                    zip_media_path = f"media/{filename}"
+                    zf.write(local_file_path, arcname=zip_media_path)
+                    media_map[m.original_url] = zip_media_path
+                    
+        # 2. Build Markdown payload
+        yaml_frontmatter = f"---\nsource: {item.source_url}\nplatform: {item.platform}\ndate: {item.created_at.isoformat()}\n---\n\n"
+        markdown_body = f"# {item.title}\n\n"
+        
+        if item.content_blocks_json:
+            import json as _json
+            try:
+                blocks = _json.loads(item.content_blocks_json)
+                for block in blocks:
+                    if block["type"] == "text" and block.get("content"):
+                        markdown_body += block["content"] + "\n\n"
+                    elif block["type"] == "image" and block.get("url"):
+                        local_url = block["url"]
+                        filename = os.path.basename(local_url)
+                        zip_media_path = f"media/{filename}"
+                        markdown_body += f"![[{zip_media_path}]]\n\n"
+            except Exception:
+                markdown_body += str(item.canonical_text) + "\n\n"
+        else:
+            markdown_body += str(item.canonical_text) + "\n\n"
+            for zip_media_path in media_map.values():
+                 markdown_body += f"![[{zip_media_path}]]\n\n"
+                 
+        full_content = yaml_frontmatter + markdown_body
+        
+        # Add markdown file
+        zf.writestr(f"{safe_title}.md", full_content.encode('utf-8'))
+        
+    zip_buffer.seek(0)
+    
+    return StreamingResponse(
+        iter([zip_buffer.getvalue()]), 
+        media_type="application/zip", 
+        headers={"Content-Disposition": f"attachment; filename={safe_title}.zip"}
+    )
+

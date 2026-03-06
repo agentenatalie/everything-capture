@@ -42,3 +42,16 @@ class Media(Base):
     inline_position = Column(Float, default=-1.0)  # 0.0-1.0 fractional position within article body; -1 = unknown
 
     item = relationship("Item", back_populates="media")
+
+class Settings(Base):
+    __tablename__ = "settings"
+    
+    id = Column(Integer, primary_key=True, index=True, default=1)
+    notion_api_token = Column(String, nullable=True)
+    notion_database_id = Column(String, nullable=True)
+    notion_client_id = Column(String, nullable=True)
+    notion_client_secret = Column(String, nullable=True)
+    notion_redirect_uri = Column(String, nullable=True)
+    obsidian_rest_api_url = Column(String, nullable=True)
+    obsidian_api_key = Column(String, nullable=True)
+    auto_sync_target = Column(String, default="none") # "none", "notion", "obsidian", "both"

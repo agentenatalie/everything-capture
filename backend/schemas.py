@@ -60,3 +60,26 @@ class ExtractResponse(BaseModel):
     platform: str
     text_length: int
     media_count: int = 0
+
+class SettingsResponse(BaseModel):
+    notion_api_token: Optional[str] = None
+    notion_database_id: Optional[str] = None
+    notion_client_id: Optional[str] = None
+    notion_client_secret: Optional[str] = None
+    notion_redirect_uri: Optional[str] = None
+    obsidian_rest_api_url: Optional[str] = None
+    obsidian_api_key: Optional[str] = None
+    auto_sync_target: str = "none"
+
+    class Config:
+        from_attributes = True
+
+class SettingsUpdateRequest(BaseModel):
+    notion_api_token: Optional[str] = None
+    notion_database_id: Optional[str] = None
+    notion_client_id: Optional[str] = None
+    notion_client_secret: Optional[str] = None
+    notion_redirect_uri: Optional[str] = None
+    obsidian_rest_api_url: Optional[str] = None
+    obsidian_api_key: Optional[str] = None
+    auto_sync_target: Optional[str] = None

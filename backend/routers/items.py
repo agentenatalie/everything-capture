@@ -36,6 +36,8 @@ def get_items(skip: int = 0, limit: int = 100, db: Session = Depends(get_db)):
             content_blocks_json=item.content_blocks_json,
             status=item.status,
             platform=item.platform,
+            notion_page_id=item.notion_page_id,
+            obsidian_path=item.obsidian_path,
             media=media_list,
         ))
     return results

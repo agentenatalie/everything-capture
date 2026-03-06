@@ -38,6 +38,8 @@ class ItemResponse(BaseModel):
     content_blocks_json: Optional[str] = None  # JSON content blocks with inline images
     status: str
     platform: str
+    notion_page_id: Optional[str] = None
+    obsidian_path: Optional[str] = None
     media: list[MediaResponse] = []
     
     class Config:

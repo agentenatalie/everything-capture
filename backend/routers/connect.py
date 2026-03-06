@@ -63,6 +63,62 @@ def _page_title_plain_text(page: dict) -> str:
             return _notion_title_plain_text(property_meta.get("title", []))
     return "Untitled"
 
+def _database_target_from_payload(database: dict) -> dict:
+    title_property_name = None
+    for property_name, property_meta in database.get("properties", {}).items():
+        if property_meta.get("type") == "title":
+            title_property_name = property_name
+            break
+    if not title_property_name:
+        raise HTTPException(status_code=500, detail="The configured Notion database has no title property.")
+    return {
+        "id": database.get("id"),
+        "object": "database",
+        "title": _notion_title_plain_text(database.get("title", [])),
+        "title_property_name": title_property_name,
+    }
+
+async def _resolve_single_child_database_target(
+    client: httpx.AsyncClient,
+    headers: dict[str, str],
+    page_id: str,
+) -> dict | None:
+    response = await client.get(
+        f"https://api.notion.com/v1/blocks/{page_id}/children?page_size=100",
+        headers=headers,
+        timeout=20.0,
+    )
+    if response.status_code != 200:
+        logger.warning("Failed to inspect Notion page children for %s: %s", page_id, response.text)
+        return None
+
+    child_database_blocks = [
+        block
+        for block in response.json().get("results", [])
+        if block.get("type") == "child_database" and block.get("id")
+    ]
+    if len(child_database_blocks) != 1:
+        return None
+
+    child_database_id = child_database_blocks[0]["id"]
+    database_response = await client.get(
+        f"https://api.notion.com/v1/databases/{child_database_id}",
+        headers=headers,
+        timeout=20.0,
+    )
+    if database_response.status_code != 200:
+        logger.warning(
+            "Found child database block %s under page %s, but could not retrieve database: %s",
+            child_database_id,
+            page_id,
+            database_response.text,
+        )
+        return None
+
+    target = _database_target_from_payload(database_response.json())
+    target["resolved_from_page_id"] = page_id
+    return target
+
 async def _fetch_notion_title_property_name(
     client: httpx.AsyncClient,
     headers: dict[str, str],
@@ -126,6 +182,7 @@ async def _search_notion_targets(
                 "title": title,
                 "url": result.get("url"),
                 "object": object_type,
+                "parent_type": (result.get("parent") or {}).get("type"),
             }
         )
     return results
@@ -145,20 +202,7 @@ async def _resolve_notion_target(
         timeout=20.0,
     )
     if db_response.status_code == 200:
-        database = db_response.json()
-        title_property_name = None
-        for property_name, property_meta in database.get("properties", {}).items():
-            if property_meta.get("type") == "title":
-                title_property_name = property_name
-                break
-        if not title_property_name:
-            raise HTTPException(status_code=500, detail="The configured Notion database has no title property.")
-        return {
-            "id": target_id,
-            "object": "database",
-            "title": _notion_title_plain_text(database.get("title", [])),
-            "title_property_name": title_property_name,
-        }
+        return _database_target_from_payload(db_response.json())
 
     page_response = await client.get(
         f"https://api.notion.com/v1/pages/{target_id}",
@@ -167,6 +211,9 @@ async def _resolve_notion_target(
     )
     if page_response.status_code == 200:
         page = page_response.json()
+        child_database_target = await _resolve_single_child_database_target(client, headers, target_id)
+        if child_database_target:
+            return child_database_target
         return {
             "id": target_id,
             "object": "page",
@@ -204,6 +251,13 @@ async def _discover_single_notion_target(
             status_code=400,
             detail="No accessible Notion page or database was found for this integration.",
         )
+    root_pages = [
+        target
+        for target in all_targets
+        if target.get("object") == "page" and target.get("parent_type") == "workspace"
+    ]
+    if len(root_pages) == 1:
+        return await _resolve_notion_target(client, headers, root_pages[0]["id"])
     raise HTTPException(
         status_code=400,
         detail="Multiple Notion pages are accessible. Please choose a sync target explicitly in Settings.",
@@ -402,7 +456,17 @@ async def sync_to_notion(item_id: str, db: Session = Depends(get_db)):
             notion_target = None
             target_value = settings.notion_database_id if settings else None
             if target_value:
-                notion_target = await _resolve_notion_target(client, headers, target_value)
+                try:
+                    notion_target = await _resolve_notion_target(client, headers, target_value)
+                    if settings and notion_target.get("id") != _normalize_notion_id(target_value):
+                        settings.notion_database_id = notion_target["id"]
+                        db.commit()
+                except HTTPException as exc:
+                    if exc.status_code != 400:
+                        raise
+                    notion_target = await _discover_single_notion_target(client, headers)
+                    settings.notion_database_id = notion_target["id"]
+                    db.commit()
             else:
                 notion_target = await _discover_single_notion_target(client, headers)
                 settings.notion_database_id = notion_target["id"]
@@ -454,7 +518,13 @@ async def sync_to_notion(item_id: str, db: Session = Depends(get_db)):
             item.notion_page_id = page_id
             db.commit()
             
-            return {"status": "ok", "notion_page_id": page_id}
+            return {
+                "status": "ok",
+                "notion_page_id": page_id,
+                "target_id": notion_target["id"],
+                "target_object": notion_target["object"],
+                "target_title": notion_target.get("title"),
+            }
             
         except httpx.RequestError as e:
             logger.error(f"Network error to Notion API: {str(e)}")

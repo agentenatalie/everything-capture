@@ -1176,6 +1176,9 @@
                         <div style="margin-top: 6px; font-size: 0.8rem; color: #8594ad; line-height: 1.5;">
                             OAuth 只负责授权。要真正同步，还需要选择一个可写入的 Notion 页面或数据库作为目标。
                         </div>
+                        <div id="notionTargetHint" style="margin-top: 8px; font-size: 0.8rem; line-height: 1.5; color: #6b7280;">
+                            当前尚未解析到有效的 Notion 同步目标。
+                        </div>
                     </div>
                 </div>
 
@@ -1202,13 +1205,13 @@
                 <hr style="border: 0; border-top: 1px solid rgba(133, 148, 173, 0.18);">
 
                 <div class="settings-group">
-                    <h3 style="margin-bottom: 10px; font-size: 1.05rem; color: var(--text-primary);">自动同步策略 (抓取后自动执行)
+                    <h3 style="margin-bottom: 10px; font-size: 1.05rem; color: var(--text-primary);">自动同步
                     </h3>
                     <select id="autoSyncTarget" class="platform-select" style="width: 100%;">
                         <option value="none">停用</option>
-                        <option value="notion">仅 Notion</option>
-                        <option value="obsidian">仅 Obsidian</option>
-                        <option value="both">由于 Notion 和 Obsidian (推荐)</option>
+                        <option value="notion">同步至 Notion</option>
+                        <option value="obsidian">同步至 Obsidian</option>
+                        <option value="both">同步至 Notion 和 Obsidian (推荐)</option>
                     </select>
                 </div>
 
@@ -1243,6 +1246,7 @@
         const notionDbIdInput = document.getElementById('notionDbId');
         const notionDbSelect = document.getElementById('notionDbSelect');
         const refreshNotionDbsBtn = document.getElementById('refreshNotionDbsBtn');
+        const notionTargetHint = document.getElementById('notionTargetHint');
 
         const iconCalendar = '<svg class="inline-icon" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M7 3v3M17 3v3M4 9h16M6.5 5h11A1.5 1.5 0 0 1 19 6.5v11A1.5 1.5 0 0 1 17.5 19h-11A1.5 1.5 0 0 1 5 17.5v-11A1.5 1.5 0 0 1 6.5 5Z" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>';
         const iconText = '<svg class="inline-icon" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M5 7.5h14M5 12h14M5 16.5h9" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>';
@@ -1295,10 +1299,48 @@
             obsidianStatusText.style.color = '#6b7280';
         }
 
+        function setNotionTargetHint(databases = [], selectedValue = '') {
+            const normalizedValue = (selectedValue || notionDbSelect.value || notionDbIdInput.value || '').trim();
+            const matched = databases.find((database) =>
+                database.id === normalizedValue || database.url === normalizedValue
+            );
+            const hasDatabaseTarget = databases.some((database) => database.object === 'database');
+
+            if (matched?.object === 'database') {
+                notionTargetHint.textContent = `当前目标是 Database: ${matched.title || 'Untitled'}。同步成功后会作为新页面写入该数据库。`;
+                notionTargetHint.style.color = '#1f7a4d';
+                return;
+            }
+
+            if (matched?.object === 'page') {
+                notionTargetHint.textContent = `当前目标是普通 Page: ${matched.title || 'Untitled'}。同步成功后会在这个页面下创建子页面，不会写入数据库视图。若你想写入数据库，请在 Notion 中直接把数据库共享给当前集成，并重新选择那个 Database。`;
+                notionTargetHint.style.color = '#b7791f';
+                return;
+            }
+
+            if (databases.length && !hasDatabaseTarget) {
+                notionTargetHint.textContent = '当前集成只看到了 Page，没有看到任何 Database。通常这表示你共享的是页面，而不是数据库本身。';
+                notionTargetHint.style.color = '#b7791f';
+                return;
+            }
+
+            if (normalizedValue) {
+                notionTargetHint.textContent = '当前填写的目标尚未在可访问列表中匹配到，可能是旧 ID，保存或同步时后端会尝试自动修复。';
+                notionTargetHint.style.color = '#6b7280';
+                return;
+            }
+
+            notionTargetHint.textContent = '当前尚未解析到有效的 Notion 同步目标。';
+            notionTargetHint.style.color = '#6b7280';
+        }
+
         async function loadNotionDatabases(selectedValue = '') {
             notionDbSelect.innerHTML = '<option value="">先完成 OAuth，再从这里选择</option>';
             const hasToken = document.getElementById('notionApiToken').value.trim();
-            if (!hasToken) return [];
+            if (!hasToken) {
+                setNotionTargetHint([], selectedValue);
+                return [];
+            }
 
             refreshNotionDbsBtn.disabled = true;
             refreshNotionDbsBtn.innerText = '刷新中...';
@@ -1307,12 +1349,14 @@
                 const data = await res.json();
                 if (!res.ok) {
                     console.error('Failed to load Notion databases', data.detail);
+                    setNotionTargetHint([], selectedValue);
                     return [];
                 }
 
                 const databases = data.results || [];
                 if (!databases.length) {
                     notionDbSelect.innerHTML = '<option value="">没有可访问的页面或数据库，请先在 Notion 中把目标页面/数据库共享给当前集成</option>';
+                    setNotionTargetHint([], selectedValue);
                     return [];
                 }
                 notionDbSelect.innerHTML = '<option value="">选择一个 Notion 页面或数据库</option>';
@@ -1332,9 +1376,11 @@
                 if (matched) {
                     notionDbSelect.value = matched.id;
                 }
+                setNotionTargetHint(databases, currentValue);
                 return databases;
             } catch (e) {
                 console.error('Failed to load Notion databases', e);
+                setNotionTargetHint([], selectedValue);
                 return [];
             } finally {
                 refreshNotionDbsBtn.disabled = false;
@@ -1449,11 +1495,26 @@
             }
         };
 
+        function getCurrentNotionOptions() {
+            return Array.from(notionDbSelect.options)
+                .filter((option) => option.value)
+                .map((option) => ({
+                    id: option.value,
+                    object: option.textContent.includes('[Database]') ? 'database' : 'page',
+                    title: option.textContent
+                }));
+        }
+
         notionDbSelect.onchange = () => {
             if (notionDbSelect.value) {
                 notionDbIdInput.value = notionDbSelect.value;
             }
+            setNotionTargetHint(getCurrentNotionOptions(), notionDbSelect.value);
         };
+
+        notionDbIdInput.addEventListener('input', () => {
+            setNotionTargetHint(getCurrentNotionOptions(), notionDbIdInput.value.trim());
+        });
 
         refreshNotionDbsBtn.onclick = async () => {
             await loadNotionDatabases(notionDbIdInput.value.trim());
@@ -1595,6 +1656,18 @@
             }
         }
 
+        function renderSyncBadges(item) {
+            const badges = [];
+            if (item.notion_page_id) {
+                badges.push('<span style="padding: 4px 8px; border-radius: 999px; background: rgba(0, 0, 0, 0.08); font-size: 0.75rem; color: #111;">Notion</span>');
+            }
+            if (item.obsidian_path) {
+                badges.push('<span style="padding: 4px 8px; border-radius: 999px; background: rgba(99, 102, 241, 0.12); font-size: 0.75rem; color: #374151;">Obsidian</span>');
+            }
+            if (!badges.length) return '';
+            return `<div style="display:flex; gap:6px; align-items:center; flex-wrap:wrap;">${badges.join('')}</div>`;
+        }
+
         function renderItems(entries) {
             if (entries.length === 0) {
                 grid.className = currentView === 'gallery' ? 'grid' : 'list-view';
@@ -1627,6 +1700,7 @@
                                 <span>${item.platform || 'web'}</span>
                                 <span>${formatDate(item.created_at)}</span>
                                 <span>${length} 字</span>
+                                ${renderSyncBadges(item)}
                                 <div style="display: flex; gap: 12px; align-items: center;">
                                     <button onclick="deleteItem('${item.id}', event)" class="delete-btn" title="删除">
                                         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2M10 11v6M14 11v6"/></svg>
@@ -1669,6 +1743,7 @@
                             <div class="meta">
                                 <span class="meta-item">${iconCalendar}${formatDate(item.created_at)}</span>
                                 <span class="meta-item">${iconText}${length} 字</span>
+                                ${renderSyncBadges(item)}
                             </div>
                             <div style="display: flex; gap: 12px; align-items: center;">
                                 <button onclick="deleteItem('${item.id}', event)" class="delete-btn" title="删除">
@@ -1717,6 +1792,12 @@
         function openModal(index) {
             const item = itemsData[index];
             modalTitle.innerText = item.title || '无标题';
+            const notionStatus = item.notion_page_id
+                ? `已同步 (${item.notion_page_id.slice(0, 8)})`
+                : '未同步';
+            const obsidianStatus = item.obsidian_path
+                ? `已同步 (${item.obsidian_path})`
+                : '未同步';
 
             const platform = normalizePlatform(item.platform || '');
             const isCarouselPlatform = platform === 'xiaohongshu' || platform === 'douyin';
@@ -1784,9 +1865,13 @@
 
             // After existing content is rendered, append the sync buttons to whatever was inserted
             const buttonsHtml = `
+            <div style="margin-top: 1.5rem; display: flex; gap: 8px; flex-wrap: wrap;">
+                <span style="padding: 6px 10px; border-radius: 999px; background: rgba(0, 0, 0, 0.06); font-size: 0.8rem; color: #111;">Notion: ${notionStatus}</span>
+                <span style="padding: 6px 10px; border-radius: 999px; background: rgba(99, 102, 241, 0.10); font-size: 0.8rem; color: #374151;">Obsidian: ${obsidianStatus}</span>
+            </div>
             <div style="margin-top: 2rem; padding-top: 1rem; border-top: 1px solid rgba(133, 148, 173, 0.18); display: flex; gap: 10px; flex-wrap: wrap;">
-                <button onclick="syncItem('${item.id}', 'notion')" class="extract-btn" style="background: rgba(255, 255, 255, 0.7); color: #333; border: 1px solid #d1d9e4;">同步至 Notion</button>
-                <button onclick="syncItem('${item.id}', 'obsidian')" class="extract-btn" style="background: rgba(255, 255, 255, 0.7); color: #333; border: 1px solid #d1d9e4;">同步至 Obsidian</button>
+                <button onclick="syncItem('${item.id}', 'notion')" class="extract-btn" style="background: rgba(255, 255, 255, 0.7); color: #333; border: 1px solid #d1d9e4;">${item.notion_page_id ? '再次检查 Notion 同步' : '同步至 Notion'}</button>
+                <button onclick="syncItem('${item.id}', 'obsidian')" class="extract-btn" style="background: rgba(255, 255, 255, 0.7); color: #333; border: 1px solid #d1d9e4;">${item.obsidian_path ? '再次检查 Obsidian 同步' : '同步至 Obsidian'}</button>
                 <button onclick="downloadZip('${item.id}')" class="extract-btn" style="background: rgba(255, 255, 255, 0.7); color: #333; border: 1px solid #d1d9e4;">下载 ZIP</button>
             </div>`;
 
@@ -1803,7 +1888,23 @@
                 const res = await fetch(`/api/connect/${target}/sync/${id}`, { method: 'POST' });
                 const data = await res.json();
                 if (res.ok) {
-                    showToast(`同步成功 (ID: ${data[`${target}_page_id`] || data.obsidian_path || '已同步'})`, 'success');
+                    const currentItem = itemsData.find(item => item.id === id);
+                    if (currentItem) {
+                        if (target === 'notion' && data.notion_page_id) currentItem.notion_page_id = data.notion_page_id;
+                        if (target === 'obsidian' && data.obsidian_path) currentItem.obsidian_path = data.obsidian_path;
+                    }
+                    applyFilter();
+                    const refreshedIndex = itemsData.findIndex(item => item.id === id);
+                    if (currentOpenItemId === id && refreshedIndex >= 0) {
+                        openModal(refreshedIndex);
+                    }
+                    if (target === 'notion' && data.target_object) {
+                        const targetLabel = data.target_object === 'database' ? 'Database' : 'Page';
+                        const targetName = data.target_title || data.target_id || 'Untitled';
+                        showToast(`已同步到 Notion ${targetLabel}: ${targetName}`, 'success');
+                    } else {
+                        showToast(`同步成功 (ID: ${data[`${target}_page_id`] || data.obsidian_path || '已同步'})`, 'success');
+                    }
                 } else {
                     let message = data.detail || '未知错误';
                     if (typeof message === 'string' && message.includes('notion_database_id')) {

@@ -71,6 +71,7 @@ class SettingsResponse(BaseModel):
     notion_redirect_uri: Optional[str] = None
     obsidian_rest_api_url: Optional[str] = None
     obsidian_api_key: Optional[str] = None
+    obsidian_folder_path: Optional[str] = None
     auto_sync_target: str = "none"
     notion_ready: bool = False
     notion_missing_fields: list[str] = Field(default_factory=list)
@@ -88,4 +89,5 @@ class SettingsUpdateRequest(BaseModel):
     notion_redirect_uri: Optional[str] = None
     obsidian_rest_api_url: Optional[str] = None
     obsidian_api_key: Optional[str] = None
+    obsidian_folder_path: Optional[str] = None
     auto_sync_target: Optional[str] = None

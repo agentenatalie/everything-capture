@@ -54,4 +54,5 @@ class Settings(Base):
     notion_redirect_uri = Column(String, nullable=True)
     obsidian_rest_api_url = Column(String, nullable=True)
     obsidian_api_key = Column(String, nullable=True)
+    obsidian_folder_path = Column(String, nullable=True)
     auto_sync_target = Column(String, default="none") # "none", "notion", "obsidian", "both"

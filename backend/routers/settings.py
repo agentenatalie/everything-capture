@@ -33,6 +33,7 @@ def _build_settings_response(settings_obj: Optional[Settings]) -> SettingsRespon
 
     obsidian_rest_api_url = _clean_optional_string(settings_obj.obsidian_rest_api_url)
     obsidian_api_key = _clean_optional_string(settings_obj.obsidian_api_key)
+    obsidian_folder_path = _clean_optional_string(settings_obj.obsidian_folder_path)
     obsidian_missing_fields = []
     if not obsidian_rest_api_url:
         obsidian_missing_fields.append("obsidian_rest_api_url")
@@ -47,6 +48,7 @@ def _build_settings_response(settings_obj: Optional[Settings]) -> SettingsRespon
         notion_redirect_uri=_clean_optional_string(settings_obj.notion_redirect_uri),
         obsidian_rest_api_url=obsidian_rest_api_url,
         obsidian_api_key=obsidian_api_key,
+        obsidian_folder_path=obsidian_folder_path,
         auto_sync_target=settings_obj.auto_sync_target or "none",
         notion_ready=len(notion_missing_fields) == 0,
         notion_missing_fields=notion_missing_fields,
@@ -81,6 +83,8 @@ def update_settings(request: SettingsUpdateRequest, db: Session = Depends(get_db
         settings_obj.obsidian_rest_api_url = _clean_optional_string(request.obsidian_rest_api_url)
     if request.obsidian_api_key is not None:
         settings_obj.obsidian_api_key = _clean_optional_string(request.obsidian_api_key)
+    if request.obsidian_folder_path is not None:
+        settings_obj.obsidian_folder_path = _clean_optional_string(request.obsidian_folder_path)
     if request.auto_sync_target is not None:
         settings_obj.auto_sync_target = request.auto_sync_target
 

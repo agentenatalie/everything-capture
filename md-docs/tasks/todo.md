@@ -41,3 +41,36 @@
 - The primary action keeps the existing `/api/extract` workflow but now shows loading inside the suggestion row, which matches the new layout more cleanly than the old pill button.
 - Clipboard import is now a real action with its own loading state and fills the input directly without breaking the existing `Enter`, `Esc`, and `⌘K / Ctrl+K` interactions.
 - Verified the HTML parses and the inline script still compiles after replacing the panel DOM and associated event wiring.
+
+# Knowledge Sync Reliability Fixes
+
+- [x] Rework Notion sync so page creation uses structured content order instead of flattening into "all images then all text"
+- [x] Add Notion remote-existence checks and clear stale sync IDs when the remote page was deleted
+- [x] Switch Notion image handling to local file uploads with external-URL fallback so signed or anti-hotlink image URLs stop breaking page creation
+- [x] Fix Obsidian note path encoding and media upload paths so titles containing spaces, `%`, or Unicode punctuation no longer fail
+- [x] Limit Obsidian uploads to media actually referenced by the note and keep note embeds inline inside one Markdown document
+- [x] Add front-end sync status refresh so deleted remote pages/notes stop showing as already synced in the library
+- [x] Verify the updated backend routes compile and spot-check the new helpers against real local item records
+
+## Review
+
+- Notion sync now builds children from stored structured blocks when available, uploads local images through the Notion file upload flow, appends overflow blocks beyond the first 100, and verifies an existing `notion_page_id` before deciding a record is already synced.
+- Obsidian sync now percent-encodes vault paths, keeps attachments grouped under `EverythingCapture_Media/<item-id>/`, uploads only referenced media instead of the whole scraped asset set, and rebuilds the note body from the same structured block order used by the reader.
+- The library now calls a lightweight remote status refresh after loading items, which clears stale `notion_page_id` / `obsidian_path` values in both the database and UI when the remote content was deleted.
+- Verified with `python3 -m py_compile` and with runtime helper checks inside the project virtualenv for structured block parsing, encoded Obsidian paths, and inline media embedding behavior.
+
+# Obsidian Reliability Pass
+
+- [x] Reproduce the real Obsidian integration against the local REST API instead of relying on static reasoning
+- [x] Fix stale Obsidian status detection so missing or wrong-content notes no longer appear as synced
+- [x] Eliminate same-title note collisions by switching new note paths to `标题-短ID.md`
+- [x] Add optional Obsidian target folder setting and surface the actual write location in Settings
+- [x] Add a real Obsidian write/read/delete probe endpoint and verify it against the live local API
+- [x] Re-sync the failing Douyin sample and confirm the created note can be read back from Obsidian
+
+## Review
+
+- Confirmed the active Obsidian service is reachable at `https://127.0.0.1:27124`, not the previously stored `http://` URL, and the backend now persists the working base URL after a successful probe or sync.
+- The previously failing Douyin entry now syncs to a unique path, `1.7亿阅读的“人生作弊码”，教你一天“重装你的人生系统” #个人成长-f905b87b.md`, and read-back verification confirmed the note contains the expected frontmatter and body in Obsidian.
+- Duplicate-title records no longer share the same `obsidian_path`; stale paths are cleared when the remote note is missing or belongs to a different item, which fixes the false-positive “已同步” state in the library.
+- Settings now expose the Obsidian target folder and an explicit write-location hint, so the UI shows that writes go to the currently opened Obsidian vault root unless a folder is configured.

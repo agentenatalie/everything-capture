@@ -1727,6 +1727,17 @@
                             <input type="password" id="obsidianApiKey" class="filter-input" style="width: 100%;"
                                 placeholder="Your API Key" />
                         </div>
+                        <div class="settings-field">
+                            <label class="settings-label">目标文件夹（可选）</label>
+                            <input type="text" id="obsidianFolderPath" class="filter-input" style="width: 100%;"
+                                placeholder="例如：EverythingCapture/Inbox" />
+                            <div class="settings-help">不填则写入当前打开的 Obsidian Vault 根目录。填写后会写入该文件夹下，并使用“标题-短ID.md”避免同标题互相覆盖。</div>
+                            <div id="obsidianTargetHint" class="settings-help" style="color: #6b7280;">当前尚未解析到 Obsidian 写入位置。</div>
+                        </div>
+                        <div class="settings-actions">
+                            <button id="testObsidianBtn" class="extract-btn"
+                                style="width: 100%; background: #0f172a; color: #fff;">验证 Obsidian 写入</button>
+                        </div>
                         <div id="obsidianStatusText" class="settings-status" style="color: #6b7280;">
                             状态：未配置
                         </div>
@@ -1786,6 +1797,9 @@
         const btnSaveSettings = document.getElementById('saveSettingsBtn');
         const notionStatusText = document.getElementById('notionStatusText');
         const obsidianStatusText = document.getElementById('obsidianStatusText');
+        const obsidianFolderPathInput = document.getElementById('obsidianFolderPath');
+        const obsidianTargetHint = document.getElementById('obsidianTargetHint');
+        const testObsidianBtn = document.getElementById('testObsidianBtn');
         const notionDbIdInput = document.getElementById('notionDbId');
         const notionDbSelect = document.getElementById('notionDbSelect');
         const refreshNotionDbsBtn = document.getElementById('refreshNotionDbsBtn');
@@ -1807,6 +1821,8 @@
         let commandSearchTimer = null;
         let libraryRequestId = 0;
         let commandRequestId = 0;
+        let remoteSyncRefreshTimer = null;
+        let remoteSyncRefreshInFlight = false;
 
         // Settings Logic
         function setNotionStatus(data) {
@@ -1833,6 +1849,7 @@
             if (data?.obsidian_ready) {
                 obsidianStatusText.textContent = '状态：已配置，可同步到 Obsidian。';
                 obsidianStatusText.style.color = '#1f7a4d';
+                setObsidianTargetHint(data);
                 return;
             }
 
@@ -1844,11 +1861,28 @@
                 if (missingKey) missingLabels.push('API Key');
                 obsidianStatusText.textContent = `状态：未完成配置，缺少 ${missingLabels.join(' / ')}。`;
                 obsidianStatusText.style.color = '#b7791f';
+                setObsidianTargetHint(data);
                 return;
             }
 
             obsidianStatusText.textContent = '状态：未配置';
             obsidianStatusText.style.color = '#6b7280';
+            setObsidianTargetHint(data);
+        }
+
+        function setObsidianTargetHint(data) {
+            const baseUrl = (data?.obsidian_rest_api_url || document.getElementById('obsidianApiUrl').value || '').trim();
+            const folderPath = (data?.obsidian_folder_path || obsidianFolderPathInput.value || '').trim().replace(/^\/+|\/+$/g, '');
+            const locationText = folderPath
+                ? `当前写入：当前打开的 Obsidian Vault /${folderPath}`
+                : '当前写入：当前打开的 Obsidian Vault 根目录';
+
+            if (!baseUrl) {
+                obsidianTargetHint.textContent = '当前尚未配置 Obsidian REST API URL，无法判断写入位置。';
+                return;
+            }
+
+            obsidianTargetHint.textContent = `${locationText}。文件名格式：标题-短ID.md。REST API：${baseUrl}`;
         }
 
         function setNotionTargetHint(databases = [], selectedValue = '') {
@@ -1952,6 +1986,7 @@
                     notionDbIdInput.value = data.notion_database_id || '';
                     document.getElementById('obsidianApiUrl').value = data.obsidian_rest_api_url || '';
                     document.getElementById('obsidianApiKey').value = data.obsidian_api_key || '';
+                    document.getElementById('obsidianFolderPath').value = data.obsidian_folder_path || '';
                     document.getElementById('autoSyncTarget').value = data.auto_sync_target || 'none';
                     setNotionStatus(data);
                     setObsidianStatus(data);
@@ -1981,6 +2016,7 @@
                 notion_database_id: notionDbIdInput.value.trim() || null,
                 obsidian_rest_api_url: document.getElementById('obsidianApiUrl').value.trim() || null,
                 obsidian_api_key: document.getElementById('obsidianApiKey').value.trim() || null,
+                obsidian_folder_path: document.getElementById('obsidianFolderPath').value.trim() || null,
                 auto_sync_target: document.getElementById('autoSyncTarget').value
             };
             btnSaveSettings.disabled = true;
@@ -2068,12 +2104,57 @@
             setNotionTargetHint(getCurrentNotionOptions(), notionDbIdInput.value.trim());
         });
 
+        obsidianFolderPathInput.addEventListener('input', () => {
+            setObsidianTargetHint({
+                obsidian_rest_api_url: document.getElementById('obsidianApiUrl').value.trim(),
+                obsidian_folder_path: obsidianFolderPathInput.value.trim(),
+            });
+        });
+
         refreshNotionDbsBtn.onclick = async () => {
             await loadNotionDatabases(notionDbIdInput.value.trim());
             if (!notionDbSelect.value && notionDbIdInput.value.trim()) {
                 showToast('当前 Database ID/URL 已保留，但不在可访问列表中，请确认数据库已向 Notion 集成开放。', 'info');
             }
         };
+
+        testObsidianBtn.onclick = async () => {
+            testObsidianBtn.disabled = true;
+            testObsidianBtn.innerText = '验证中...';
+            try {
+                const response = await fetch('/api/connect/obsidian/test', { method: 'POST' });
+                const data = await response.json();
+                if (!response.ok) {
+                    showToast(`Obsidian 验证失败: ${data.detail || '未知错误'}`, 'error');
+                    return;
+                }
+
+                setObsidianTargetHint({
+                    obsidian_rest_api_url: document.getElementById('obsidianApiUrl').value.trim(),
+                    obsidian_folder_path: document.getElementById('obsidianFolderPath').value.trim(),
+                });
+                showToast(`Obsidian 验证成功：${data.write_location_hint}`, 'success');
+            } catch (error) {
+                showToast(`Obsidian 验证失败: ${error.message}`, 'error');
+            } finally {
+                testObsidianBtn.disabled = false;
+                testObsidianBtn.innerText = '验证 Obsidian 写入';
+            }
+        };
+
+        window.addEventListener('focus', () => {
+            triggerRemoteSyncRefresh();
+        });
+
+        document.addEventListener('visibilitychange', () => {
+            if (document.visibilityState === 'visible') {
+                triggerRemoteSyncRefresh();
+            }
+        });
+
+        remoteSyncRefreshTimer = window.setInterval(() => {
+            triggerRemoteSyncRefresh();
+        }, 15000);
 
         function openCommandPalette() {
             commandOverlay.classList.add('active');
@@ -2565,11 +2646,78 @@
                     hasKeyword || hasPlatformFilter
                 );
                 renderItems(filteredEntries);
+                refreshRemoteSyncStatus(nextItems.map((item) => item.id), requestId);
             } catch (error) {
                 setStatsMessage('加载失败');
                 grid.className = 'grid';
                 grid.innerHTML = '<div class="empty-state">无法连接到后端 API</div>';
             }
+        }
+
+        async function refreshRemoteSyncStatus(itemIds, requestId) {
+            if (!Array.isArray(itemIds) || itemIds.length === 0) return;
+            if (remoteSyncRefreshInFlight) return;
+
+            try {
+                remoteSyncRefreshInFlight = true;
+                const response = await fetch('/api/connect/sync-status/refresh', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ item_ids: itemIds }),
+                });
+                if (!response.ok) return;
+
+                const data = await response.json();
+                if (requestId !== libraryRequestId || !data || !Array.isArray(data.items)) return;
+
+                const statusMap = new Map(data.items.map((item) => [item.id, item]));
+                let changed = false;
+
+                itemsData = itemsData.map((item) => {
+                    const nextStatus = statusMap.get(item.id);
+                    if (!nextStatus) return item;
+                    if (item.notion_page_id === nextStatus.notion_page_id && item.obsidian_path === nextStatus.obsidian_path) {
+                        return item;
+                    }
+                    changed = true;
+                    return {
+                        ...item,
+                        notion_page_id: nextStatus.notion_page_id || null,
+                        obsidian_path: nextStatus.obsidian_path || null,
+                    };
+                });
+
+                commandSearchResults = commandSearchResults.map((item) => {
+                    const nextStatus = statusMap.get(item.id);
+                    if (!nextStatus) return item;
+                    return {
+                        ...item,
+                        notion_page_id: nextStatus.notion_page_id || null,
+                        obsidian_path: nextStatus.obsidian_path || null,
+                    };
+                });
+
+                filteredEntries = itemsData;
+
+                if (changed) {
+                    renderItems(filteredEntries);
+                    const refreshedItem = currentOpenItemId
+                        ? itemsData.find((item) => item.id === currentOpenItemId) || commandSearchResults.find((item) => item.id === currentOpenItemId)
+                        : null;
+                    if (refreshedItem && currentOpenItemId === refreshedItem.id) {
+                        openModalByItem(refreshedItem);
+                    }
+                }
+            } catch (error) {
+                console.warn('Failed to refresh remote sync status', error);
+            } finally {
+                remoteSyncRefreshInFlight = false;
+            }
+        }
+
+        function triggerRemoteSyncRefresh() {
+            if (!Array.isArray(itemsData) || itemsData.length === 0) return;
+            refreshRemoteSyncStatus(itemsData.map((item) => item.id), libraryRequestId);
         }
 
         function renderItems(entries) {

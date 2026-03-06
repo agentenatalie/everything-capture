@@ -13,6 +13,16 @@ SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()
 
 
+def ensure_runtime_schema():
+    with engine.begin() as connection:
+        settings_columns = {
+            row[1]
+            for row in connection.exec_driver_sql("PRAGMA table_info(settings)").fetchall()
+        }
+        if "obsidian_folder_path" not in settings_columns:
+            connection.exec_driver_sql("ALTER TABLE settings ADD COLUMN obsidian_folder_path VARCHAR")
+
+
 def init_search_index():
     with engine.begin() as connection:
         connection.exec_driver_sql(

@@ -10,3 +10,6 @@
 - 知识库同步状态不能只靠本地 `notion_page_id` / `obsidian_path` 判断；远端页面或笔记可能已被删除，列表加载和手动重同步前都要先做存在性校验，避免“显示已同步但实际不存在”。
 - Obsidian Local REST API 的 vault 路径不能直接拼原始标题；含空格、Unicode 标点或 `%` 的文件名必须先做 URL 编码，否则会触发 `Failed to decode param` 这类服务端错误。
 - Obsidian 笔记路径不能只按标题生成；同标题内容会直接共用一个 `obsidian_path`，从而让多条记录互相覆盖或互相冒充“已同步”。路径生成必须带稳定唯一标识，并在校验时检查 note frontmatter 是否真的对应当前条目。
+- 做仓库扫描和技能读取时，不要开启容易悬挂的长会话命令；优先用一次性短命令直接返回结果，避免用户看到“卡住”。
+- 连接器改动如果用户要求“先测试再回我”，不能只跑本地单元测试；必须做真实远端写入、读回验证，并在验证后清理临时 Notion/Obsidian 产物。
+- 这个项目的 Notion 集成需要兼容新版 `data_source` 模型，不能再假设所有可写集合都通过旧 `database.properties` 暴露 title property。

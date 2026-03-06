@@ -74,3 +74,19 @@
 - The previously failing Douyin entry now syncs to a unique path, `1.7亿阅读的“人生作弊码”，教你一天“重装你的人生系统” #个人成长-f905b87b.md`, and read-back verification confirmed the note contains the expected frontmatter and body in Obsidian.
 - Duplicate-title records no longer share the same `obsidian_path`; stale paths are cleared when the remote note is missing or belongs to a different item, which fixes the false-positive “已同步” state in the library.
 - Settings now expose the Obsidian target folder and an explicit write-location hint, so the UI shows that writes go to the currently opened Obsidian vault root unless a folder is configured.
+
+# Restore HTML-First Sync Formatting
+
+- [x] Reproduce the current fallback path for items that have `canonical_html` but no `content_blocks_json`
+- [x] Add an HTML-to-structured-block fallback for Notion and Obsidian sync so image positions stay inline
+- [x] Preserve richer Markdown text formatting from stored article HTML when building Obsidian notes
+- [x] Add regression tests covering inline image order and markdown formatting from `canonical_html`
+- [x] Verify the backend compiles and the new tests pass locally
+
+## Review
+
+- Root cause was the sync fallback path: records with `canonical_html` but no `content_blocks_json` were rebuilt from `canonical_text` plus a trailing media list, which always pushed images to the bottom and stripped rich-text structure.
+- Sync now rebuilds ordered blocks from stored article HTML before falling back to plain-text paragraphs, so existing generic web captures preserve inline image placement without needing re-extraction.
+- Obsidian note generation now emits markdown for headings, lists, quotes, code fences, links, and emphasis from the stored HTML structure instead of flattening everything into raw paragraphs.
+- Notion child generation now uses the same HTML-derived ordered blocks, including headings, list items, quotes, code blocks, dividers, and inline image placement, and the sync target resolver now supports both legacy `database_id` and current `data_source_id` targets.
+- Verified with `python -m py_compile`, a dedicated `unittest` suite, and real end-to-end writes to both Obsidian and Notion using a temporary item that exercised the exact regression case: `canonical_html` present, `content_blocks_json` missing, and images expected to remain inline. The temporary remote artifacts were cleaned up after read-back verification.

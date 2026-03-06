@@ -23,6 +23,7 @@ import json
 import mimetypes
 from pathlib import Path
 from urllib.parse import urlparse, urlunparse, quote
+from bs4 import BeautifulSoup, NavigableString, Tag
 
 NOTION_VERSION = "2025-09-03"
 NOTION_RICH_TEXT_LIMIT = 2000
@@ -140,9 +141,198 @@ def _fallback_structured_blocks(item: Item) -> list[dict]:
     return blocks
 
 
+def _normalize_media_url(src: str | None, base_url: str | None = None) -> str:
+    if not src:
+        return ""
+    src = src.strip()
+    if not src or src.startswith(("data:", "blob:")):
+        return ""
+    if src.startswith("/static/"):
+        return src
+    if src.startswith("//"):
+        return f"https:{src}"
+    if src.startswith("/") and base_url:
+        parsed = urlparse(base_url)
+        return f"{parsed.scheme}://{parsed.netloc}{src}"
+    if src.startswith("http") or src.startswith("/static/"):
+        return src
+    return ""
+
+
+def _normalize_markdown_lines(text: str) -> str:
+    if not text:
+        return ""
+    lines = []
+    last_blank = False
+    for raw_line in text.replace("\xa0", " ").splitlines():
+        line = re.sub(r"[ \t]+", " ", raw_line).strip()
+        line = re.sub(r"\s+([,.;:!?])", r"\1", line)
+        if not line:
+            if last_blank:
+                continue
+            lines.append("")
+            last_blank = True
+            continue
+        lines.append(line)
+        last_blank = False
+    return "\n".join(lines).strip()
+
+
+def _render_inline_markdown(node: Tag | NavigableString) -> str:
+    if isinstance(node, NavigableString):
+        return str(node)
+
+    if not isinstance(node, Tag):
+        return ""
+
+    tag_name = (node.name or "").lower()
+    if tag_name == "br":
+        return "\n"
+
+    inner = "".join(_render_inline_markdown(child) for child in node.children)
+    inner = _normalize_markdown_lines(inner) if "\n" in inner else re.sub(r"\s+", " ", inner.replace("\xa0", " ")).strip()
+
+    if tag_name in {"strong", "b"}:
+        return f"**{inner}**" if inner else ""
+    if tag_name in {"em", "i"}:
+        return f"*{inner}*" if inner else ""
+    if tag_name == "code":
+        code_text = re.sub(r"\s+", " ", node.get_text(" ", strip=True))
+        return f"`{code_text}`" if code_text else ""
+    if tag_name == "a":
+        href = _normalize_media_url(node.get("href")) or (node.get("href") or "").strip()
+        label = inner or href
+        return f"[{label}]({href})" if href and label else label
+
+    return inner
+
+
+def _text_block_payload(node: Tag) -> tuple[str, str]:
+    plain = re.sub(r"\s+", " ", node.get_text(" ", strip=True).replace("\xa0", " ")).strip()
+    plain = re.sub(r"\s+([,.;:!?])", r"\1", plain)
+    markdown = _normalize_markdown_lines("".join(_render_inline_markdown(child) for child in node.children))
+    return plain, markdown or plain
+
+
+def _html_structured_blocks(item: Item) -> list[dict]:
+    if not item.canonical_html:
+        return []
+
+    soup = BeautifulSoup(item.canonical_html, "html.parser")
+    root = soup.body or soup
+    blocks: list[dict] = []
+    skip_tags = {"script", "style", "nav", "footer", "header", "noscript", "iframe", "form", "button"}
+    block_tags = {
+        "p", "h1", "h2", "h3", "h4", "h5", "h6",
+        "blockquote", "pre", "ul", "ol", "figure", "img", "hr",
+    }
+    recursive_tags = {
+        "div", "section", "article", "main", "figure", "picture",
+        "a", "span", "header", "footer",
+    }
+
+    def append_text_block(block_type: str, content: str, markdown: str | None = None, **extra) -> None:
+        content = (content or "").strip()
+        if not content and block_type != "divider":
+            return
+        block = {"type": block_type, "content": content}
+        if markdown:
+            block["markdown"] = markdown.strip()
+        block.update(extra)
+        blocks.append(block)
+
+    def walk(node: Tag) -> None:
+        for child in node.children:
+            if isinstance(child, NavigableString):
+                continue
+            if not isinstance(child, Tag):
+                continue
+
+            tag_name = (child.name or "").lower()
+            if tag_name in skip_tags:
+                continue
+
+            if tag_name == "img":
+                src = _normalize_media_url(
+                    child.get("src") or child.get("data-src") or child.get("data-original"),
+                    item.final_url or item.source_url,
+                )
+                if src:
+                    blocks.append({"type": "image", "url": src})
+                continue
+
+            if tag_name == "figure":
+                walk(child)
+                continue
+
+            if tag_name == "hr":
+                blocks.append({"type": "divider"})
+                continue
+
+            if tag_name in {"ul", "ol"}:
+                list_type = "numbered_list_item" if tag_name == "ol" else "bulleted_list_item"
+                for li in child.find_all("li", recursive=False):
+                    content, markdown = _text_block_payload(li)
+                    append_text_block(list_type, content, markdown)
+                continue
+
+            if tag_name == "blockquote":
+                content, markdown = _text_block_payload(child)
+                append_text_block("quote", content, markdown)
+                continue
+
+            if tag_name == "pre":
+                code_text = child.get_text("\n", strip=False).strip("\n")
+                language = ""
+                class_names = child.get("class") or []
+                for class_name in class_names:
+                    if class_name.startswith("language-"):
+                        language = class_name.split("-", 1)[1]
+                        break
+                if code_text:
+                    blocks.append({"type": "code", "content": code_text, "language": language})
+                continue
+
+            if tag_name in {"h1", "h2", "h3"}:
+                content, markdown = _text_block_payload(child)
+                append_text_block(tag_name.replace("h", "heading_"), content, markdown)
+                continue
+
+            if tag_name in {"h4", "h5", "h6"}:
+                content, markdown = _text_block_payload(child)
+                append_text_block("heading_3", content, markdown)
+                continue
+
+            if tag_name == "p":
+                content, markdown = _text_block_payload(child)
+                append_text_block("paragraph", content, markdown)
+                continue
+
+            if tag_name in recursive_tags:
+                walk(child)
+                continue
+
+            if tag_name not in block_tags:
+                if child.find(["img", "picture", "figure"], recursive=True):
+                    walk(child)
+                    continue
+                if child.find(["p", "h1", "h2", "h3", "h4", "h5", "h6", "blockquote", "pre", "ul", "ol"], recursive=False):
+                    walk(child)
+                    continue
+                content, markdown = _text_block_payload(child)
+                if content:
+                    append_text_block("paragraph", content, markdown)
+
+    walk(root)
+    return [block for block in blocks if block.get("type") != "paragraph" or block.get("content")]
+
+
 def _get_structured_blocks(item: Item) -> list[dict]:
     blocks = _load_content_blocks(item)
-    return blocks if blocks else _fallback_structured_blocks(item)
+    if blocks:
+        return blocks
+    html_blocks = _html_structured_blocks(item)
+    return html_blocks if html_blocks else _fallback_structured_blocks(item)
 
 
 def _media_lookup(item: Item) -> dict[str, object]:
@@ -174,6 +364,33 @@ def _collect_referenced_media(item: Item, blocks: list[dict]) -> list:
         [media for media in item.media if media.type in {"image", "cover", "video"}],
         key=lambda entry: (entry.display_order, entry.original_url or ""),
     )
+
+
+def _block_markdown(block: dict) -> str:
+    block_type = block.get("type")
+    content = (block.get("markdown") or block.get("content") or "").strip()
+
+    if block_type in {"text", "paragraph"}:
+        return content
+    if block_type == "heading_1":
+        return f"# {content}" if content else ""
+    if block_type == "heading_2":
+        return f"## {content}" if content else ""
+    if block_type == "heading_3":
+        return f"### {content}" if content else ""
+    if block_type == "bulleted_list_item":
+        return f"- {content}" if content else ""
+    if block_type == "numbered_list_item":
+        return f"1. {content}" if content else ""
+    if block_type == "quote":
+        return "\n".join(f"> {line}" if line else ">" for line in content.splitlines()) if content else ""
+    if block_type == "code":
+        language = (block.get("language") or "").strip()
+        body = block.get("content") or ""
+        return f"```{language}\n{body}\n```".strip()
+    if block_type == "divider":
+        return "---"
+    return content
 
 
 async def _notion_page_exists(
@@ -218,6 +435,62 @@ async def _append_notion_children(
                 status_code=500,
                 detail=f"Notion block append failed: {response.text}",
             )
+
+
+async def _list_notion_child_block_ids(
+    client: httpx.AsyncClient,
+    headers: dict[str, str],
+    page_id: str,
+) -> list[str]:
+    block_ids: list[str] = []
+    next_cursor = None
+    while True:
+        params = {"page_size": 100}
+        if next_cursor:
+            params["start_cursor"] = next_cursor
+        response = await client.get(
+            f"https://api.notion.com/v1/blocks/{page_id}/children",
+            headers=headers,
+            params=params,
+            timeout=30.0,
+        )
+        if response.status_code != 200:
+            logger.error("Failed to list Notion children for %s: %s", page_id, response.text)
+            raise HTTPException(status_code=500, detail=f"Notion child listing failed: {response.text}")
+        payload = response.json()
+        block_ids.extend(
+            block.get("id")
+            for block in payload.get("results", [])
+            if block.get("id")
+        )
+        if not payload.get("has_more"):
+            return block_ids
+        next_cursor = payload.get("next_cursor")
+
+
+async def _archive_notion_blocks(
+    client: httpx.AsyncClient,
+    headers: dict[str, str],
+    block_ids: list[str],
+) -> None:
+    for block_id in block_ids:
+        response = await client.patch(
+            f"https://api.notion.com/v1/blocks/{block_id}",
+            headers=headers,
+            json={"archived": True},
+            timeout=30.0,
+        )
+        if response.status_code != 200:
+            logger.error("Failed to archive Notion block %s: %s", block_id, response.text)
+            raise HTTPException(status_code=500, detail=f"Notion block archive failed: {response.text}")
+
+
+def _page_title_property_name(page: dict) -> str:
+    properties = page.get("properties") or {}
+    for property_name, property_meta in properties.items():
+        if property_meta.get("type") == "title":
+            return property_name
+    raise HTTPException(status_code=500, detail="The target Notion page has no title property.")
 
 
 async def _upload_file_to_notion(
@@ -277,13 +550,24 @@ async def _build_notion_children(
 
     for block in structured_blocks:
         block_type = block.get("type")
-        if block_type == "text":
+        notion_text_type = {
+            "text": "paragraph",
+            "paragraph": "paragraph",
+            "heading_1": "heading_1",
+            "heading_2": "heading_2",
+            "heading_3": "heading_3",
+            "bulleted_list_item": "bulleted_list_item",
+            "numbered_list_item": "numbered_list_item",
+            "quote": "quote",
+        }.get(block_type)
+
+        if notion_text_type:
             for chunk in _split_rich_text_chunks(block.get("content", "")):
                 notion_children.append(
                     {
                         "object": "block",
-                        "type": "paragraph",
-                        "paragraph": {
+                        "type": notion_text_type,
+                        notion_text_type: {
                             "rich_text": [
                                 {
                                     "type": "text",
@@ -293,6 +577,31 @@ async def _build_notion_children(
                         },
                     }
                 )
+        elif block_type == "code":
+            for chunk in _split_rich_text_chunks(block.get("content", "")):
+                notion_children.append(
+                    {
+                        "object": "block",
+                        "type": "code",
+                        "code": {
+                            "rich_text": [
+                                {
+                                    "type": "text",
+                                    "text": {"content": chunk},
+                                }
+                            ],
+                            "language": (block.get("language") or "plain text"),
+                        },
+                    }
+                )
+        elif block_type == "divider":
+            notion_children.append(
+                {
+                    "object": "block",
+                    "type": "divider",
+                    "divider": {},
+                }
+            )
         elif block_type in {"image", "cover"}:
             block_url = block.get("url", "")
             media = media_lookup.get(block_url)
@@ -422,8 +731,19 @@ def _build_obsidian_note(item: Item, media_references: dict[str, str]) -> str:
 
     for block in structured_blocks:
         block_type = block.get("type")
-        if block_type == "text":
-            content = (block.get("content") or "").strip()
+        if block_type in {
+            "text",
+            "paragraph",
+            "heading_1",
+            "heading_2",
+            "heading_3",
+            "bulleted_list_item",
+            "numbered_list_item",
+            "quote",
+            "code",
+            "divider",
+        }:
+            content = _block_markdown(block)
             if content:
                 parts.append(f"{content}\n\n")
         elif block_type in {"image", "cover"}:
@@ -478,6 +798,23 @@ def _database_target_from_payload(database: dict) -> dict:
         "title_property_name": title_property_name,
     }
 
+
+def _data_source_target_from_payload(data_source: dict) -> dict:
+    title_property_name = None
+    for property_name, property_meta in data_source.get("properties", {}).items():
+        if property_meta.get("type") == "title":
+            title_property_name = property_name
+            break
+    if not title_property_name:
+        raise HTTPException(status_code=500, detail="The configured Notion data source has no title property.")
+    return {
+        "id": data_source.get("id"),
+        "object": "data_source",
+        "title": _notion_title_plain_text(data_source.get("title", [])),
+        "title_property_name": title_property_name,
+        "database_id": (data_source.get("parent") or {}).get("database_id"),
+    }
+
 async def _resolve_single_child_database_target(
     client: httpx.AsyncClient,
     headers: dict[str, str],
@@ -519,6 +856,40 @@ async def _resolve_single_child_database_target(
     target["resolved_from_page_id"] = page_id
     return target
 
+
+async def _resolve_single_data_source_target(
+    client: httpx.AsyncClient,
+    headers: dict[str, str],
+    database_id: str,
+) -> dict | None:
+    response = await client.get(
+        f"https://api.notion.com/v1/databases/{database_id}",
+        headers=headers,
+        timeout=20.0,
+    )
+    if response.status_code != 200:
+        logger.warning("Failed to inspect Notion database %s for data sources: %s", database_id, response.text)
+        return None
+
+    data_sources = response.json().get("data_sources", [])
+    if len(data_sources) != 1:
+        return None
+
+    data_source_id = data_sources[0].get("id")
+    if not data_source_id:
+        return None
+
+    data_source_response = await client.get(
+        f"https://api.notion.com/v1/data_sources/{data_source_id}",
+        headers=headers,
+        timeout=20.0,
+    )
+    if data_source_response.status_code != 200:
+        logger.warning("Failed to retrieve Notion data source %s: %s", data_source_id, data_source_response.text)
+        return None
+
+    return _data_source_target_from_payload(data_source_response.json())
+
 async def _fetch_notion_title_property_name(
     client: httpx.AsyncClient,
     headers: dict[str, str],
@@ -550,7 +921,7 @@ async def _search_notion_targets(
 ) -> list[dict]:
     payload = {"page_size": 50}
     if databases_only:
-        payload["filter"] = {"property": "object", "value": "database"}
+        payload["filter"] = {"property": "object", "value": "data_source"}
 
     response = await client.post(
         "https://api.notion.com/v1/search",
@@ -568,12 +939,12 @@ async def _search_notion_targets(
     results = []
     for result in response.json().get("results", []):
         object_type = result.get("object")
-        if object_type not in {"database", "page"}:
+        if object_type not in {"database", "page", "data_source"}:
             continue
 
         title = (
             _notion_title_plain_text(result.get("title", []))
-            if object_type == "database"
+            if object_type in {"database", "data_source"}
             else _page_title_plain_text(result)
         )
         results.append(
@@ -602,7 +973,21 @@ async def _resolve_notion_target(
         timeout=20.0,
     )
     if db_response.status_code == 200:
-        return _database_target_from_payload(db_response.json())
+        database_payload = db_response.json()
+        if database_payload.get("properties"):
+            return _database_target_from_payload(database_payload)
+        data_source_target = await _resolve_single_data_source_target(client, headers, target_id)
+        if data_source_target:
+            return data_source_target
+        raise HTTPException(status_code=500, detail="The configured Notion database has no directly writable title property.")
+
+    data_source_response = await client.get(
+        f"https://api.notion.com/v1/data_sources/{target_id}",
+        headers=headers,
+        timeout=20.0,
+    )
+    if data_source_response.status_code == 200:
+        return _data_source_target_from_payload(data_source_response.json())
 
     page_response = await client.get(
         f"https://api.notion.com/v1/pages/{target_id}",
@@ -621,8 +1006,9 @@ async def _resolve_notion_target(
         }
 
     logger.error(
-        "Notion target resolution failed. database=%s page=%s",
+        "Notion target resolution failed. database=%s data_source=%s page=%s",
         db_response.text,
+        data_source_response.text,
         page_response.text,
     )
     raise HTTPException(
@@ -769,13 +1155,16 @@ async def sync_to_notion(item_id: str, db: Session = Depends(get_db)):
     if not notion_api_token:
         raise HTTPException(status_code=400, detail="Notion settings are incomplete: missing notion_api_token")
     notion_headers = _notion_headers(notion_api_token)
+    existing_page_id = None
 
     async with httpx.AsyncClient() as client:
         try:
             if item.notion_page_id:
                 page_exists = await _notion_page_exists(client, notion_headers, item.notion_page_id)
                 if page_exists:
-                    return {"status": "ok", "message": "Already synced", "notion_page_id": item.notion_page_id}
+                    existing_page_id = item.notion_page_id
+                    item.notion_page_id = None
+                    db.commit()
                 if page_exists is None:
                     return {"status": "ok", "message": "Unable to verify existing page", "notion_page_id": item.notion_page_id}
                 if page_exists is False:
@@ -806,9 +1195,10 @@ async def sync_to_notion(item_id: str, db: Session = Depends(get_db)):
             remaining_children = children[NOTION_CHILDREN_LIMIT:]
             title_content = _truncate_text(item.title, NOTION_RICH_TEXT_LIMIT, "Untitled")
 
-            if notion_target["object"] == "database":
+            if notion_target["object"] in {"database", "data_source"}:
+                parent_type = "database_id" if notion_target["object"] == "database" else "data_source_id"
                 payload = {
-                    "parent": { "type": "database_id", "database_id": notion_target["id"] },
+                    "parent": { "type": parent_type, parent_type: notion_target["id"] },
                     "properties": {
                         notion_target["title_property_name"]: {
                             "title": [
@@ -854,6 +1244,16 @@ async def sync_to_notion(item_id: str, db: Session = Depends(get_db)):
             # Save the notion page ID
             item.notion_page_id = page_id
             db.commit()
+
+            if existing_page_id:
+                archive_response = await client.patch(
+                    f"https://api.notion.com/v1/pages/{existing_page_id}",
+                    headers=notion_headers,
+                    json={"archived": True},
+                    timeout=30.0,
+                )
+                if archive_response.status_code != 200:
+                    logger.warning("Failed to archive previous Notion page %s: %s", existing_page_id, archive_response.text)
             
             return {
                 "status": "ok",
@@ -861,6 +1261,7 @@ async def sync_to_notion(item_id: str, db: Session = Depends(get_db)):
                 "target_id": notion_target["id"],
                 "target_object": notion_target["object"],
                 "target_title": notion_target.get("title"),
+                "replaced_page_id": existing_page_id,
             }
             
         except httpx.RequestError as e:
@@ -884,16 +1285,17 @@ async def sync_to_obsidian(item_id: str, db: Session = Depends(get_db)):
     for url_base in url_bases:
         async with httpx.AsyncClient(**_obsidian_client_kwargs(url_base)) as client:
             try:
+                target_note_path = note_path
                 if item.obsidian_path:
                     note_state, note_content = await _obsidian_note_exists(client, url_base, settings.obsidian_api_key, item.obsidian_path)
                     if note_state == "exists" and note_content and _obsidian_note_matches_item(note_content, item):
-                        _persist_obsidian_url_base(settings, db, url_base)
-                        return {"status": "ok", "message": "Already synced", "obsidian_path": item.obsidian_path}
+                        target_note_path = item.obsidian_path
                     if note_state == "unknown":
                         return {"status": "ok", "message": "Unable to verify existing note", "obsidian_path": item.obsidian_path}
                     if note_state in {"missing", "exists"}:
-                        item.obsidian_path = None
-                        db.commit()
+                        if note_state == "missing" or (note_content and not _obsidian_note_matches_item(note_content, item)):
+                            item.obsidian_path = None
+                            db.commit()
                 structured_blocks = _get_structured_blocks(item)
                 media_references: dict[str, str] = {}
                 media_folder = f"{OBSIDIAN_MEDIA_FOLDER}/{item.id}"
@@ -925,7 +1327,7 @@ async def sync_to_obsidian(item_id: str, db: Session = Depends(get_db)):
 
                 full_content = _build_obsidian_note(item, media_references)
                 note_response = await client.put(
-                    f"{url_base}/vault/{_encode_obsidian_vault_path(note_path)}",
+                    f"{url_base}/vault/{_encode_obsidian_vault_path(target_note_path)}",
                     headers=_obsidian_headers(settings.obsidian_api_key, "text/markdown; charset=utf-8"),
                     content=full_content.encode("utf-8"),
                     timeout=120.0,
@@ -933,11 +1335,11 @@ async def sync_to_obsidian(item_id: str, db: Session = Depends(get_db)):
                 if note_response.status_code not in [200, 201, 204]:
                     raise HTTPException(status_code=500, detail=f"Obsidian API error: {note_response.text}")
 
-                item.obsidian_path = note_path
+                item.obsidian_path = target_note_path
                 _persist_obsidian_url_base(settings, db, url_base)
                 db.commit()
 
-                return {"status": "ok", "obsidian_path": note_path}
+                return {"status": "ok", "obsidian_path": target_note_path}
             except httpx.RequestError as e:
                 last_error = e
                 logger.error("Network error to Obsidian API via %s: %s", url_base, str(e))

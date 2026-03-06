@@ -223,29 +223,9 @@ def export_item_zip(item_id: str, db: Session = Depends(get_db)):
                     media_map[m.original_url] = zip_media_path
                     
         # 2. Build Markdown payload
-        yaml_frontmatter = f"---\nsource: {item.source_url}\nplatform: {item.platform}\ndate: {item.created_at.isoformat()}\n---\n\n"
-        markdown_body = f"# {item.title}\n\n"
-        
-        if item.content_blocks_json:
-            import json as _json
-            try:
-                blocks = _json.loads(item.content_blocks_json)
-                for block in blocks:
-                    if block["type"] == "text" and block.get("content"):
-                        markdown_body += block["content"] + "\n\n"
-                    elif block["type"] == "image" and block.get("url"):
-                        local_url = block["url"]
-                        filename = os.path.basename(local_url)
-                        zip_media_path = f"media/{filename}"
-                        markdown_body += f"![[{zip_media_path}]]\n\n"
-            except Exception:
-                markdown_body += str(item.canonical_text) + "\n\n"
-        else:
-            markdown_body += str(item.canonical_text) + "\n\n"
-            for zip_media_path in media_map.values():
-                 markdown_body += f"![[{zip_media_path}]]\n\n"
-                 
-        full_content = yaml_frontmatter + markdown_body
+        from routers.connect import _build_obsidian_note
+
+        full_content = _build_obsidian_note(item, media_map)
         
         # Add markdown file
         zf.writestr(f"{safe_title}.md", full_content.encode('utf-8'))

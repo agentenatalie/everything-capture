@@ -1,17 +1,29 @@
-# Notion / Obsidian / ZIP Fix
+# Frontend Layout Refinement
 
-- [x] Read root project documentation and handover notes
-- [x] Trace the `Notion settings are incomplete` failure path
-- [x] Reproduce ZIP, Notion sync, and Obsidian sync from the backend runtime context
-- [x] Fix backend path handling so runtime cwd no longer changes the active database/static directory
-- [x] Fix Notion sync so it can auto-resolve a single accessible page/database target and sync successfully
-- [x] Fix ZIP export so Unicode titles no longer crash `Content-Disposition`
-- [x] Improve Obsidian sync compatibility for HTTPS self-signed localhost and `PUT /vault/{path}`
-- [x] Verify the updated flow with local checks and live Notion API calls
+- [x] Rework card/list metadata and sync badge styling so the footer reads cleaner and removes the time stamp
+- [x] Convert the detail modal to a solid white reading surface with fullscreen toggle and sticky bottom actions
+- [x] Improve settings modal grouping and field rhythm so Notion/Obsidian sections look intentional instead of stacked raw inputs
+- [x] Rebuild list-row layout and selection states to avoid hover overflow, improve alignment, and create clearer visual focus
+- [x] Verify the updated inline script and review the final diff for interaction regressions
 
 ## Review
 
-- ZIP root cause: non-ASCII item titles were inserted directly into the `Content-Disposition` header, which triggered a `UnicodeEncodeError`.
-- Runtime path root cause: the app depended on relative `./items.db` and `static/...` paths, so behavior changed with the process cwd.
-- Notion root cause: the saved token could see one accessible Notion page target but no saved target ID in app settings. The sync flow now auto-discovers and reuses that single target. Live sync succeeded and wrote `notion_page_id=31ba7a1e-dabc-8105-9fcf-ec111f5d6fd9` for item `71aff06f-5e9a-4c61-b03a-30ac6ca15d3b`.
-- Obsidian runtime evidence: the Local REST API plugin is installed and configured in `/Users/hbz/Documents/Obsidian Vault/.obsidian/plugins/obsidian-local-rest-api/data.json`, but macOS has no listener on ports `27124` or `27123`, so the server itself is not currently running.
+- Card and list footers now show date-only metadata, cleaner sync badges, and a more consistent action cluster so the lower information layer reads in one scan.
+- Detail modal now uses a pure white reading surface, a top-right fullscreen toggle, and a dedicated bottom action bar that stays available while scrolling long content.
+- Settings are regrouped into clearer section cards with better label rhythm and status placement for Notion, Obsidian, and auto-sync.
+- List rows now render as independent aligned cards with fixed right-column structure and active-state emphasis instead of clipped hover scaling inside one large container.
+- Verified the HTML parses and the inline script compiles successfully after the DOM and interaction changes.
+
+# Command Palette Refresh
+
+- [x] Replace the existing simplified Command K layout with the preferred search-header and suggestion-list composition
+- [x] Reconnect the current extract flow, keyboard shortcuts, overlay dismissal, and autofocus behavior to the new panel
+- [x] Add explicit loading motion for URL extraction and clipboard import so the panel has clear in-place feedback
+- [x] Verify the updated inline HTML and script compile cleanly after the Command K refactor
+
+## Review
+
+- Command K now uses the new centered glass panel with search icon, large inline input, ESC keycap, and suggestion rows instead of the old title-plus-pill form.
+- The primary action keeps the existing `/api/extract` workflow but now shows loading inside the suggestion row, which matches the new layout more cleanly than the old pill button.
+- Clipboard import is now a real action with its own loading state and fills the input directly without breaking the existing `Enter`, `Esc`, and `⌘K / Ctrl+K` interactions.
+- Verified the HTML parses and the inline script still compiles after replacing the panel DOM and associated event wiring.

@@ -34,6 +34,12 @@
             --glass-blur-sm: 12px;
             --glass-blur-md: 18px;
             --glass-blur-lg: 24px;
+            --glass-bg: rgba(255, 255, 255, 0.65);
+            --glass-bg-strong: rgba(255, 255, 255, 0.82);
+            --glass-border: rgba(255, 255, 255, 0.5);
+            --glass-radius: 24px;
+            --card-hover-shadow: 0 20px 40px -5px rgba(0, 0, 0, 0.1);
+            --panel-radius: 1rem;
         }
 
         * {
@@ -48,10 +54,30 @@
             min-height: 100vh;
             overflow-x: hidden;
             position: relative;
+            scrollbar-width: thin;
+            scrollbar-color: rgba(0, 0, 0, 0.1) transparent;
             background:
                 radial-gradient(1300px 700px at -10% -20%, rgba(255, 255, 255, 0.94), rgba(255, 255, 255, 0.4) 55%, transparent 70%),
                 radial-gradient(1100px 700px at 120% 110%, rgba(220, 231, 246, 0.6), rgba(225, 236, 249, 0.14) 55%, transparent 70%),
                 linear-gradient(165deg, var(--bg-base) 0%, var(--bg-overlay) 100%);
+        }
+
+        *::-webkit-scrollbar {
+            width: 8px;
+            height: 8px;
+        }
+
+        *::-webkit-scrollbar-track {
+            background: transparent;
+        }
+
+        *::-webkit-scrollbar-thumb {
+            border-radius: 999px;
+            background: rgba(0, 0, 0, 0.1);
+        }
+
+        *::-webkit-scrollbar-thumb:hover {
+            background: rgba(0, 0, 0, 0.2);
         }
 
         .bg-shapes {
@@ -97,37 +123,6 @@
             }
         }
 
-        .extract-bar {
-            display: flex;
-            gap: 10px;
-            width: 100%;
-            margin: 0;
-        }
-
-        .extract-bar input {
-            flex: 1;
-            padding: 12px 17px;
-            border-radius: 999px;
-            border: 1px solid rgba(255, 255, 255, 0.4);
-            background: rgba(255, 255, 255, 0.5);
-            color: var(--text-primary);
-            font-size: 0.9rem;
-            outline: none;
-            transition: all 0.2s ease;
-            backdrop-filter: blur(10px);
-            -webkit-backdrop-filter: blur(10px);
-        }
-
-        .extract-bar input:focus {
-            background: #ffffff;
-            border-color: rgba(0, 113, 227, 0.3);
-            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.05);
-        }
-
-        .extract-bar input::placeholder {
-            color: #64748b;
-        }
-
         .extract-btn {
             padding: 11px 19px;
             border: 1px solid rgba(255, 255, 255, 0.4);
@@ -142,6 +137,7 @@
             backdrop-filter: blur(10px);
             -webkit-backdrop-filter: blur(10px);
             position: relative;
+            box-shadow: 0 8px 18px -18px rgba(15, 23, 42, 0.45);
         }
 
         .extract-btn:hover:not(:disabled) {
@@ -185,9 +181,9 @@
             top: 20px;
             right: 20px;
             padding: 14px 18px;
-            border-radius: 18px;
-            border: 1px solid rgba(255, 255, 255, 0.8);
-            background: rgba(255, 255, 255, 0.78);
+            border-radius: var(--glass-radius);
+            border: 1px solid var(--glass-border);
+            background: var(--glass-bg);
             font-size: 0.88rem;
             font-weight: 600;
             z-index: 200;
@@ -196,8 +192,8 @@
             max-width: 420px;
             color: #293043;
             box-shadow: 0 20px 34px -24px rgba(15, 23, 42, 0.42), inset 0 1px 0 rgba(255, 255, 255, 0.7);
-            backdrop-filter: saturate(185%) blur(18px);
-            -webkit-backdrop-filter: saturate(185%) blur(18px);
+            backdrop-filter: saturate(185%) blur(20px);
+            -webkit-backdrop-filter: saturate(185%) blur(20px);
         }
 
         .toast.show {
@@ -244,15 +240,13 @@
         }
 
         .command-panel {
-            width: min(680px, 100%);
+            width: min(600px, 100%);
             background: rgba(255, 255, 255, 0.8);
             backdrop-filter: blur(24px) saturate(220%);
             -webkit-backdrop-filter: blur(24px) saturate(220%);
             border: 1px solid rgba(255, 255, 255, 0.6);
-            border-radius: 20px;
+            border-radius: 24px;
             box-shadow: 0 30px 56px -34px rgba(15, 23, 42, 0.62);
-            padding: 14px;
-            position: relative;
             overflow: hidden;
             opacity: 0;
             transform: translateY(8px) scale(0.985);
@@ -264,33 +258,150 @@
             transform: translateY(0) scale(1);
         }
 
-        /* 移除原来的 .command-panel::before 伪元素 */
-
-        .command-title {
-            font-size: 0.82rem;
-            color: #64748b;
-            margin-bottom: 10px;
-            letter-spacing: 0.02em;
+        .command-header {
+            padding: 16px 20px;
+            border-bottom: 1px solid rgba(203, 213, 225, 0.5);
+            display: flex;
+            align-items: center;
+            gap: 12px;
         }
 
-        .command-hint {
-            margin-top: 10px;
-            font-size: 0.76rem;
+        .command-header svg {
+            flex-shrink: 0;
             color: #64748b;
+        }
+
+        .command-input {
+            flex: 1;
+            background: transparent;
+            border: none;
+            outline: none;
+            color: #1e293b;
+            font-size: 1.125rem;
+            padding: 0;
+        }
+
+        .command-input::placeholder {
+            color: #94a3b8;
+        }
+
+        .command-esc {
+            font-size: 0.75rem;
+            font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+            background: #f1f5f9;
+            padding: 4px 8px;
+            border-radius: 6px;
+            color: #64748b;
+            border: 1px solid #e2e8f0;
+            flex-shrink: 0;
+        }
+
+        .command-suggestions {
+            padding: 8px;
+        }
+
+        .suggestions-title {
+            font-size: 0.75rem;
+            font-weight: 600;
+            color: #94a3b8;
+            padding: 8px 12px;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+        }
+
+        .suggestion-item {
+            width: 100%;
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            padding: 12px 16px;
+            border: none;
+            background: transparent;
+            color: #475569;
+            font-size: 0.875rem;
+            text-align: left;
+            border-radius: 12px;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            position: relative;
+        }
+
+        .suggestion-item:hover:not(:disabled) {
+            background: #ffffff;
+            color: #0f172a;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.05);
+        }
+
+        .suggestion-item:disabled {
+            opacity: 0.72;
+            cursor: not-allowed;
+        }
+
+        .suggestion-item svg {
+            flex-shrink: 0;
+            color: currentColor;
+        }
+
+        .suggestion-item.is-loading {
+            padding-left: 42px;
+        }
+
+        .suggestion-item.is-loading::before {
+            content: '';
+            position: absolute;
+            left: 16px;
+            top: 50%;
+            width: 14px;
+            height: 14px;
+            margin-top: -7px;
+            border: 2px solid rgba(100, 116, 139, 0.4);
+            border-top-color: #0f172a;
+            border-radius: 50%;
+            animation: suggestion-spin 0.75s linear infinite;
+        }
+
+        .suggestion-meta {
+            margin-left: auto;
+            font-size: 0.75rem;
+            color: #94a3b8;
+            white-space: nowrap;
+        }
+
+        @keyframes suggestion-spin {
+            to {
+                transform: rotate(360deg);
+            }
         }
 
         .stats {
-            color: #606a7c;
-            font-size: 0.74rem;
-            background: linear-gradient(180deg, rgba(255, 255, 255, 0.66), rgba(255, 255, 255, 0.48));
-            padding: 7px 12px;
-            border-radius: 999px;
-            border: 1px solid rgba(255, 255, 255, 0.86);
+            display: inline-flex;
+            align-items: center;
+            gap: 10px;
+            color: #475569;
+            font-size: 0.875rem;
+            padding: 0;
             white-space: nowrap;
             justify-self: end;
-            box-shadow: 0 10px 18px -18px rgba(15, 23, 42, 0.48), inset 0 1px 0 rgba(255, 255, 255, 0.72);
-            backdrop-filter: saturate(var(--glass-sat)) blur(var(--glass-blur-sm));
-            -webkit-backdrop-filter: saturate(var(--glass-sat)) blur(var(--glass-blur-sm));
+        }
+
+        .stats::before {
+            content: "";
+            width: 1px;
+            height: 16px;
+            background: #cbd5e1;
+        }
+
+        .stats.is-plain::before {
+            display: none;
+        }
+
+        .stats strong {
+            color: #0f172a;
+            font-weight: 700;
+        }
+
+        .stats .stats-secondary {
+            color: #64748b;
         }
 
         main {
@@ -312,6 +423,12 @@
             gap: 1.4rem;
         }
 
+        .list-view {
+            width: min(1340px, 100%);
+            margin-left: auto;
+            margin-right: auto;
+        }
+
         .board-toolbar {
             display: flex;
             justify-content: space-between;
@@ -326,7 +443,8 @@
             }
 
             .board-toolbar,
-            .grid {
+            .grid,
+            .list-view {
                 width: min(1340px, 100%);
                 margin-left: auto;
                 margin-right: auto;
@@ -349,11 +467,11 @@
             display: inline-flex;
             align-items: center;
             padding: 4px;
-            border: 1px solid rgba(255, 255, 255, 0.86);
+            border: 1px solid rgba(255, 255, 255, 0.2);
             border-radius: 999px;
-            background: linear-gradient(180deg, rgba(255, 255, 255, 0.62), rgba(255, 255, 255, 0.44));
+            background: rgba(0, 0, 0, 0.05);
             gap: 4px;
-            box-shadow: 0 14px 24px -22px rgba(15, 23, 42, 0.46), inset 0 1px 0 rgba(255, 255, 255, 0.7);
+            box-shadow: 0 14px 24px -22px rgba(15, 23, 42, 0.46), inset 0 1px 0 rgba(255, 255, 255, 0.45);
             backdrop-filter: saturate(var(--glass-sat)) blur(var(--glass-blur-sm));
             -webkit-backdrop-filter: saturate(var(--glass-sat)) blur(var(--glass-blur-sm));
         }
@@ -377,7 +495,8 @@
 
         .view-btn.active {
             color: #1f232b;
-            background: rgba(255, 255, 255, 0.92);
+            background: #ffffff;
+            font-weight: 700;
             box-shadow: 0 10px 18px -18px rgba(15, 23, 42, 0.62), inset 0 1px 0 rgba(255, 255, 255, 0.84);
         }
 
@@ -398,20 +517,27 @@
             -webkit-backdrop-filter: blur(6px);
         }
 
+        .delete-btn svg {
+            transition: color 0.2s ease, stroke 0.2s ease;
+        }
+
         .delete-btn:hover {
             opacity: 1;
             transform: translateY(-1px);
-            color: var(--error);
             background: rgba(255, 245, 245, 0.95);
             border-color: rgba(246, 199, 199, 0.9);
             box-shadow: 0 14px 20px -18px rgba(204, 59, 59, 0.58);
         }
 
+        .delete-btn:hover svg {
+            color: var(--error);
+        }
+
         .filter-input {
             width: min(460px, 100%);
             max-width: 100%;
-            border: 1px solid rgba(255, 255, 255, 0.9);
-            background: linear-gradient(180deg, rgba(255, 255, 255, 0.68), rgba(255, 255, 255, 0.5));
+            border: 1px solid rgba(255, 255, 255, 0.4);
+            background: rgba(255, 255, 255, 0.5);
             color: var(--text-primary);
             border-radius: 999px;
             font-size: 0.83rem;
@@ -425,6 +551,7 @@
 
         .filter-input:focus {
             border-color: rgba(0, 113, 227, 0.4);
+            background: #ffffff;
             box-shadow: var(--focus-ring), inset 0 1px 0 rgba(255, 255, 255, 0.76);
         }
 
@@ -434,8 +561,8 @@
 
         .platform-select {
             width: 116px;
-            border: 1px solid rgba(255, 255, 255, 0.9);
-            background: linear-gradient(180deg, rgba(255, 255, 255, 0.68), rgba(255, 255, 255, 0.5));
+            border: 1px solid rgba(255, 255, 255, 0.4);
+            background: rgba(255, 255, 255, 0.5);
             color: var(--text-primary);
             border-radius: 999px;
             font-size: 0.83rem;
@@ -450,7 +577,7 @@
             background-image:
                 linear-gradient(45deg, transparent 50%, #8b94a6 50%),
                 linear-gradient(135deg, #8b94a6 50%, transparent 50%),
-                linear-gradient(180deg, rgba(255, 255, 255, 0.68), rgba(255, 255, 255, 0.5));
+                linear-gradient(180deg, rgba(255, 255, 255, 0.5), rgba(255, 255, 255, 0.5));
             background-position:
                 calc(100% - 16px) calc(50% - 1px),
                 calc(100% - 11px) calc(50% - 1px),
@@ -465,16 +592,16 @@
 
         .platform-select:focus {
             border-color: rgba(0, 113, 227, 0.4);
+            background-color: #ffffff;
             box-shadow: var(--focus-ring), inset 0 1px 0 rgba(255, 255, 255, 0.76);
         }
 
         .card {
-            background: rgba(255, 255, 255, 0.65);
-            /* 更透明的背景 */
+            background: var(--glass-bg);
             backdrop-filter: blur(20px) saturate(140%);
             -webkit-backdrop-filter: blur(20px) saturate(140%);
-            border: 1px solid rgba(255, 255, 255, 0.5);
-            border-radius: var(--radius-lg);
+            border: 1px solid var(--glass-border);
+            border-radius: var(--glass-radius);
             padding: 1.34rem;
             transition: all 0.3s cubic-bezier(0.25, 0.8, 0.25, 1);
             display: flex;
@@ -500,16 +627,14 @@
 
         .card:hover {
             background: #ffffff;
-            transform: translateY(-4px) scale(1.02);
-            box-shadow: 0 20px 40px -5px rgba(0, 0, 0, 0.1), 0 10px 20px -5px rgba(0, 0, 0, 0.04);
+            transform: translateY(-2px) scale(1.02);
+            box-shadow: var(--card-hover-shadow);
             border-color: rgba(255, 255, 255, 0.9);
         }
 
         .card-header {
             display: flex;
-            justify-content: space-between;
             align-items: flex-start;
-            gap: 1rem;
         }
 
         .title {
@@ -522,17 +647,6 @@
             -webkit-box-orient: vertical;
             overflow: hidden;
             letter-spacing: -0.01em;
-        }
-
-        .status {
-            padding: 3px 8px;
-            border-radius: 999px;
-            font-size: 0.7rem;
-            font-weight: 600;
-            background: rgba(227, 246, 236, 0.74);
-            color: #2a7e5a;
-            border: 1px solid rgba(156, 215, 186, 0.7);
-            white-space: nowrap;
         }
 
         .preview {
@@ -553,6 +667,7 @@
             margin-top: auto;
             border-top: 1px solid rgba(133, 148, 173, 0.12);
             padding-top: 0.84rem;
+            gap: 14px;
         }
 
         .meta {
@@ -561,6 +676,7 @@
             gap: 12px;
             font-size: 0.8rem;
             color: #788295;
+            flex-wrap: wrap;
         }
 
         .meta-item {
@@ -569,11 +685,47 @@
             gap: 6px;
         }
 
+        .knowledge-dots {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            flex-wrap: nowrap;
+            flex-shrink: 0;
+        }
+
+        .knowledge-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 999px;
+            background: #cbd5e1;
+            box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.72);
+        }
+
+        .knowledge-dot.notion.is-ready {
+            background: #111111;
+        }
+
+        .knowledge-dot.obsidian.is-ready {
+            background: #7c3aed;
+        }
+
+        .knowledge-dot.is-idle {
+            background: #cbd5e1;
+        }
+
         .inline-icon {
             width: 13px;
             height: 13px;
             color: #8792a8;
             flex-shrink: 0;
+        }
+
+        .footer-actions {
+            display: inline-flex;
+            align-items: center;
+            gap: 10px;
+            flex-shrink: 0;
+            margin-left: auto;
         }
 
         .source-link {
@@ -589,44 +741,58 @@
 
         .source-link:hover {
             color: var(--accent-hover);
+            text-decoration: underline;
+            text-underline-offset: 2px;
         }
 
         .list-view {
             display: flex;
             flex-direction: column;
-            border: 1px solid rgba(255, 255, 255, 0.84);
-            border-radius: 22px;
-            overflow: hidden;
-            background: linear-gradient(180deg, rgba(255, 255, 255, 0.62), rgba(255, 255, 255, 0.46));
-            box-shadow: 0 14px 24px -22px rgba(15, 23, 42, 0.34), inset 0 1px 0 rgba(255, 255, 255, 0.66);
-            backdrop-filter: saturate(var(--glass-sat)) blur(var(--glass-blur-md));
-            -webkit-backdrop-filter: saturate(var(--glass-sat)) blur(var(--glass-blur-md));
+            gap: 4px;
+            background: var(--glass-bg);
+            border: 1px solid var(--glass-border);
+            border-radius: 28px;
+            overflow: visible;
+            box-shadow: 0 16px 28px -28px rgba(15, 23, 42, 0.28);
+            padding: 8px;
+            backdrop-filter: blur(20px) saturate(160%);
+            -webkit-backdrop-filter: blur(20px) saturate(160%);
         }
 
         .list-row {
             display: grid;
-            grid-template-columns: minmax(0, 1fr) auto;
+            grid-template-columns: minmax(0, 1fr) minmax(360px, 430px);
             gap: 14px;
             align-items: center;
-            padding: 13px 16px;
-            border-bottom: 1px solid rgba(133, 148, 173, 0.18);
+            padding: 14px 16px;
+            border: 1px solid transparent;
+            border-radius: 18px;
+            background: transparent;
+            box-shadow: none;
             cursor: pointer;
-            transition: background 0.2s, transform 0.2s;
-        }
-
-        .list-row:last-child {
-            border-bottom: none;
+            transform-origin: center center;
+            transition: all 0.3s cubic-bezier(0.25, 0.8, 0.25, 1);
+            position: relative;
         }
 
         .list-row:hover {
-            background: rgba(255, 255, 255, 0.42);
-            transform: translateY(0);
+            background: #ffffff;
+            border-color: rgba(226, 232, 240, 0.95);
+            transform: translateY(-2px) scale(1.01);
+            box-shadow: 0 18px 34px -26px rgba(15, 23, 42, 0.24);
+        }
+
+        .list-row.is-active,
+        .card.is-active {
+            border-color: rgba(148, 163, 184, 0.9);
+            box-shadow: 0 0 0 2px rgba(226, 232, 240, 0.95), 0 24px 44px -32px rgba(15, 23, 42, 0.34);
+            background: #ffffff;
         }
 
         .list-main {
             display: flex;
-            align-items: flex-start;
-            gap: 11px;
+            align-items: center;
+            gap: 14px;
             min-width: 0;
         }
 
@@ -646,19 +812,21 @@
             height: 100%;
             object-fit: cover;
             display: block;
+            transition: transform 0.7s ease-out;
+        }
+
+        .list-row:hover .list-thumb img {
+            transform: scale(1.05);
         }
 
         .list-content {
             min-width: 0;
             display: flex;
             flex-direction: column;
-            gap: 4px;
+            gap: 6px;
         }
 
         .list-title-row {
-            display: flex;
-            align-items: center;
-            gap: 8px;
             min-width: 0;
         }
 
@@ -679,13 +847,37 @@
             text-overflow: ellipsis;
         }
 
-        .list-meta {
-            display: flex;
+        .list-side {
+            display: inline-flex;
             align-items: center;
-            gap: 12px;
+            gap: 14px;
+            min-width: auto;
+            justify-self: end;
+        }
+
+        .list-meta {
+            display: inline-flex;
+            align-items: center;
+            gap: 18px;
             color: #7a8598;
             font-size: 0.78rem;
+            min-width: 0;
             white-space: nowrap;
+        }
+
+        .list-stat {
+            display: inline-flex;
+            align-items: center;
+            justify-content: flex-start;
+            min-width: 0;
+        }
+
+        .list-actions {
+            display: inline-flex;
+            align-items: center;
+            gap: 10px;
+            flex-shrink: 0;
+            justify-self: end;
         }
 
         .empty-state {
@@ -693,12 +885,12 @@
             text-align: center;
             padding: 3rem;
             grid-column: 1 / -1;
-            background: rgba(255, 255, 255, 0.62);
-            border: 1px solid rgba(255, 255, 255, 0.76);
-            border-radius: 20px;
+            background: var(--glass-bg);
+            border: 1px solid var(--glass-border);
+            border-radius: var(--glass-radius);
             box-shadow: 0 12px 22px -20px rgba(15, 23, 42, 0.32);
-            backdrop-filter: blur(10px);
-            -webkit-backdrop-filter: blur(10px);
+            backdrop-filter: blur(20px);
+            -webkit-backdrop-filter: blur(20px);
         }
 
         .skeleton {
@@ -724,7 +916,7 @@
             left: 0;
             width: 100%;
             height: 100%;
-            background: rgba(26, 31, 41, 0.24);
+            background: rgba(15, 23, 42, 0.28);
             backdrop-filter: blur(8px);
             -webkit-backdrop-filter: blur(8px);
             z-index: 100;
@@ -746,15 +938,25 @@
             width: 90%;
             max-width: 800px;
             max-height: 85vh;
-            border-radius: 30px;
-            border: 1px solid rgba(224, 230, 238, 0.95);
-            box-shadow: 0 36px 56px -34px rgba(15, 23, 42, 0.6), inset 0 1px 0 rgba(255, 255, 255, 0.82);
+            border-radius: var(--glass-radius);
+            border: 1px solid rgba(226, 232, 240, 0.95);
+            box-shadow: 0 36px 56px -34px rgba(15, 23, 42, 0.6);
             display: flex;
             flex-direction: column;
             transform: translateY(18px) scale(0.96);
             transition: all 0.3s cubic-bezier(0.2, 0.75, 0.2, 1);
             backdrop-filter: none;
             -webkit-backdrop-filter: none;
+            overflow: hidden;
+            height: min(85vh, 920px);
+        }
+
+        .modal.is-fullscreen {
+            width: calc(100vw - 24px);
+            max-width: none;
+            max-height: calc(100vh - 24px);
+            height: calc(100vh - 24px);
+            border-radius: 20px;
         }
 
         .modal-overlay.active .modal {
@@ -767,35 +969,80 @@
             display: flex;
             justify-content: space-between;
             align-items: flex-start;
+            gap: 14px;
+            background: #ffffff;
         }
 
         .modal-title {
             font-size: 1.24rem;
             font-weight: 650;
             line-height: 1.38;
-            padding-right: 2rem;
             letter-spacing: -0.01em;
+            flex: 1;
+            min-width: 0;
+        }
+
+        .modal-header-actions {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
         }
 
         .close-btn {
             background: rgba(255, 255, 255, 0.62);
-            border: 1px solid rgba(255, 255, 255, 0.74);
+            border: 1px solid rgba(226, 232, 240, 0.95);
             color: #7b8496;
-            font-size: 1.25rem;
             cursor: pointer;
             transition: color 0.2s, transform 0.2s, background 0.2s;
-            width: 32px;
-            height: 32px;
+            width: 36px;
+            height: 36px;
             border-radius: 999px;
             display: inline-flex;
             align-items: center;
             justify-content: center;
+            font-size: 1.25rem;
         }
 
         .close-btn:hover {
             color: #1e2531;
             background: rgba(255, 255, 255, 0.9);
             transform: translateY(-1px);
+        }
+
+        .reader-toolbar {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 16px;
+            padding: 1rem 1.5rem 0;
+            background: #ffffff;
+        }
+
+        .reader-toolbar-right {
+            display: inline-flex;
+            align-items: center;
+            gap: 14px;
+            margin-left: auto;
+        }
+
+        .reader-action {
+            color: #7a8598;
+            cursor: pointer;
+            transition: color 0.2s ease;
+            user-select: none;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .reader-action:hover {
+            color: #0f172a;
+        }
+
+        .reader-action svg {
+            width: 16px;
+            height: 16px;
+            stroke: currentColor;
         }
 
         .modal-body {
@@ -805,6 +1052,65 @@
             font-size: 0.95rem;
             line-height: 1.64;
             white-space: pre-wrap;
+            flex: 1;
+            background: #ffffff;
+        }
+
+        .modal-footer {
+            position: sticky;
+            bottom: 0;
+            background: #ffffff;
+            border-top: 1px solid rgba(226, 232, 240, 0.95);
+            padding: 1rem 1.5rem 1.25rem;
+        }
+
+        .modal-footer-status {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+            flex-wrap: wrap;
+            margin-bottom: 0.85rem;
+        }
+
+        .modal-status-dots {
+            display: inline-flex;
+            align-items: center;
+            gap: 10px;
+            padding: 6px 10px;
+            border-radius: 999px;
+            background: #f8fafc;
+            border: 1px solid rgba(226, 232, 240, 0.95);
+        }
+
+        .modal-footer-actions {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 10px;
+            flex-wrap: wrap;
+        }
+
+        .modal-action-btn {
+            min-width: 180px;
+            justify-content: center;
+            text-align: center;
+            background: #ffffff;
+            border-color: #dbe4ee;
+            color: #334155;
+            box-shadow: 0 10px 18px -18px rgba(15, 23, 42, 0.38);
+        }
+
+        .modal-action-btn:hover:not(:disabled) {
+            background: #0f172a;
+            color: #ffffff;
+            border-color: #0f172a;
+            box-shadow: 0 22px 36px -20px rgba(15, 23, 42, 0.58);
+            transform: translateY(-2px);
+        }
+
+        .modal-action-btn:active:not(:disabled) {
+            transform: translateY(0);
         }
 
         .card-media {
@@ -880,6 +1186,99 @@
             font-size: 0.8rem;
             color: #778398;
             margin-top: 6px;
+        }
+
+        .settings-modal {
+            max-width: 640px !important;
+            height: auto;
+            max-height: min(88vh, 920px);
+        }
+
+        .settings-modal .modal-body {
+            flex: 0 1 auto;
+        }
+
+        .settings-body {
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+            background: #ffffff;
+            white-space: normal;
+        }
+
+        .settings-group {
+            display: contents;
+        }
+
+        .settings-section {
+            background: rgba(248, 250, 252, 0.95);
+            border: 1px solid rgba(226, 232, 240, 0.95);
+            border-radius: 22px;
+            padding: 16px;
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }
+
+        .settings-section h3 {
+            margin: 0;
+            font-size: 1.02rem;
+            color: var(--text-primary);
+        }
+
+        .settings-field {
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+        }
+
+        .settings-label {
+            display: block;
+            font-size: 0.84rem;
+            font-weight: 600;
+            color: #475569;
+        }
+
+        .settings-help {
+            font-size: 0.8rem;
+            color: #8594ad;
+            line-height: 1.55;
+        }
+
+        .settings-status {
+            font-size: 0.82rem;
+            line-height: 1.6;
+            margin: 0;
+        }
+
+        .settings-divider {
+            display: none;
+        }
+
+        .settings-row {
+            display: flex;
+            gap: 8px;
+            align-items: center;
+        }
+
+        .settings-row .platform-select,
+        .settings-row .extract-btn {
+            flex-shrink: 0;
+        }
+
+        .settings-row .platform-select {
+            flex: 1;
+            width: auto;
+        }
+
+        .settings-actions {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+
+        .settings-primary {
+            width: 100%;
         }
 
         /* Article HTML Content (inline images, reserved for canonical_html rich text) */
@@ -1014,7 +1413,7 @@
             }
 
             .command-panel {
-                border-radius: 14px;
+                border-radius: var(--panel-radius);
                 padding: 12px;
             }
 
@@ -1023,10 +1422,42 @@
                 gap: 8px;
             }
 
+            .list-side {
+                grid-template-columns: minmax(0, 1fr);
+                gap: 10px;
+                min-width: 0;
+            }
+
             .list-meta {
-                justify-content: space-between;
+                display: flex;
+                justify-content: flex-start;
+                flex-wrap: wrap;
                 gap: 8px;
                 font-size: 0.75rem;
+            }
+
+            .list-actions {
+                margin-left: auto;
+            }
+
+            .modal {
+                width: calc(100vw - 20px);
+                height: calc(100vh - 20px);
+                max-height: calc(100vh - 20px);
+                border-radius: 18px;
+            }
+
+            .modal-footer {
+                padding: 0.9rem 1rem 1rem;
+            }
+
+            .modal-action-btn {
+                min-width: calc(50% - 6px);
+            }
+
+            .settings-row {
+                flex-direction: column;
+                align-items: stretch;
             }
         }
 
@@ -1048,13 +1479,39 @@
     <div class="toast" id="toast"></div>
 
     <div class="command-overlay" id="commandOverlay">
-        <div class="command-panel" role="dialog" aria-modal="true" aria-label="添加链接">
-            <div class="command-title">添加链接</div>
-            <div class="extract-bar">
-                <input type="text" id="urlInput" placeholder="粘贴链接后回车…" />
-                <button class="extract-btn" id="extractBtn" onclick="extractURL()">添加</button>
+        <div class="command-panel" role="dialog" aria-modal="true" aria-label="Command 面板">
+            <div class="command-header">
+                <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" fill="currentColor" viewBox="0 0 256 256"
+                    aria-hidden="true">
+                    <path
+                        d="M229.66,218.34l-50.07-50.06a88.11,88.11,0,1,0-11.31,11.31l50.06,50.07a8,8,0,0,0,11.32-11.32ZM40,112a72,72,0,1,1,72,72A72.08,72.08,0,0,1,40,112Z">
+                    </path>
+                </svg>
+                <input type="text" id="urlInput" placeholder="输入命令或粘贴链接..." class="command-input" />
+                <span class="command-esc">ESC</span>
             </div>
-            <div class="command-hint">快捷键：⌘K / Ctrl+K 打开，Esc 关闭</div>
+            <div class="command-suggestions">
+                <div class="suggestions-title">Suggestions</div>
+                <button class="suggestion-item" id="extractBtn" type="button" onclick="extractURL()">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" fill="currentColor"
+                        viewBox="0 0 256 256" aria-hidden="true">
+                        <path
+                            d="M224,128a8,8,0,0,1-8,8H136v80a8,8,0,0,1-16,0V136H40a8,8,0,0,1,0-16h80V40a8,8,0,0,1,16,0v80h80A8,8,0,0,1,224,128Z">
+                        </path>
+                    </svg>
+                    <span id="extractBtnLabel">添加新链接</span>
+                    <span class="suggestion-meta">ENTER</span>
+                </button>
+                <button class="suggestion-item" id="clipboardBtn" type="button" onclick="importFromClipboard()">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" fill="currentColor"
+                        viewBox="0 0 256 256" aria-hidden="true">
+                        <path
+                            d="M224,48H32a8,8,0,0,0-8,8V192a32,32,0,0,0,32,32H200a32,32,0,0,0,32-32V56A8,8,0,0,0,224,48ZM216,192a16,16,0,0,1-16,16H56a16,16,0,0,1-16-16V64H216Zm-24-80a8,8,0,0,1-8,8H72a8,8,0,0,1,0-16H184A8,8,0,0,1,192,112Z">
+                        </path>
+                    </svg>
+                    <span id="clipboardBtnLabel">从剪贴板导入</span>
+                </button>
+            </div>
         </div>
     </div>
 
@@ -1065,7 +1522,7 @@
                     <button class="view-btn active" id="galleryViewBtn" type="button">画廊</button>
                     <button class="view-btn" id="listViewBtn" type="button">列表</button>
                 </div>
-                <div class="stats" id="stats">加载中...</div>
+                <div class="stats is-plain" id="stats">加载中...</div>
                 <button id="settingsBtn" class="view-btn"
                     style="display: flex; align-items: center; justify-content: center; width: 34px; height: 34px; padding: 0;"
                     title="集成设置">
@@ -1111,111 +1568,122 @@
 
     <div class="modal-overlay" id="modalOverlay">
         <div class="modal">
-            <div class="modal-header">
-                <h2 class="modal-title" id="modalTitle">标题</h2>
-                <button class="close-btn" id="closeModal">×</button>
+            <div class="reader-toolbar">
+                <div class="modal-status-dots" id="readerStatusDots" aria-label="知识库同步状态"></div>
+                <div class="reader-toolbar-right">
+                    <span class="reader-action" id="toggleFullscreenBtn" role="button" tabindex="0" aria-label="全屏阅读">
+                        <svg viewBox="0 0 24 24" fill="none" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                            <path d="M8 3H3v5M16 3h5v5M21 16v5h-5M8 21H3v-5"></path>
+                        </svg>
+                    </span>
+                    <span class="reader-action" id="closeModal" role="button" tabindex="0" aria-label="关闭">
+                        <svg viewBox="0 0 24 24" fill="none" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                            <path d="M18 6 6 18M6 6l12 12"></path>
+                        </svg>
+                    </span>
+                </div>
             </div>
             <div class="modal-body" id="modalContent">内容加载中...</div>
+            <div class="modal-footer" id="modalFooter"></div>
         </div>
     </div>
 
     <!-- Settings Modal -->
     <div class="modal-overlay" id="settingsOverlay">
-        <div class="modal" style="max-width: 500px;">
+        <div class="modal settings-modal">
             <div class="modal-header">
                 <h2 class="modal-title">集成设置</h2>
-                <button class="close-btn" id="closeSettingsModal">×</button>
+                <div class="modal-header-actions">
+                    <button class="close-btn" id="closeSettingsModal" type="button">×</button>
+                </div>
             </div>
-            <div class="modal-body" style="display: flex; flex-direction: column; gap: 15px;">
+            <div class="modal-body settings-body">
                 <div class="settings-group">
-                    <h3 style="margin-bottom: 10px; font-size: 1.05rem; color: var(--text-primary);">Notion 集成</h3>
-                    <div style="margin-bottom: 8px;">
-                        <label style="display: block; font-size: 0.85rem; margin-bottom: 4px;">Client ID (OAuth)</label>
-                        <input type="text" id="notionClientId" class="filter-input" style="width: 100%;"
-                            placeholder="e.g. fd23..." />
-                    </div>
-                    <div style="margin-bottom: 8px;">
-                        <label style="display: block; font-size: 0.85rem; margin-bottom: 4px;">Client Secret
-                            (OAuth)</label>
-                        <input type="password" id="notionClientSecret" class="filter-input" style="width: 100%;"
-                            placeholder="secret_..." />
-                    </div>
-                    <div style="margin-bottom: 8px;">
-                        <label style="display: block; font-size: 0.85rem; margin-bottom: 4px;">Redirect URI</label>
-                        <input type="text" id="notionRedirectUri" class="filter-input" style="width: 100%;"
-                            placeholder="http://localhost:8000/api/connect/notion/oauth/callback" />
-                    </div>
-                    <div style="margin-bottom: 8px;">
-                        <label style="display: block; font-size: 0.85rem; margin-bottom: 4px;">API Token (Auto-filled by
-                            OAuth)</label>
-                        <input type="password" id="notionApiToken" class="filter-input"
-                            style="width: 100%; background: #f5f7fa;" placeholder="Not connected" disabled />
-                    </div>
-                    <div style="margin-top: 10px; margin-bottom: 10px;">
-                        <button id="connectNotionBtn" class="extract-btn"
-                            style="width: 100%; background: #000; color: #fff;">Connect to Notion</button>
-                    </div>
-                    <div id="notionStatusText" style="font-size: 0.82rem; color: #6b7280; line-height: 1.5;">
-                        状态：未连接
-                    </div>
-                    <div style="margin-top: 12px; margin-bottom: 8px;">
-                        <label style="display: block; font-size: 0.85rem; margin-bottom: 4px;">可访问的同步目标</label>
-                        <div style="display: flex; gap: 8px;">
-                            <select id="notionDbSelect" class="platform-select" style="flex: 1;">
-                                <option value="">先完成 OAuth，再从这里选择</option>
-                            </select>
-                            <button id="refreshNotionDbsBtn" class="extract-btn"
-                                style="padding: 0 14px; white-space: nowrap;">刷新</button>
+                    <div class="settings-section">
+                        <h3>Notion 集成</h3>
+                        <div class="settings-field">
+                            <label class="settings-label">Client ID (OAuth)</label>
+                            <input type="text" id="notionClientId" class="filter-input" style="width: 100%;"
+                                placeholder="e.g. fd23..." />
                         </div>
-                    </div>
-                    <div>
-                        <label style="display: block; font-size: 0.85rem; margin-bottom: 4px;">Notion Target ID /
-                            URL</label>
-                        <input type="text" id="notionDbId" class="filter-input" style="width: 100%;"
-                            placeholder="支持直接粘贴 Notion 数据库分享链接或原始 ID" />
-                        <div style="margin-top: 6px; font-size: 0.8rem; color: #8594ad; line-height: 1.5;">
-                            OAuth 只负责授权。要真正同步，还需要选择一个可写入的 Notion 页面或数据库作为目标。
+                        <div class="settings-field">
+                            <label class="settings-label">Client Secret (OAuth)</label>
+                            <input type="password" id="notionClientSecret" class="filter-input" style="width: 100%;"
+                                placeholder="secret_..." />
                         </div>
-                        <div id="notionTargetHint" style="margin-top: 8px; font-size: 0.8rem; line-height: 1.5; color: #6b7280;">
-                            当前尚未解析到有效的 Notion 同步目标。
+                        <div class="settings-field">
+                            <label class="settings-label">Redirect URI</label>
+                            <input type="text" id="notionRedirectUri" class="filter-input" style="width: 100%;"
+                                placeholder="http://localhost:8000/api/connect/notion/oauth/callback" />
+                        </div>
+                        <div class="settings-field">
+                            <label class="settings-label">API Token (Auto-filled by OAuth)</label>
+                            <input type="password" id="notionApiToken" class="filter-input"
+                                style="width: 100%; background: #f5f7fa;" placeholder="Not connected" disabled />
+                        </div>
+                        <div class="settings-actions">
+                            <button id="connectNotionBtn" class="extract-btn"
+                                style="width: 100%; background: #000; color: #fff;">Connect to Notion</button>
+                            <div id="notionStatusText" class="settings-status" style="color: #6b7280;">状态：未连接</div>
+                        </div>
+                        <div class="settings-field">
+                            <label class="settings-label">可访问的同步目标</label>
+                            <div class="settings-row">
+                                <select id="notionDbSelect" class="platform-select" style="flex: 1;">
+                                    <option value="">先完成 OAuth，再从这里选择</option>
+                                </select>
+                                <button id="refreshNotionDbsBtn" class="extract-btn"
+                                    style="padding: 0 14px; white-space: nowrap;">刷新</button>
+                            </div>
+                        </div>
+                        <div class="settings-field">
+                            <label class="settings-label">Notion Target ID / URL</label>
+                            <input type="text" id="notionDbId" class="filter-input" style="width: 100%;"
+                                placeholder="支持直接粘贴 Notion 数据库分享链接或原始 ID" />
+                            <div class="settings-help">OAuth 只负责授权。要真正同步，还需要选择一个可写入的 Notion 页面或数据库作为目标。</div>
+                            <div id="notionTargetHint" class="settings-help" style="color: #6b7280;">当前尚未解析到有效的 Notion
+                                同步目标。</div>
                         </div>
                     </div>
                 </div>
 
-                <hr style="border: 0; border-top: 1px solid rgba(133, 148, 173, 0.18);">
+                <hr class="settings-divider">
 
                 <div class="settings-group">
-                    <h3 style="margin-bottom: 10px; font-size: 1.05rem; color: var(--text-primary);">Obsidian 集成</h3>
-                    <div style="margin-bottom: 8px;">
-                        <label style="display: block; font-size: 0.85rem; margin-bottom: 4px;">REST API URL</label>
-                        <input type="text" id="obsidianApiUrl" class="filter-input" style="width: 100%;"
-                            placeholder="https://127.0.0.1:27124" />
-                    </div>
-                    <div>
-                        <label style="display: block; font-size: 0.85rem; margin-bottom: 4px;">API Key</label>
-                        <input type="password" id="obsidianApiKey" class="filter-input" style="width: 100%;"
-                            placeholder="Your API Key" />
-                    </div>
-                    <div id="obsidianStatusText"
-                        style="margin-top: 10px; font-size: 0.82rem; color: #6b7280; line-height: 1.5;">
-                        状态：未配置
+                    <div class="settings-section">
+                        <h3>Obsidian 集成</h3>
+                        <div class="settings-field">
+                            <label class="settings-label">REST API URL</label>
+                            <input type="text" id="obsidianApiUrl" class="filter-input" style="width: 100%;"
+                                placeholder="https://127.0.0.1:27124" />
+                        </div>
+                        <div class="settings-field">
+                            <label class="settings-label">API Key</label>
+                            <input type="password" id="obsidianApiKey" class="filter-input" style="width: 100%;"
+                                placeholder="Your API Key" />
+                        </div>
+                        <div id="obsidianStatusText" class="settings-status" style="color: #6b7280;">
+                            状态：未配置
+                        </div>
                     </div>
                 </div>
 
-                <hr style="border: 0; border-top: 1px solid rgba(133, 148, 173, 0.18);">
+                <hr class="settings-divider">
 
                 <div class="settings-group">
-                    <h3 style="margin-bottom: 10px; font-size: 1.05rem; color: var(--text-primary);">自动同步
-                    </h3>
-                    <select id="autoSyncTarget" class="platform-select" style="width: 100%;">
-                        <option value="none">停用</option>
-                        <option value="notion">同步至 Notion</option>
-                        <option value="obsidian">同步至 Obsidian</option>
-                        <option value="both">同步至 Notion 和 Obsidian (推荐)</option>
-                    </select>
+                    <div class="settings-section">
+                        <h3>自动同步</h3>
+                        <select id="autoSyncTarget" class="platform-select" style="width: 100%;">
+                            <option value="none">停用</option>
+                            <option value="notion">同步至 Notion</option>
+                            <option value="obsidian">同步至 Obsidian</option>
+                            <option value="both">同步至 Notion 和 Obsidian (推荐)</option>
+                        </select>
+                    </div>
                 </div>
 
-                <button id="saveSettingsBtn" class="extract-btn" style="margin-top: 10px; width: 100%;">保存设置</button>
+                <button id="saveSettingsBtn" class="extract-btn settings-primary"
+                    style="margin-top: 10px; width: 100%;">保存设置</button>
             </div>
         </div>
     </div>
@@ -1224,11 +1692,17 @@
         const grid = document.getElementById('grid');
         const stats = document.getElementById('stats');
         const modalOverlay = document.getElementById('modalOverlay');
+        const modalShell = modalOverlay.querySelector('.modal');
         const commandOverlay = document.getElementById('commandOverlay');
-        const modalTitle = document.getElementById('modalTitle');
         const modalContent = document.getElementById('modalContent');
+        const modalFooter = document.getElementById('modalFooter');
+        const readerStatusDots = document.getElementById('readerStatusDots');
         const closeModal = document.getElementById('closeModal');
+        const toggleFullscreenBtn = document.getElementById('toggleFullscreenBtn');
         const urlInput = document.getElementById('urlInput');
+        const extractBtnLabel = document.getElementById('extractBtnLabel');
+        const clipboardBtn = document.getElementById('clipboardBtn');
+        const clipboardBtnLabel = document.getElementById('clipboardBtnLabel');
         const extractBtn = document.getElementById('extractBtn');
         const toast = document.getElementById('toast');
         const filterInput = document.getElementById('filterInput');
@@ -1255,6 +1729,7 @@
         let currentView = 'gallery';
         let filteredEntries = [];
         let currentOpenItemId = null;
+        let isModalFullscreen = false;
 
         // Settings Logic
         function setNotionStatus(data) {
@@ -1525,17 +2000,63 @@
 
         function openCommandPalette() {
             commandOverlay.classList.add('active');
-            setTimeout(() => urlInput.focus(), 10);
+            requestAnimationFrame(() => {
+                urlInput.focus();
+                urlInput.select();
+            });
         }
 
         function closeCommandPalette() {
             commandOverlay.classList.remove('active');
+            urlInput.blur();
+        }
+
+        async function importFromClipboard() {
+            if (!navigator.clipboard?.readText) {
+                showToast('当前浏览器不支持读取剪贴板', 'error');
+                return;
+            }
+
+            clipboardBtn.disabled = true;
+            clipboardBtn.classList.add('is-loading');
+            clipboardBtnLabel.textContent = '读取剪贴板中...';
+            try {
+                const text = (await navigator.clipboard.readText()).trim();
+                if (!text) {
+                    showToast('剪贴板为空', 'error');
+                    return;
+                }
+                urlInput.value = text;
+                urlInput.focus();
+                urlInput.select();
+                showToast('已导入剪贴板内容', 'success');
+            } catch (e) {
+                showToast('读取剪贴板失败：' + e.message, 'error');
+            } finally {
+                clipboardBtn.disabled = false;
+                clipboardBtn.classList.remove('is-loading');
+                clipboardBtnLabel.textContent = '从剪贴板导入';
+            }
         }
 
         function showToast(msg, type) {
             toast.textContent = msg;
             toast.className = 'toast ' + type + ' show';
             setTimeout(() => { toast.classList.remove('show'); }, 4000);
+        }
+
+        function setStatsMessage(message) {
+            stats.classList.add('is-plain');
+            stats.textContent = message;
+        }
+
+        function setStatsSummary(total, visible, hasFilter) {
+            stats.classList.remove('is-plain');
+            if (hasFilter) {
+                stats.innerHTML = `已收录 <strong>${total}</strong> 篇 <span class="stats-secondary">显示 <strong>${visible}</strong> 篇</span>`;
+                return;
+            }
+            stats.innerHTML = `已收录 <strong>${total}</strong> 篇文章`;
         }
 
         async function extractURL() {
@@ -1545,7 +2066,7 @@
 
             extractBtn.disabled = true;
             extractBtn.classList.add('is-loading');
-            extractBtn.textContent = '处理中…';
+            extractBtnLabel.textContent = '处理中...';
             try {
                 const resp = await fetch('/api/extract', {
                     method: 'POST',
@@ -1567,7 +2088,7 @@
             } finally {
                 extractBtn.disabled = false;
                 extractBtn.classList.remove('is-loading');
-                extractBtn.textContent = '添加';
+                extractBtnLabel.textContent = '添加新链接';
             }
         }
 
@@ -1584,12 +2105,36 @@
             }
             if (e.key === 'Escape' && commandOverlay.classList.contains('active')) {
                 closeCommandPalette();
+                return;
+            }
+            if (e.key === 'Escape' && modalOverlay.classList.contains('active')) {
+                closeModalDialog();
             }
         });
 
         function formatDate(dateStr) {
             const date = new Date(dateStr);
-            return date.toLocaleDateString('zh-CN', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+            const month = String(date.getMonth() + 1).padStart(2, '0');
+            const day = String(date.getDate()).padStart(2, '0');
+            return `${month}/${day}`;
+        }
+
+        function renderSyncBadges(item) {
+            return `
+                <div class="knowledge-dots" aria-label="知识库状态">
+                    <span class="knowledge-dot notion ${item.notion_page_id ? 'is-ready' : 'is-idle'}" title="Notion${item.notion_page_id ? '已同步' : '未同步'}"></span>
+                    <span class="knowledge-dot obsidian ${item.obsidian_path ? 'is-ready' : 'is-idle'}" title="Obsidian${item.obsidian_path ? '已同步' : '未同步'}"></span>
+                </div>
+            `;
+        }
+
+        function setModalFullscreen(nextValue) {
+            isModalFullscreen = typeof nextValue === 'boolean' ? nextValue : !isModalFullscreen;
+            modalShell.classList.toggle('is-fullscreen', isModalFullscreen);
+            toggleFullscreenBtn.setAttribute('aria-label', isModalFullscreen ? '退出全屏' : '全屏阅读');
+            toggleFullscreenBtn.innerHTML = isModalFullscreen
+                ? `<svg viewBox="0 0 24 24" fill="none" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 3H3v6M15 3h6v6M21 15v6h-6M3 15v6h6"></path></svg>`
+                : `<svg viewBox="0 0 24 24" fill="none" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 3H3v5M16 3h5v5M21 16v5h-5M8 21H3v-5"></path></svg>`;
         }
 
         function getItemThumbnail(item) {
@@ -1635,10 +2180,7 @@
 
             const hasKeyword = !!keyword;
             const hasPlatformFilter = selectedPlatform !== 'all';
-            const countText = (hasKeyword || hasPlatformFilter)
-                ? `已收录 ${itemsData.length} 篇 · 显示 ${filteredEntries.length} 篇`
-                : `已收录 ${itemsData.length} 篇文章`;
-            stats.innerText = countText;
+            setStatsSummary(itemsData.length, filteredEntries.length, hasKeyword || hasPlatformFilter);
 
             renderItems(filteredEntries);
         }
@@ -1650,22 +2192,10 @@
                 itemsData = await response.json();
                 applyFilter();
             } catch (error) {
-                stats.innerText = '加载失败';
+                setStatsMessage('加载失败');
                 grid.className = 'grid';
                 grid.innerHTML = '<div class="empty-state">无法连接到后端 API</div>';
             }
-        }
-
-        function renderSyncBadges(item) {
-            const badges = [];
-            if (item.notion_page_id) {
-                badges.push('<span style="padding: 4px 8px; border-radius: 999px; background: rgba(0, 0, 0, 0.08); font-size: 0.75rem; color: #111;">Notion</span>');
-            }
-            if (item.obsidian_path) {
-                badges.push('<span style="padding: 4px 8px; border-radius: 999px; background: rgba(99, 102, 241, 0.12); font-size: 0.75rem; color: #374151;">Obsidian</span>');
-            }
-            if (!badges.length) return '';
-            return `<div style="display:flex; gap:6px; align-items:center; flex-wrap:wrap;">${badges.join('')}</div>`;
         }
 
         function renderItems(entries) {
@@ -1681,27 +2211,29 @@
                     const textPreview = item.canonical_text ? item.canonical_text.substring(0, 120) + '...' : '无正文内容';
                     const length = item.canonical_text ? item.canonical_text.length : 0;
                     const thumb = getItemThumbnail(item);
+                    const activeClass = currentOpenItemId === item.id ? ' is-active' : '';
                     const thumbHtml = thumb
                         ? `<div class="list-thumb"><img src="${thumb.url}" loading="lazy" alt=""></div>`
                         : `<div class="list-thumb"></div>`;
                     return `
-                        <div class="list-row" onclick="openModal(${index})">
+                        <div class="list-row${activeClass}" onclick="openModal(${index})">
                             <div class="list-main">
                                 ${thumbHtml}
                                 <div class="list-content">
                                     <div class="list-title-row">
                                         <div class="list-title">${item.title || '无标题'}</div>
-                                        <span class="status">解析成功</span>
                                     </div>
                                     <div class="list-preview">${textPreview}</div>
                                 </div>
                             </div>
-                            <div class="list-meta">
-                                <span>${item.platform || 'web'}</span>
-                                <span>${formatDate(item.created_at)}</span>
-                                <span>${length} 字</span>
-                                ${renderSyncBadges(item)}
-                                <div style="display: flex; gap: 12px; align-items: center;">
+                            <div class="list-side">
+                                <div class="list-meta">
+                                    <span class="list-stat">${item.platform || 'web'}</span>
+                                    <span class="list-stat">${formatDate(item.created_at)}</span>
+                                    <span class="list-stat">${length} 字</span>
+                                </div>
+                                <div class="list-actions">
+                                    ${renderSyncBadges(item)}
                                     <button onclick="deleteItem('${item.id}', event)" class="delete-btn" title="删除">
                                         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2M10 11v6M14 11v6"/></svg>
                                     </button>
@@ -1718,6 +2250,7 @@
             grid.innerHTML = entries.map(({ item, index }) => {
                 const textPreview = item.canonical_text ? item.canonical_text.substring(0, 150) + '...' : '无正文内容';
                 const length = item.canonical_text ? item.canonical_text.length : 0;
+                const activeClass = currentOpenItemId === item.id ? ' is-active' : '';
 
                 // 生成媒体缩略图
                 let thumbnailHtml = '';
@@ -1732,20 +2265,19 @@
                 }
 
                 return `
-                    <div class="card" onclick="openModal(${index})">
+                    <div class="card${activeClass}" onclick="openModal(${index})">
                         ${thumbnailHtml}
                         <div class="card-header">
                             <h3 class="title">${item.title || '无标题'}</h3>
-                            <span class="status">解析成功</span>
                         </div>
                         <div class="preview">${textPreview}</div>
                         <div class="footer">
                             <div class="meta">
                                 <span class="meta-item">${iconCalendar}${formatDate(item.created_at)}</span>
-                                <span class="meta-item">${iconText}${length} 字</span>
-                                ${renderSyncBadges(item)}
+                                <span class="meta-item">${iconText}${length} </span>
                             </div>
-                            <div style="display: flex; gap: 12px; align-items: center;">
+                            <div class="footer-actions">
+                                ${renderSyncBadges(item)}
                                 <button onclick="deleteItem('${item.id}', event)" class="delete-btn" title="删除">
                                     <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2M10 11v6M14 11v6"/></svg>
                                 </button>
@@ -1791,14 +2323,13 @@
 
         function openModal(index) {
             const item = itemsData[index];
-            modalTitle.innerText = item.title || '无标题';
-            const notionStatus = item.notion_page_id
-                ? `已同步 (${item.notion_page_id.slice(0, 8)})`
-                : '未同步';
-            const obsidianStatus = item.obsidian_path
-                ? `已同步 (${item.obsidian_path})`
-                : '未同步';
-
+            currentOpenItemId = item.id;
+            renderItems(filteredEntries);
+            setModalFullscreen(false);
+            readerStatusDots.innerHTML = `
+                <span class="knowledge-dot notion ${item.notion_page_id ? 'is-ready' : 'is-idle'}" title="Notion${item.notion_page_id ? '已同步' : '未同步'}"></span>
+                <span class="knowledge-dot obsidian ${item.obsidian_path ? 'is-ready' : 'is-idle'}" title="Obsidian${item.obsidian_path ? '已同步' : '未同步'}"></span>
+            `;
             const platform = normalizePlatform(item.platform || '');
             const isCarouselPlatform = platform === 'xiaohongshu' || platform === 'douyin';
             const videos = (item.media || []).filter(m => m.type === 'video');
@@ -1863,23 +2394,16 @@
                 modalContent.innerHTML = html;
             }
 
-            // After existing content is rendered, append the sync buttons to whatever was inserted
-            const buttonsHtml = `
-            <div style="margin-top: 1.5rem; display: flex; gap: 8px; flex-wrap: wrap;">
-                <span style="padding: 6px 10px; border-radius: 999px; background: rgba(0, 0, 0, 0.06); font-size: 0.8rem; color: #111;">Notion: ${notionStatus}</span>
-                <span style="padding: 6px 10px; border-radius: 999px; background: rgba(99, 102, 241, 0.10); font-size: 0.8rem; color: #374151;">Obsidian: ${obsidianStatus}</span>
-            </div>
-            <div style="margin-top: 2rem; padding-top: 1rem; border-top: 1px solid rgba(133, 148, 173, 0.18); display: flex; gap: 10px; flex-wrap: wrap;">
-                <button onclick="syncItem('${item.id}', 'notion')" class="extract-btn" style="background: rgba(255, 255, 255, 0.7); color: #333; border: 1px solid #d1d9e4;">${item.notion_page_id ? '再次检查 Notion 同步' : '同步至 Notion'}</button>
-                <button onclick="syncItem('${item.id}', 'obsidian')" class="extract-btn" style="background: rgba(255, 255, 255, 0.7); color: #333; border: 1px solid #d1d9e4;">${item.obsidian_path ? '再次检查 Obsidian 同步' : '同步至 Obsidian'}</button>
-                <button onclick="downloadZip('${item.id}')" class="extract-btn" style="background: rgba(255, 255, 255, 0.7); color: #333; border: 1px solid #d1d9e4;">下载 ZIP</button>
-            </div>`;
-
-            modalContent.innerHTML += buttonsHtml;
+            modalFooter.innerHTML = `
+                <div class="modal-footer-actions">
+                    <button onclick="syncItem('${item.id}', 'notion')" class="extract-btn modal-action-btn">${item.notion_page_id ? '再次检查 Notion 同步' : '同步至 Notion'}</button>
+                    <button onclick="syncItem('${item.id}', 'obsidian')" class="extract-btn modal-action-btn">${item.obsidian_path ? '再次检查 Obsidian 同步' : '同步至 Obsidian'}</button>
+                    <button onclick="downloadZip('${item.id}')" class="extract-btn modal-action-btn">下载 ZIP</button>
+                </div>
+            `;
 
             modalOverlay.classList.add('active');
             document.body.style.overflow = 'hidden';
-            currentOpenItemId = item.id;
         }
 
         async function syncItem(id, target) {
@@ -1921,17 +2445,44 @@
             window.location.href = `/api/items/${id}/export/zip`;
         }
 
-        closeModal.onclick = () => {
+        function closeModalDialog() {
             modalOverlay.classList.remove('active');
             document.body.style.overflow = '';
+            currentOpenItemId = null;
+            setModalFullscreen(false);
+            readerStatusDots.innerHTML = '';
+            modalFooter.innerHTML = '';
+            renderItems(filteredEntries);
+        }
+
+        closeModal.onclick = () => {
+            closeModalDialog();
         };
 
+        closeModal.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter' || e.key === ' ') {
+                e.preventDefault();
+                closeModalDialog();
+            }
+        });
+
         modalOverlay.onclick = (e) => {
-            if (e.target === modalOverlay) closeModal.onclick();
+            if (e.target === modalOverlay) closeModalDialog();
         };
         settingsOverlay.onclick = (e) => {
             if (e.target === settingsOverlay) closeSettingsModal.onclick();
         };
+
+        toggleFullscreenBtn.onclick = () => {
+            setModalFullscreen();
+        };
+
+        toggleFullscreenBtn.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter' || e.key === ' ') {
+                e.preventDefault();
+                setModalFullscreen();
+            }
+        });
 
         // Fetch on load
         fetchItems();

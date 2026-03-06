@@ -379,6 +379,15 @@
             font-weight: 700;
         }
 
+        .suggestion-copy code {
+            font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+            font-size: 0.78rem;
+            color: #0f172a;
+            background: rgba(15, 23, 42, 0.06);
+            padding: 2px 6px;
+            border-radius: 6px;
+        }
+
         .command-results {
             display: flex;
             flex-direction: column;
@@ -2189,6 +2198,12 @@
                 updateCommandPaletteState();
                 urlInput.focus();
                 urlInput.select();
+                const resolvedUrl = resolveCommandUrl(text);
+                if (resolvedUrl && !isLikelyUrl(text)) {
+                    showToast('已识别分享文案中的链接，开始导入', 'success');
+                    extractURL(resolvedUrl);
+                    return;
+                }
                 showToast('已导入剪贴板内容', 'success');
             } catch (e) {
                 showToast('读取剪贴板失败：' + e.message, 'error');
@@ -2245,6 +2260,23 @@
             return value.length > maxLength ? `${value.slice(0, maxLength)}…` : value;
         }
 
+        function extractFirstHttpUrl(value) {
+            if (!value) return null;
+            const match = String(value).match(/https?:\/\/[^\s<>"'`]+/i);
+            if (!match) return null;
+
+            const candidate = match[0].replace(/[)\]}>.,!?;:'"。，！？；：]+$/u, '');
+            try {
+                const parsed = new URL(candidate);
+                if (parsed.protocol === 'http:' || parsed.protocol === 'https:') {
+                    return candidate;
+                }
+            } catch (error) {
+                return null;
+            }
+            return null;
+        }
+
         function isLikelyUrl(value) {
             if (!value) return false;
             try {
@@ -2253,6 +2285,18 @@
             } catch (error) {
                 return false;
             }
+        }
+
+        function resolveCommandUrl(value) {
+            const trimmedValue = String(value || '').trim();
+            if (!trimmedValue) return null;
+            if (isLikelyUrl(trimmedValue)) return trimmedValue;
+            return extractFirstHttpUrl(trimmedValue);
+        }
+
+        function setCommandActionsVisible(visible) {
+            extractBtn.hidden = !visible;
+            clipboardBtn.hidden = !visible;
         }
 
         function getActiveSearchParams(limit = 200, qOverride = null) {
@@ -2465,8 +2509,11 @@
         function updateCommandPaletteState() {
             const value = urlInput.value.trim();
             const platformLabel = platformFilter.options[platformFilter.selectedIndex]?.textContent || '全部';
+            const resolvedUrl = resolveCommandUrl(value);
+            const hasEmbeddedUrl = Boolean(resolvedUrl && !isLikelyUrl(value));
 
             if (!value) {
+                setCommandActionsVisible(true);
                 extractBtn.disabled = true;
                 extractBtnLabel.textContent = '粘贴链接或输入关键词';
                 extractBtnMeta.textContent = 'ENTER';
@@ -2476,14 +2523,18 @@
             }
 
             extractBtn.disabled = false;
-            if (isLikelyUrl(value)) {
-                extractBtnLabel.textContent = '导入这个链接';
+            if (resolvedUrl) {
+                setCommandActionsVisible(true);
+                extractBtnLabel.textContent = hasEmbeddedUrl ? '导入识别出的链接' : '导入这个链接';
                 extractBtnMeta.textContent = 'ENTER';
-                commandHelpText.innerHTML = '识别为 <strong>链接</strong>，按 Enter 会直接导入到 Everything Capture。';
+                commandHelpText.innerHTML = hasEmbeddedUrl
+                    ? `已从分享文案中识别到 <strong>链接</strong>：<code>${escapeHtml(truncateText(resolvedUrl, 42))}</code>`
+                    : '识别为 <strong>链接</strong>，按 Enter 会直接导入到 Everything Capture。';
                 clearCommandResults();
                 return;
             }
 
+            setCommandActionsVisible(false);
             extractBtnLabel.textContent = `搜索资料库 “${truncateText(value, 18)}”`;
             extractBtnMeta.textContent = `${platformLabel} · ENTER`;
             commandHelpText.innerHTML = `识别为 <strong>搜索词</strong>，会在 title、content、source_url 中全文搜索，并按最新时间排序。`;
@@ -2492,7 +2543,7 @@
 
         async function fetchCommandResults(query) {
             const trimmedQuery = (query || '').trim();
-            if (!trimmedQuery || isLikelyUrl(trimmedQuery)) {
+            if (!trimmedQuery || resolveCommandUrl(trimmedQuery)) {
                 clearCommandResults();
                 return;
             }
@@ -2545,7 +2596,7 @@
                 showToast('请输入链接或关键词', 'error');
                 return;
             }
-            if (isLikelyUrl(value)) {
+            if (resolveCommandUrl(value)) {
                 extractURL();
                 return;
             }
@@ -2561,10 +2612,11 @@
             openModalByItem(item);
         }
 
-        async function extractURL() {
-            const url = urlInput.value.trim();
-            if (!url) { showToast('请输入链接', 'error'); return; }
-            if (!url.startsWith('http')) { showToast('请输入有效的 http/https 链接', 'error'); return; }
+        async function extractURL(urlOverride = null) {
+            const rawValue = urlOverride ?? urlInput.value.trim();
+            const url = resolveCommandUrl(rawValue);
+            if (!rawValue) { showToast('请输入链接', 'error'); return; }
+            if (!url) { showToast('请输入有效的 http/https 链接', 'error'); return; }
 
             extractBtn.disabled = true;
             extractBtn.classList.add('is-loading');
@@ -2597,6 +2649,16 @@
         }
 
         urlInput.addEventListener('input', updateCommandPaletteState);
+        urlInput.addEventListener('paste', (e) => {
+            const pastedText = e.clipboardData?.getData('text')?.trim();
+            const resolvedUrl = resolveCommandUrl(pastedText);
+            if (!pastedText || !resolvedUrl || isLikelyUrl(pastedText)) return;
+
+            e.preventDefault();
+            urlInput.value = pastedText;
+            updateCommandPaletteState();
+            extractURL(resolvedUrl);
+        });
         urlInput.addEventListener('keydown', e => {
             if (e.key === 'Enter') {
                 e.preventDefault();

@@ -8,10 +8,11 @@ import logging
 from pathlib import Path
 
 import httpx
+from paths import MEDIA_DIR
 
 logger = logging.getLogger(__name__)
 
-MEDIA_ROOT = Path("static/media")
+MEDIA_ROOT = MEDIA_DIR
 
 _MOBILE_UA = (
     "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) "

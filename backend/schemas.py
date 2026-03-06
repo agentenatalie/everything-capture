@@ -1,4 +1,4 @@
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from typing import Optional
 from datetime import datetime
 
@@ -70,6 +70,10 @@ class SettingsResponse(BaseModel):
     obsidian_rest_api_url: Optional[str] = None
     obsidian_api_key: Optional[str] = None
     auto_sync_target: str = "none"
+    notion_ready: bool = False
+    notion_missing_fields: list[str] = Field(default_factory=list)
+    obsidian_ready: bool = False
+    obsidian_missing_fields: list[str] = Field(default_factory=list)
 
     class Config:
         from_attributes = True

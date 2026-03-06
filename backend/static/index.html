@@ -108,51 +108,47 @@
             flex: 1;
             padding: 12px 17px;
             border-radius: 999px;
-            border: 1px solid rgba(255, 255, 255, 0.9);
-            background: linear-gradient(180deg, rgba(255, 255, 255, 0.7), rgba(255, 255, 255, 0.54));
+            border: 1px solid rgba(255, 255, 255, 0.4);
+            background: rgba(255, 255, 255, 0.5);
             color: var(--text-primary);
             font-size: 0.9rem;
             outline: none;
-            box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.62), 0 8px 18px -18px rgba(13, 24, 43, 0.46);
-            transition: border-color 0.24s, box-shadow 0.24s, transform 0.24s;
-            backdrop-filter: saturate(var(--glass-sat)) blur(var(--glass-blur-sm));
-            -webkit-backdrop-filter: saturate(var(--glass-sat)) blur(var(--glass-blur-sm));
+            transition: all 0.2s ease;
+            backdrop-filter: blur(10px);
+            -webkit-backdrop-filter: blur(10px);
         }
 
         .extract-bar input:focus {
-            border-color: rgba(0, 113, 227, 0.38);
-            box-shadow: var(--focus-ring), inset 0 1px 0 rgba(255, 255, 255, 0.74);
+            background: #ffffff;
+            border-color: rgba(0, 113, 227, 0.3);
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.05);
         }
 
         .extract-bar input::placeholder {
-            color: #8b94a6;
+            color: #64748b;
         }
 
         .extract-btn {
             padding: 11px 19px;
-            border: 1px solid #d1d9e4;
+            border: 1px solid rgba(255, 255, 255, 0.4);
             border-radius: 999px;
-            background: #f3f6fa;
-            color: #2a3342;
+            background: rgba(255, 255, 255, 0.5);
+            color: #334155;
             font-size: 0.84rem;
             font-weight: 650;
             cursor: pointer;
-            transition: background-color 0.2s, border-color 0.2s, color 0.2s;
+            transition: all 0.2s ease;
             white-space: nowrap;
-            box-shadow: none;
-            backdrop-filter: none;
-            -webkit-backdrop-filter: none;
+            backdrop-filter: blur(10px);
+            -webkit-backdrop-filter: blur(10px);
             position: relative;
         }
 
         .extract-btn:hover:not(:disabled) {
-            background: #e9eef5;
-            border-color: #c8d1df;
-        }
-
-        .extract-btn:active:not(:disabled) {
-            background: #e2e8f1;
-            border-color: #c1cbdb;
+            background: #ffffff;
+            color: #000;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
+            border-color: rgba(255, 255, 255, 0.6);
         }
 
         .extract-btn:disabled {
@@ -229,7 +225,7 @@
         .command-overlay {
             position: fixed;
             inset: 0;
-            background: rgba(19, 24, 34, 0.28);
+            background: rgba(15, 23, 42, 0.2);
             backdrop-filter: blur(8px);
             -webkit-backdrop-filter: blur(8px);
             display: flex;
@@ -249,19 +245,18 @@
 
         .command-panel {
             width: min(680px, 100%);
-            background: linear-gradient(160deg, rgba(255, 255, 255, 0.78), rgba(255, 255, 255, 0.56));
-            border: 1px solid rgba(255, 255, 255, 0.88);
+            background: rgba(255, 255, 255, 0.8);
+            backdrop-filter: blur(24px) saturate(220%);
+            -webkit-backdrop-filter: blur(24px) saturate(220%);
+            border: 1px solid rgba(255, 255, 255, 0.6);
             border-radius: 20px;
-            box-shadow: 0 30px 56px -34px rgba(15, 23, 42, 0.62), inset 0 1px 0 rgba(255, 255, 255, 0.86);
+            box-shadow: 0 30px 56px -34px rgba(15, 23, 42, 0.62);
             padding: 14px;
-            backdrop-filter: saturate(220%) blur(22px);
-            -webkit-backdrop-filter: saturate(220%) blur(22px);
             position: relative;
             overflow: hidden;
             opacity: 0;
             transform: translateY(8px) scale(0.985);
             transition: transform 0.24s cubic-bezier(0.22, 0.9, 0.3, 1), opacity 0.2s ease;
-            will-change: transform, opacity;
         }
 
         .command-overlay.active .command-panel {
@@ -269,30 +264,19 @@
             transform: translateY(0) scale(1);
         }
 
-        .command-panel::before {
-            content: '';
-            position: absolute;
-            inset: 1px;
-            border-radius: 19px;
-            background: linear-gradient(180deg, rgba(255, 255, 255, 0.34), rgba(255, 255, 255, 0.05) 62%, rgba(255, 255, 255, 0.2));
-            pointer-events: none;
-        }
+        /* 移除原来的 .command-panel::before 伪元素 */
 
         .command-title {
             font-size: 0.82rem;
-            color: #69758a;
+            color: #64748b;
             margin-bottom: 10px;
             letter-spacing: 0.02em;
-            position: relative;
-            z-index: 1;
         }
 
         .command-hint {
             margin-top: 10px;
             font-size: 0.76rem;
-            color: #8b94a6;
-            position: relative;
-            z-index: 1;
+            color: #64748b;
         }
 
         .stats {
@@ -485,22 +469,24 @@
         }
 
         .card {
-            background: linear-gradient(165deg, rgba(255, 255, 255, 0.64), rgba(255, 255, 255, 0.42));
-            border: 1px solid var(--card-border);
+            background: rgba(255, 255, 255, 0.65);
+            /* 更透明的背景 */
+            backdrop-filter: blur(20px) saturate(140%);
+            -webkit-backdrop-filter: blur(20px) saturate(140%);
+            border: 1px solid rgba(255, 255, 255, 0.5);
             border-radius: var(--radius-lg);
             padding: 1.34rem;
-            transition: transform 0.3s cubic-bezier(0.2, 0.8, 0.2, 1), box-shadow 0.3s cubic-bezier(0.2, 0.8, 0.2, 1), border-color 0.3s;
-            backdrop-filter: saturate(var(--glass-sat)) blur(var(--glass-blur-md));
-            -webkit-backdrop-filter: saturate(var(--glass-sat)) blur(var(--glass-blur-md));
+            transition: all 0.3s cubic-bezier(0.25, 0.8, 0.25, 1);
             display: flex;
             flex-direction: column;
             gap: 0.86rem;
             position: relative;
             overflow: hidden;
             cursor: pointer;
-            box-shadow: var(--shadow-soft), inset 0 1px 0 rgba(255, 255, 255, 0.76);
+            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05), 0 2px 4px -1px rgba(0, 0, 0, 0.03);
         }
 
+        /*
         .card::before {
             content: '';
             position: absolute;
@@ -510,10 +496,12 @@
             pointer-events: none;
             opacity: 0.82;
         }
+        */
 
         .card:hover {
-            transform: translateY(-2px);
-            box-shadow: var(--shadow-card-hover), inset 0 1px 0 rgba(255, 255, 255, 0.88);
+            background: #ffffff;
+            transform: translateY(-4px) scale(1.02);
+            box-shadow: 0 20px 40px -5px rgba(0, 0, 0, 0.1), 0 10px 20px -5px rgba(0, 0, 0, 0.04);
             border-color: rgba(255, 255, 255, 0.9);
         }
 
@@ -827,12 +815,18 @@
             position: relative;
             background: rgba(240, 244, 250, 0.94);
             border: 1px solid rgba(255, 255, 255, 0.82);
+            transition: all 0.7s ease-out;
         }
 
         .card-media img {
             width: 100%;
             height: 100%;
             object-fit: cover;
+            transition: transform 0.7s ease-out;
+        }
+
+        .card:hover .card-media img {
+            transform: scale(1.05);
         }
 
         .card-media .media-badge {
@@ -1161,10 +1155,27 @@
                         <button id="connectNotionBtn" class="extract-btn"
                             style="width: 100%; background: #000; color: #fff;">Connect to Notion</button>
                     </div>
+                    <div id="notionStatusText" style="font-size: 0.82rem; color: #6b7280; line-height: 1.5;">
+                        状态：未连接
+                    </div>
+                    <div style="margin-top: 12px; margin-bottom: 8px;">
+                        <label style="display: block; font-size: 0.85rem; margin-bottom: 4px;">可访问的同步目标</label>
+                        <div style="display: flex; gap: 8px;">
+                            <select id="notionDbSelect" class="platform-select" style="flex: 1;">
+                                <option value="">先完成 OAuth，再从这里选择</option>
+                            </select>
+                            <button id="refreshNotionDbsBtn" class="extract-btn"
+                                style="padding: 0 14px; white-space: nowrap;">刷新</button>
+                        </div>
+                    </div>
                     <div>
-                        <label style="display: block; font-size: 0.85rem; margin-bottom: 4px;">Database ID</label>
+                        <label style="display: block; font-size: 0.85rem; margin-bottom: 4px;">Notion Target ID /
+                            URL</label>
                         <input type="text" id="notionDbId" class="filter-input" style="width: 100%;"
-                            placeholder="e.g. 1234abcd..." />
+                            placeholder="支持直接粘贴 Notion 数据库分享链接或原始 ID" />
+                        <div style="margin-top: 6px; font-size: 0.8rem; color: #8594ad; line-height: 1.5;">
+                            OAuth 只负责授权。要真正同步，还需要选择一个可写入的 Notion 页面或数据库作为目标。
+                        </div>
                     </div>
                 </div>
 
@@ -1175,12 +1186,16 @@
                     <div style="margin-bottom: 8px;">
                         <label style="display: block; font-size: 0.85rem; margin-bottom: 4px;">REST API URL</label>
                         <input type="text" id="obsidianApiUrl" class="filter-input" style="width: 100%;"
-                            placeholder="http://127.0.0.1:27123" />
+                            placeholder="https://127.0.0.1:27124" />
                     </div>
                     <div>
                         <label style="display: block; font-size: 0.85rem; margin-bottom: 4px;">API Key</label>
                         <input type="password" id="obsidianApiKey" class="filter-input" style="width: 100%;"
                             placeholder="Your API Key" />
+                    </div>
+                    <div id="obsidianStatusText"
+                        style="margin-top: 10px; font-size: 0.82rem; color: #6b7280; line-height: 1.5;">
+                        状态：未配置
                     </div>
                 </div>
 
@@ -1223,6 +1238,11 @@
         const settingsOverlay = document.getElementById('settingsOverlay');
         const closeSettingsModal = document.getElementById('closeSettingsModal');
         const btnSaveSettings = document.getElementById('saveSettingsBtn');
+        const notionStatusText = document.getElementById('notionStatusText');
+        const obsidianStatusText = document.getElementById('obsidianStatusText');
+        const notionDbIdInput = document.getElementById('notionDbId');
+        const notionDbSelect = document.getElementById('notionDbSelect');
+        const refreshNotionDbsBtn = document.getElementById('refreshNotionDbsBtn');
 
         const iconCalendar = '<svg class="inline-icon" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M7 3v3M17 3v3M4 9h16M6.5 5h11A1.5 1.5 0 0 1 19 6.5v11A1.5 1.5 0 0 1 17.5 19h-11A1.5 1.5 0 0 1 5 17.5v-11A1.5 1.5 0 0 1 6.5 5Z" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>';
         const iconText = '<svg class="inline-icon" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M5 7.5h14M5 12h14M5 16.5h9" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>';
@@ -1233,23 +1253,117 @@
         let currentOpenItemId = null;
 
         // Settings Logic
+        function setNotionStatus(data) {
+            if (data?.notion_ready) {
+                notionStatusText.textContent = '状态：已连接，可同步到 Notion。';
+                notionStatusText.style.color = '#1f7a4d';
+                return;
+            }
+
+            if (data?.notion_api_token) {
+                const missingDatabase = (data.notion_missing_fields || []).includes('notion_database_id');
+                notionStatusText.textContent = missingDatabase
+                    ? '状态：已完成 OAuth，但还没有选择同步目标，当前不能同步。'
+                    : '状态：已授权，但配置仍不完整。';
+                notionStatusText.style.color = '#b7791f';
+                return;
+            }
+
+            notionStatusText.textContent = '状态：未连接';
+            notionStatusText.style.color = '#6b7280';
+        }
+
+        function setObsidianStatus(data) {
+            if (data?.obsidian_ready) {
+                obsidianStatusText.textContent = '状态：已配置，可同步到 Obsidian。';
+                obsidianStatusText.style.color = '#1f7a4d';
+                return;
+            }
+
+            const missingUrl = (data?.obsidian_missing_fields || []).includes('obsidian_rest_api_url');
+            const missingKey = (data?.obsidian_missing_fields || []).includes('obsidian_api_key');
+            if (missingUrl || missingKey) {
+                const missingLabels = [];
+                if (missingUrl) missingLabels.push('REST API URL');
+                if (missingKey) missingLabels.push('API Key');
+                obsidianStatusText.textContent = `状态：未完成配置，缺少 ${missingLabels.join(' / ')}。`;
+                obsidianStatusText.style.color = '#b7791f';
+                return;
+            }
+
+            obsidianStatusText.textContent = '状态：未配置';
+            obsidianStatusText.style.color = '#6b7280';
+        }
+
+        async function loadNotionDatabases(selectedValue = '') {
+            notionDbSelect.innerHTML = '<option value="">先完成 OAuth，再从这里选择</option>';
+            const hasToken = document.getElementById('notionApiToken').value.trim();
+            if (!hasToken) return [];
+
+            refreshNotionDbsBtn.disabled = true;
+            refreshNotionDbsBtn.innerText = '刷新中...';
+            try {
+                const res = await fetch('/api/connect/notion/databases');
+                const data = await res.json();
+                if (!res.ok) {
+                    console.error('Failed to load Notion databases', data.detail);
+                    return [];
+                }
+
+                const databases = data.results || [];
+                if (!databases.length) {
+                    notionDbSelect.innerHTML = '<option value="">没有可访问的页面或数据库，请先在 Notion 中把目标页面/数据库共享给当前集成</option>';
+                    return [];
+                }
+                notionDbSelect.innerHTML = '<option value="">选择一个 Notion 页面或数据库</option>';
+                for (const database of databases) {
+                    const option = document.createElement('option');
+                    option.value = database.id;
+                    const shortId = database.id ? database.id.slice(0, 8) : 'unknown';
+                    const objectLabel = database.object === 'database' ? 'Database' : 'Page';
+                    option.textContent = `${database.title || 'Untitled'} [${objectLabel}] (${shortId})`;
+                    notionDbSelect.appendChild(option);
+                }
+
+                const currentValue = (selectedValue || notionDbIdInput.value || '').trim();
+                const matched = databases.find((database) =>
+                    database.id === currentValue || database.url === currentValue
+                );
+                if (matched) {
+                    notionDbSelect.value = matched.id;
+                }
+                return databases;
+            } catch (e) {
+                console.error('Failed to load Notion databases', e);
+                return [];
+            } finally {
+                refreshNotionDbsBtn.disabled = false;
+                refreshNotionDbsBtn.innerText = '刷新';
+            }
+        }
+
         async function loadSettings() {
             try {
                 const res = await fetch('/api/settings');
                 if (res.ok) {
                     const data = await res.json();
-                    if (data.notion_api_token) document.getElementById('notionApiToken').value = data.notion_api_token;
-                    if (data.notion_client_id) document.getElementById('notionClientId').value = data.notion_client_id;
-                    if (data.notion_client_secret) document.getElementById('notionClientSecret').value = data.notion_client_secret;
-                    if (data.notion_redirect_uri) document.getElementById('notionRedirectUri').value = data.notion_redirect_uri;
-                    if (data.notion_database_id) document.getElementById('notionDbId').value = data.notion_database_id;
-                    if (data.obsidian_rest_api_url) document.getElementById('obsidianApiUrl').value = data.obsidian_rest_api_url;
-                    if (data.obsidian_api_key) document.getElementById('obsidianApiKey').value = data.obsidian_api_key;
-                    if (data.auto_sync_target) document.getElementById('autoSyncTarget').value = data.auto_sync_target;
+                    document.getElementById('notionApiToken').value = data.notion_api_token || '';
+                    document.getElementById('notionClientId').value = data.notion_client_id || '';
+                    document.getElementById('notionClientSecret').value = data.notion_client_secret || '';
+                    document.getElementById('notionRedirectUri').value = data.notion_redirect_uri || '';
+                    notionDbIdInput.value = data.notion_database_id || '';
+                    document.getElementById('obsidianApiUrl').value = data.obsidian_rest_api_url || '';
+                    document.getElementById('obsidianApiKey').value = data.obsidian_api_key || '';
+                    document.getElementById('autoSyncTarget').value = data.auto_sync_target || 'none';
+                    setNotionStatus(data);
+                    setObsidianStatus(data);
+                    await loadNotionDatabases(data.notion_database_id || '');
+                    return data;
                 }
             } catch (e) {
                 console.error("Failed to load settings", e);
             }
+            return null;
         }
 
         settingsBtn.onclick = () => {
@@ -1263,12 +1377,12 @@
 
         btnSaveSettings.onclick = async () => {
             const payload = {
-                notion_client_id: document.getElementById('notionClientId').value || null,
-                notion_client_secret: document.getElementById('notionClientSecret').value || null,
-                notion_redirect_uri: document.getElementById('notionRedirectUri').value || null,
-                notion_database_id: document.getElementById('notionDbId').value || null,
-                obsidian_rest_api_url: document.getElementById('obsidianApiUrl').value || null,
-                obsidian_api_key: document.getElementById('obsidianApiKey').value || null,
+                notion_client_id: document.getElementById('notionClientId').value.trim() || null,
+                notion_client_secret: document.getElementById('notionClientSecret').value.trim() || null,
+                notion_redirect_uri: document.getElementById('notionRedirectUri').value.trim() || null,
+                notion_database_id: notionDbIdInput.value.trim() || null,
+                obsidian_rest_api_url: document.getElementById('obsidianApiUrl').value.trim() || null,
+                obsidian_api_key: document.getElementById('obsidianApiKey').value.trim() || null,
                 auto_sync_target: document.getElementById('autoSyncTarget').value
             };
             btnSaveSettings.disabled = true;
@@ -1280,7 +1394,15 @@
                     body: JSON.stringify(payload)
                 });
                 if (res.ok) {
-                    showToast('设置已保存', 'success');
+                    const data = await res.json();
+                    setNotionStatus(data);
+                    setObsidianStatus(data);
+                    await loadNotionDatabases(data.notion_database_id || '');
+                    if (data.notion_ready || data.obsidian_ready) {
+                        showToast('设置已保存，集成已更新。', 'success');
+                    } else {
+                        showToast('设置已保存，但仍有未完成的集成配置。', 'info');
+                    }
                     settingsOverlay.classList.remove('active');
                 } else {
                     showToast('保存设置失败', 'error');
@@ -1300,9 +1422,9 @@
             try {
                 // First save the current OAuth credentials so the backend knows them
                 const payload = {
-                    notion_client_id: document.getElementById('notionClientId').value || null,
-                    notion_client_secret: document.getElementById('notionClientSecret').value || null,
-                    notion_redirect_uri: document.getElementById('notionRedirectUri').value || null
+                    notion_client_id: document.getElementById('notionClientId').value.trim() || null,
+                    notion_client_secret: document.getElementById('notionClientSecret').value.trim() || null,
+                    notion_redirect_uri: document.getElementById('notionRedirectUri').value.trim() || null
                 };
                 await fetch('/api/settings', {
                     method: 'POST',
@@ -1324,6 +1446,19 @@
                 showToast('请求出错: ' + e.message, 'error');
                 btn.disabled = false;
                 btn.innerText = "Connect to Notion";
+            }
+        };
+
+        notionDbSelect.onchange = () => {
+            if (notionDbSelect.value) {
+                notionDbIdInput.value = notionDbSelect.value;
+            }
+        };
+
+        refreshNotionDbsBtn.onclick = async () => {
+            await loadNotionDatabases(notionDbIdInput.value.trim());
+            if (!notionDbSelect.value && notionDbIdInput.value.trim()) {
+                showToast('当前 Database ID/URL 已保留，但不在可访问列表中，请确认数据库已向 Notion 集成开放。', 'info');
             }
         };
 
@@ -1670,7 +1805,11 @@
                 if (res.ok) {
                     showToast(`同步成功 (ID: ${data[`${target}_page_id`] || data.obsidian_path || '已同步'})`, 'success');
                 } else {
-                    showToast(`同步失败: ${data.detail}`, 'error');
+                    let message = data.detail || '未知错误';
+                    if (typeof message === 'string' && message.includes('notion_database_id')) {
+                        message = 'Notion 已授权，但还没有配置 Database ID/URL。请先在设置里选择目标数据库。';
+                    }
+                    showToast(`同步失败: ${message}`, 'error');
                 }
             } catch (e) {
                 showToast(`同步出错: ${e.message}`, 'error');
@@ -1700,7 +1839,21 @@
         const urlParams = new URLSearchParams(window.location.search);
         const notionAuth = urlParams.get('notion_auth');
         if (notionAuth === 'success') {
-            setTimeout(() => showToast('Notion Authentication Successful!', 'success'), 500);
+            setTimeout(async () => {
+                const settings = await loadSettings();
+                if (settings?.notion_ready) {
+                    showToast('Notion 授权成功，已可直接同步。', 'success');
+                } else {
+                    showToast('Notion 授权成功，但还需要选择一个同步目标才能同步。', 'info');
+                }
+            }, 500);
+            // Clean up URL
+            window.history.replaceState({}, document.title, window.location.pathname);
+        } else if (notionAuth === 'partial') {
+            setTimeout(async () => {
+                await loadSettings();
+                showToast('Notion 授权成功，但当前还缺少同步目标。请在设置里选择一个页面或数据库。', 'info');
+            }, 500);
             // Clean up URL
             window.history.replaceState({}, document.title, window.location.pathname);
         } else if (notionAuth === 'failed') {

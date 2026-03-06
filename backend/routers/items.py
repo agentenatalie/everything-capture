@@ -4,6 +4,7 @@ from database import get_db
 from models import Item
 from schemas import ItemResponse, MediaResponse
 from typing import List
+from paths import STATIC_DIR
 
 router = APIRouter(
     prefix="/api",
@@ -56,6 +57,7 @@ import io
 import zipfile
 import re
 from fastapi.responses import StreamingResponse
+from urllib.parse import quote
 
 @router.get("/items/{item_id}/export/zip")
 def export_item_zip(item_id: str, db: Session = Depends(get_db)):
@@ -72,7 +74,7 @@ def export_item_zip(item_id: str, db: Session = Depends(get_db)):
         media_map = {} # original url -> relative zip path
         for m in item.media:
             if m.local_path:
-                local_file_path = os.path.join("static", m.local_path)
+                local_file_path = STATIC_DIR / m.local_path
                 if os.path.exists(local_file_path):
                     filename = os.path.basename(m.local_path)
                     zip_media_path = f"media/{filename}"
@@ -108,10 +110,17 @@ def export_item_zip(item_id: str, db: Session = Depends(get_db)):
         zf.writestr(f"{safe_title}.md", full_content.encode('utf-8'))
         
     zip_buffer.seek(0)
+
+    download_name = f"{safe_title}.zip"
+    ascii_fallback = re.sub(r"[^A-Za-z0-9._-]", "_", download_name) or f"capture_{item.id}.zip"
     
     return StreamingResponse(
         iter([zip_buffer.getvalue()]), 
         media_type="application/zip", 
-        headers={"Content-Disposition": f"attachment; filename={safe_title}.zip"}
+        headers={
+            "Content-Disposition": (
+                f"attachment; filename=\"{ascii_fallback}\"; "
+                f"filename*=UTF-8''{quote(download_name)}"
+            )
+        }
     )
-

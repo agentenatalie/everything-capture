@@ -2537,7 +2537,7 @@
             setCommandActionsVisible(false);
             extractBtnLabel.textContent = `搜索资料库 “${truncateText(value, 18)}”`;
             extractBtnMeta.textContent = `${platformLabel} · ENTER`;
-            commandHelpText.innerHTML = `识别为 <strong>搜索词</strong>，会在 title、content、source_url 中全文搜索，并按最新时间排序。`;
+            commandHelpText.innerHTML = `识别为 <strong>搜索意图</strong>，会结合标题、正文、链接和主题相关词做智能排序。`;
             scheduleCommandSearch(value);
         }
 

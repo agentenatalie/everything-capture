@@ -2,6 +2,38 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "$0")" && pwd)"
+APP_HOST="127.0.0.1"
+APP_PORT="8000"
+
+cleanup_existing_server() {
+  local port_pids
+  port_pids=("${(@f)$(lsof -tiTCP:${APP_PORT} -sTCP:LISTEN -n -P 2>/dev/null || true)}")
+
+  if (( ${#port_pids[@]} > 0 )); then
+    echo "Stopping existing server on ${APP_HOST}:${APP_PORT}: ${port_pids[*]}"
+    kill -TERM "${port_pids[@]}" 2>/dev/null || true
+    sleep 1
+
+    local remaining_pids
+    remaining_pids=("${(@f)$(lsof -tiTCP:${APP_PORT} -sTCP:LISTEN -n -P 2>/dev/null || true)}")
+    if (( ${#remaining_pids[@]} > 0 )); then
+      echo "Force stopping lingering server processes: ${remaining_pids[*]}"
+      kill -KILL "${remaining_pids[@]}" 2>/dev/null || true
+      sleep 1
+    fi
+  fi
+}
+
+cleanup_existing_server
+
 cd "$ROOT_DIR/backend"
 
-exec ./venv/bin/python -m uvicorn main:app --host 127.0.0.1 --port 8000
+if [[ "${RUN_RELOAD:-1}" == "1" ]]; then
+  exec ./venv/bin/python -m uvicorn main:app \
+    --host "$APP_HOST" \
+    --port "$APP_PORT" \
+    --reload \
+    --reload-dir "$ROOT_DIR/backend"
+fi
+
+exec ./venv/bin/python -m uvicorn main:app --host "$APP_HOST" --port "$APP_PORT"

@@ -2,12 +2,15 @@ import os
 import io
 import re
 import zipfile
+from collections import OrderedDict
+from dataclasses import dataclass
+from datetime import datetime
 from typing import List, Optional
 from urllib.parse import quote
 
 from fastapi import APIRouter, Depends, HTTPException, Response
 from fastapi.responses import StreamingResponse
-from sqlalchemy import and_, func, or_, text
+from sqlalchemy import func, or_
 from sqlalchemy.orm import Session
 from database import get_db
 from models import Item
@@ -30,6 +33,170 @@ PLATFORM_ALIASES = {
     "x": "x",
     "twitter": "x",
 }
+
+TOKEN_PATTERN = re.compile(r"[a-z0-9][a-z0-9+#._/-]*|[\u4e00-\u9fff]+", re.IGNORECASE)
+ASCII_TOKEN_PATTERN = re.compile(r"^[a-z0-9][a-z0-9+#._/-]*$", re.IGNORECASE)
+
+COMPOUND_QUERY_EXPANSIONS = {
+    "uiux": ("ui", "ux"),
+    "uxui": ("ui", "ux"),
+    "uix": ("ui", "ux"),
+    "vibecoding": ("vibe", "coding", "vibe coding"),
+}
+
+SEARCH_INTENT_GROUPS = {
+    "ui_design": {
+        "triggers": (
+            "ui",
+            "ux",
+            "uiux",
+            "ui/ux",
+            "界面",
+            "交互",
+            "设计",
+            "设计感",
+            "审美",
+            "美感",
+        ),
+        "keywords": (
+            ("ui", 2.6),
+            ("ux", 2.6),
+            ("视觉效果", 2.6),
+            ("交互", 1.8),
+            ("审美", 2.5),
+            ("设计感", 2.2),
+            ("美感", 2.0),
+            ("组件", 1.5),
+            ("组件库", 3.0),
+            ("界面", 2.2),
+            ("design", 1.4),
+            ("component", 1.8),
+            ("components", 1.8),
+            ("component library", 2.8),
+            ("design system", 2.5),
+            ("设计系统", 2.8),
+            ("shadcn", 3.0),
+            ("shadcn/ui", 3.2),
+            ("liquid glass", 3.2),
+            ("glass", 1.6),
+            ("动效", 1.5),
+            ("vibe coding", 1.6),
+        ),
+        "gate_terms": (
+            "ui",
+            "ux",
+            "uiux",
+            "界面",
+            "交互",
+            "审美",
+            "美感",
+            "组件",
+            "组件库",
+            "component",
+            "components",
+            "component library",
+            "design system",
+            "设计系统",
+            "shadcn",
+            "shadcn/ui",
+            "vibe coding",
+        ),
+    },
+    "visual_effects": {
+        "triggers": (
+            "视觉效果",
+            "特效",
+            "动效",
+            "liquid glass",
+            "glass",
+        ),
+        "keywords": (
+            ("液态玻璃", 4.0),
+            ("liquid glass", 4.2),
+            ("glass", 2.0),
+            ("视觉效果", 3.4),
+            ("动效", 2.2),
+            ("交互", 1.3),
+        ),
+        "gate_terms": (
+            "视觉效果",
+            "液态玻璃",
+            "liquid glass",
+            "glass",
+            "特效",
+            "动效",
+        ),
+    },
+    "open_source": {
+        "triggers": (
+            "github",
+            "git",
+            "repo",
+            "repository",
+            "开源",
+            "源码",
+            "代码",
+            "star",
+        ),
+        "keywords": (
+            ("github", 3.4),
+            ("github.com", 3.8),
+            ("git", 1.3),
+            ("repo", 2.0),
+            ("repository", 2.0),
+            ("开源", 3.2),
+            ("开源项目", 3.4),
+            ("源码", 2.5),
+            ("代码", 1.4),
+            ("star", 1.6),
+        ),
+        "gate_terms": (
+            "github",
+            "github.com",
+            "gitlab",
+            "repo",
+            "repository",
+            "开源",
+            "开源项目",
+            "源码",
+            "source code",
+            "star",
+        ),
+        "require_title_or_source": True,
+    },
+}
+
+FIELD_WEIGHTS = {
+    "title": 4.8,
+    "content": 1.9,
+    "source_url": 3.2,
+    "platform": 1.0,
+}
+
+EXACT_QUERY_WEIGHTS = {
+    "title": 10.0,
+    "content": 4.0,
+    "source_url": 5.5,
+}
+
+INTENT_MATCH_BONUS = 2.4
+MIN_SEARCH_SCORE = 2.5
+
+
+@dataclass(frozen=True)
+class SearchBoostTerm:
+    term: str
+    weight: float
+    intents: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True)
+class SearchQueryPlan:
+    raw: str
+    normalized: str
+    tokens: tuple[str, ...]
+    intents: tuple[str, ...]
+    boost_terms: tuple[SearchBoostTerm, ...]
 
 
 def normalize_platform_filter(platform: Optional[str]) -> str:
@@ -100,69 +267,210 @@ def apply_platform_filter(query, platform: str):
     return query.filter(platform_expr == normalized)
 
 
+def normalize_search_text(value: str) -> str:
+    normalized = (value or "").strip().lower()
+    if not normalized:
+        return ""
+    normalized = normalized.replace("ui/ux", "uiux")
+    normalized = normalized.replace("ux/ui", "uiux")
+    normalized = normalized.replace("vibe-coding", "vibe coding")
+    normalized = re.sub(r"\s+", " ", normalized)
+    return normalized
+
+
 def tokenize_search_query(query: str) -> list[str]:
-    return [token.strip() for token in re.split(r"\s+", query) if token.strip()]
+    normalized = normalize_search_text(query)
+    if not normalized:
+        return []
+
+    tokens: list[str] = []
+    seen: set[str] = set()
+    for raw_token in TOKEN_PATTERN.findall(normalized):
+        token = raw_token.strip().lower()
+        if not token:
+            continue
+
+        expanded_tokens = (token, *COMPOUND_QUERY_EXPANSIONS.get(token, ()))
+        for expanded in expanded_tokens:
+            cleaned = expanded.strip().lower()
+            if not cleaned or cleaned in seen:
+                continue
+            tokens.append(cleaned)
+            seen.add(cleaned)
+    return tokens
 
 
-def build_match_query(tokens: list[str]) -> str:
-    escaped_tokens = [token.replace('"', '""') for token in tokens if token]
-    return " ".join(f'"{token}"' for token in escaped_tokens)
+def detect_search_intents(normalized_query: str, tokens: list[str]) -> list[str]:
+    matched: list[str] = []
+    token_set = set(tokens)
+    for intent_name, config in SEARCH_INTENT_GROUPS.items():
+        triggers = config["triggers"]
+        if any(trigger in normalized_query for trigger in triggers) or token_set.intersection(triggers):
+            matched.append(intent_name)
+    return matched
 
 
-def build_like_search_condition(tokens: list[str]):
-    title_expr = func.lower(func.coalesce(Item.title, ""))
-    content_expr = func.lower(func.coalesce(Item.canonical_text, ""))
-    source_url_expr = func.lower(func.coalesce(Item.source_url, ""))
+def build_search_query_plan(query: str) -> SearchQueryPlan:
+    normalized = normalize_search_text(query)
+    tokens = tokenize_search_query(normalized)
+    intents = detect_search_intents(normalized, tokens)
 
-    token_clauses = []
-    for token in tokens:
-        lowered = token.lower()
-        pattern = f"%{lowered}%"
-        token_clauses.append(
-            or_(
-                title_expr.like(pattern),
-                content_expr.like(pattern),
-                source_url_expr.like(pattern),
-            )
+    term_registry: OrderedDict[str, dict] = OrderedDict()
+
+    def register_term(term: str, weight: float, *, intent: str | None = None) -> None:
+        normalized_term = normalize_search_text(term)
+        if not normalized_term:
+            return
+
+        entry = term_registry.setdefault(
+            normalized_term,
+            {"weight": weight, "intents": set()},
         )
+        entry["weight"] = max(entry["weight"], weight)
+        if intent:
+            entry["intents"].add(intent)
 
-    if not token_clauses:
-        return None
-    return and_(*token_clauses)
+    for token in tokens:
+        register_term(token, 2.8)
+
+    if normalized and " " in normalized:
+        register_term(normalized, 4.2)
+
+    for intent_name in intents:
+        for keyword, weight in SEARCH_INTENT_GROUPS[intent_name]["keywords"]:
+            register_term(keyword, weight, intent=intent_name)
+
+    boost_terms = tuple(
+        SearchBoostTerm(
+            term=term,
+            weight=entry["weight"],
+            intents=tuple(sorted(entry["intents"])),
+        )
+        for term, entry in term_registry.items()
+    )
+    return SearchQueryPlan(
+        raw=query,
+        normalized=normalized,
+        tokens=tuple(tokens),
+        intents=tuple(intents),
+        boost_terms=boost_terms,
+    )
 
 
-def build_items_query(db: Session, q: Optional[str], platform: str):
-    query = db.query(Item)
-    query = apply_platform_filter(query, platform)
+def contains_search_term(text_value: str, term: str) -> bool:
+    if not text_value or not term:
+        return False
+    if ASCII_TOKEN_PATTERN.fullmatch(term):
+        pattern = rf"(?<![a-z0-9]){re.escape(term)}(?![a-z0-9])"
+        return re.search(pattern, text_value, flags=re.IGNORECASE) is not None
+    return term in text_value
 
-    raw_query = (q or "").strip()
-    if not raw_query:
-        return query
 
-    tokens = tokenize_search_query(raw_query)
-    if not tokens:
-        return query
+def has_any_term(text_value: str, terms: tuple[str, ...]) -> bool:
+    return any(contains_search_term(text_value, term) for term in terms)
 
-    if all(len(token) >= 3 for token in tokens):
-        item_ids = db.execute(
-            text(
-                """
-                SELECT item_id
-                FROM items_fts
-                WHERE items_fts MATCH :match_query
-                """
-            ),
-            {"match_query": build_match_query(tokens)},
-        ).scalars().all()
 
-        if not item_ids:
-            return query.filter(text("1 = 0"))
-        return query.filter(Item.id.in_(item_ids))
+def item_matches_intent_gates(
+    plan: SearchQueryPlan,
+    *,
+    title_text: str,
+    content_text: str,
+    source_url_text: str,
+    platform_text: str,
+) -> bool:
+    if not plan.intents:
+        return True
 
-    like_condition = build_like_search_condition(tokens)
-    if like_condition is None:
-        return query
-    return query.filter(like_condition)
+    for intent_name in plan.intents:
+        config = SEARCH_INTENT_GROUPS.get(intent_name, {})
+        gate_terms = tuple(config.get("gate_terms", ()))
+        if not gate_terms:
+            continue
+
+        title_or_source_match = (
+            has_any_term(title_text, gate_terms)
+            or has_any_term(source_url_text, gate_terms)
+            or has_any_term(platform_text, gate_terms)
+        )
+        content_match = has_any_term(content_text, gate_terms)
+
+        if config.get("require_title_or_source"):
+            if title_or_source_match:
+                return True
+            continue
+
+        if title_or_source_match or content_match:
+            return True
+
+    return False
+
+
+def score_item_for_search(item, plan: SearchQueryPlan) -> float:
+    if not plan.normalized:
+        return 0.0
+
+    title_text = normalize_search_text(getattr(item, "title", "") or "")
+    content_text = normalize_search_text(getattr(item, "canonical_text", "") or "")
+    source_url_text = normalize_search_text(getattr(item, "source_url", "") or "")
+    platform_text = normalize_search_text(getattr(item, "platform", "") or "")
+
+    if not item_matches_intent_gates(
+        plan,
+        title_text=title_text,
+        content_text=content_text,
+        source_url_text=source_url_text,
+        platform_text=platform_text,
+    ):
+        return 0.0
+
+    score = 0.0
+    matched_intents: set[str] = set()
+
+    for field_name, field_value in (
+        ("title", title_text),
+        ("content", content_text),
+        ("source_url", source_url_text),
+    ):
+        if field_value and plan.normalized in field_value:
+            score += EXACT_QUERY_WEIGHTS[field_name]
+
+    for boost_term in plan.boost_terms:
+        for field_name, field_value in (
+            ("title", title_text),
+            ("content", content_text),
+            ("source_url", source_url_text),
+            ("platform", platform_text),
+        ):
+            if contains_search_term(field_value, boost_term.term):
+                score += boost_term.weight * FIELD_WEIGHTS[field_name]
+                matched_intents.update(boost_term.intents)
+
+    if matched_intents:
+        score += len(matched_intents) * INTENT_MATCH_BONUS
+
+    created_at = getattr(item, "created_at", None)
+    if isinstance(created_at, datetime):
+        age_days = max((datetime.utcnow() - created_at).total_seconds() / 86400.0, 0.0)
+        score += max(0.0, 1.2 - age_days * 0.04)
+
+    return score
+
+
+def rank_search_rows(rows: list, query: str) -> list[str]:
+    plan = build_search_query_plan(query)
+    if not plan.boost_terms:
+        return []
+
+    scored_rows: list[tuple[float, datetime, str]] = []
+    for row in rows:
+        score = score_item_for_search(row, plan)
+        if score < MIN_SEARCH_SCORE:
+            continue
+        created_at = getattr(row, "created_at", None) or datetime.min
+        scored_rows.append((score, created_at, row.id))
+
+    scored_rows.sort(key=lambda entry: (entry[0], entry[1], entry[2]), reverse=True)
+    return [item_id for _, _, item_id in scored_rows]
 
 
 @router.get("/items", response_model=List[ItemResponse])
@@ -176,15 +484,45 @@ def get_items(
 ):
     safe_limit = max(1, min(limit, 200))
     total_count = db.query(func.count(Item.id)).scalar() or 0
-    items_query = build_items_query(db, q=q, platform=platform)
-    visible_count = items_query.count()
-    items = (
-        items_query
-        .order_by(Item.created_at.desc())
-        .offset(skip)
-        .limit(safe_limit)
-        .all()
-    )
+
+    raw_query = (q or "").strip()
+    if raw_query:
+        candidate_rows = (
+            apply_platform_filter(
+                db.query(
+                    Item.id,
+                    Item.title,
+                    Item.canonical_text,
+                    Item.source_url,
+                    Item.platform,
+                    Item.created_at,
+                ),
+                platform,
+            )
+            .all()
+        )
+        ranked_item_ids = rank_search_rows(candidate_rows, raw_query)
+        visible_count = len(ranked_item_ids)
+        page_item_ids = ranked_item_ids[skip: skip + safe_limit]
+        if page_item_ids:
+            items_by_id = {
+                item.id: item
+                for item in db.query(Item).filter(Item.id.in_(page_item_ids)).all()
+            }
+            items = [items_by_id[item_id] for item_id in page_item_ids if item_id in items_by_id]
+        else:
+            items = []
+    else:
+        items_query = apply_platform_filter(db.query(Item), platform)
+        visible_count = items_query.count()
+        items = (
+            items_query
+            .order_by(Item.created_at.desc())
+            .offset(skip)
+            .limit(safe_limit)
+            .all()
+        )
+
     response.headers["X-Total-Count"] = str(total_count)
     response.headers["X-Visible-Count"] = str(visible_count)
     response.headers["X-Returned-Count"] = str(len(items))

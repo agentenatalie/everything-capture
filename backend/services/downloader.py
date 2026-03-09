@@ -119,6 +119,41 @@ async def _download_with_ytdlp(url: str, save_path: Path, referer: str = "") -> 
         return None, 0
 
 
+def _probe_video_duration_with_ytdlp_sync(url: str, referer: str = "") -> int | None:
+    if yt_dlp is None:
+        return None
+
+    headers = {"User-Agent": _MOBILE_UA}
+    if referer:
+        headers["Referer"] = referer
+
+    options = {
+        "quiet": True,
+        "no_warnings": True,
+        "noplaylist": True,
+        "skip_download": True,
+        "http_headers": headers,
+    }
+
+    with yt_dlp.YoutubeDL(options) as ydl:
+        info = ydl.extract_info(url, download=False)
+        duration = info.get("duration") if isinstance(info, dict) else None
+        try:
+            return int(duration) if duration is not None else None
+        except (TypeError, ValueError):
+            return None
+
+
+async def probe_video_duration_seconds(url: str, media_type: str, referer: str = "") -> int | None:
+    if not _is_ytdlp_candidate(url, media_type):
+        return None
+    try:
+        return await asyncio.to_thread(_probe_video_duration_with_ytdlp_sync, url, referer)
+    except Exception as exc:
+        logger.warning("视频时长探测失败 %s: %s", url[:80], exc)
+        return None
+
+
 async def download_file(url: str, save_path: Path, media_type: str, referer: str = "") -> tuple[Path | None, int]:
     """下载单个文件，返回 (实际文件路径, 文件大小)。失败返回 (None, 0)。"""
     try:

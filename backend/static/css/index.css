@@ -166,6 +166,12 @@
             }
         }
 
+        @keyframes btn-spin-centered {
+            to {
+                transform: rotate(360deg);
+            }
+        }
+
         .toast {
             position: fixed;
             top: 20px;
@@ -518,11 +524,13 @@
             font-weight: 700;
             cursor: pointer;
             flex-shrink: 0;
-            transition: transform 0.18s ease, opacity 0.18s ease, background 0.18s ease;
+            display: grid;
+            place-items: center;
+            padding: 0;
+            transition: opacity 0.18s ease, background-color 0.18s ease;
         }
 
         .mobile-capture-submit:hover:not(:disabled) {
-            transform: translateY(-1px) scale(1.01);
             background: #000000;
         }
 
@@ -534,6 +542,7 @@
         .mobile-capture-submit.is-loading {
             color: transparent;
             position: relative;
+            overflow: hidden;
         }
 
         .mobile-capture-submit.is-loading::before {
@@ -546,7 +555,7 @@
             border: 2px solid rgba(255, 255, 255, 0.65);
             border-top-color: #ffffff;
             border-radius: 50%;
-            animation: btn-spin 0.72s linear infinite;
+            animation: btn-spin-centered 0.72s linear infinite;
         }
 
         .toolbar-left {
@@ -3306,6 +3315,7 @@
             .mobile-capture-shell {
                 display: block;
                 width: 100%;
+                transform: translateY(-34px);
             }
 
             .folder-sidebar {

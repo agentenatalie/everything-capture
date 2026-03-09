@@ -8,3 +8,5 @@
 - [x] Reduce the mobile UI to a centered pill input only
 - [x] Autofill the mobile pill from clipboard when the page becomes active
 - [x] Auto-submit mobile clipboard content only when a URL is detected
+- [x] Keep the mobile loading indicator visually fixed and move the input slightly upward
+- [x] Return `/api/extract` quickly only for shortcut/mobile captures whose videos exceed 15 minutes

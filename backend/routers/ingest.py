@@ -1,15 +1,18 @@
 import html
+import json
 import logging
 import re
 
-from fastapi import APIRouter, Depends, HTTPException, status, BackgroundTasks
+from fastapi import APIRouter, Depends, HTTPException, status, BackgroundTasks, Request
 from sqlalchemy.orm import Session
+from auth import extract_session_token, is_shortcut_bearer_token
 from database import get_db, SessionLocal
 from models import Item, Media, Settings
 from schemas import IngestRequest, IngestResponse, ExtractRequest, ExtractResponse
 from services.extractor import extract_content
-from services.downloader import download_media_list
+from services.downloader import download_media_list, probe_video_duration_seconds
 from tenant import get_current_user_id
+from bs4 import BeautifulSoup
 
 logger = logging.getLogger(__name__)
 
@@ -90,6 +93,174 @@ def _fallback_text_title(request: ExtractRequest, text: str) -> str:
     return "Shared Text"
 
 
+def _serialize_content_blocks(content_blocks: list[dict] | None) -> str | None:
+    if not content_blocks:
+        return None
+    return json.dumps(content_blocks, ensure_ascii=False)
+
+
+def _replace_media_urls_in_blocks(content_blocks: list[dict] | None, url_map: dict[str, str]) -> str | None:
+    if not content_blocks:
+        return None
+
+    final_blocks = []
+    for block in content_blocks:
+        if block["type"] in {"image", "video"}:
+            local_url = url_map.get(block["url"])
+            if local_url:
+                final_blocks.append({"type": block["type"], "url": local_url})
+        else:
+            final_blocks.append(block)
+    return _serialize_content_blocks(final_blocks)
+
+
+def _replace_media_urls_in_html(content_html: str | None, url_map: dict[str, str]) -> str | None:
+    if not content_html:
+        return None
+
+    soup = BeautifulSoup(content_html, "html.parser")
+    for img in soup.find_all("img"):
+        src = img.get("src", "")
+        local_url = url_map.get(src)
+        if local_url:
+            img["src"] = local_url
+        else:
+            img.decompose()
+
+    for video in soup.find_all("video"):
+        src = video.get("src", "")
+        if src:
+            local_url = url_map.get(src)
+            if local_url:
+                video["src"] = local_url
+        for source in video.find_all("source"):
+            source_src = source.get("src", "")
+            if not source_src:
+                continue
+            local_url = url_map.get(source_src)
+            if local_url:
+                source["src"] = local_url
+
+    for iframe in soup.find_all("iframe"):
+        src = iframe.get("src", "")
+        local_url = url_map.get(src)
+        if local_url:
+            iframe["src"] = local_url
+
+    return str(soup)
+
+
+def _store_initial_extracted_content(item: Item, content_blocks: list[dict] | None, content_html: str | None) -> None:
+    item.content_blocks_json = _serialize_content_blocks(content_blocks)
+    item.canonical_html = content_html or item.canonical_html
+
+
+async def _download_and_apply_media_updates(
+    db: Session,
+    item: Item,
+    media_list: list[dict],
+    content_blocks: list[dict] | None,
+    content_html: str | None,
+    referer: str,
+    user_id: str,
+) -> int:
+    downloaded = await download_media_list(
+        item_id=item.id,
+        media_list=media_list,
+        referer=referer,
+        user_id=user_id,
+    )
+
+    db.query(Media).filter(Media.item_id == item.id, Media.user_id == user_id).delete()
+
+    url_map: dict[str, str] = {}
+    for dl in downloaded:
+        media_record = Media(
+            user_id=user_id,
+            item_id=item.id,
+            type=dl["type"],
+            original_url=dl["original_url"],
+            local_path=dl["local_path"],
+            file_size=dl["file_size"],
+            display_order=dl["display_order"],
+            inline_position=dl.get("inline_position", -1.0),
+        )
+        db.add(media_record)
+        url_map[dl["original_url"]] = f"/static/{dl['local_path']}" if dl["local_path"] else dl["original_url"]
+
+    localized_blocks = _replace_media_urls_in_blocks(content_blocks, url_map)
+    if localized_blocks is not None:
+        item.content_blocks_json = localized_blocks
+
+    localized_html = _replace_media_urls_in_html(content_html, url_map)
+    if localized_html is not None:
+        item.canonical_html = localized_html
+
+    db.add(item)
+    return len(downloaded)
+
+
+async def _should_background_media_processing(
+    http_request: Request,
+    media_list: list[dict],
+    referer: str,
+) -> bool:
+    raw_token = extract_session_token(http_request)
+    is_shortcut_request = is_shortcut_bearer_token(raw_token)
+    user_agent = (http_request.headers.get("user-agent") or "").lower()
+    is_mobile_request = "mobile" in user_agent or "iphone" in user_agent or "android" in user_agent
+
+    if not is_shortcut_request and not is_mobile_request:
+        return False
+
+    video_candidates = [media for media in media_list if media.get("type") == "video" and media.get("url")]
+    if not video_candidates:
+        return False
+
+    duration_seconds = await probe_video_duration_seconds(
+        video_candidates[0]["url"],
+        "video",
+        referer=referer,
+    )
+    return bool(duration_seconds and duration_seconds > 15 * 60)
+
+
+def background_finalize_extracted_media(
+    item_id: str,
+    media_list: list[dict],
+    content_blocks: list[dict] | None,
+    content_html: str | None,
+    referer: str,
+    user_id: str,
+) -> None:
+    db = SessionLocal()
+    try:
+        item = db.query(Item).filter(Item.id == item_id, Item.user_id == user_id).first()
+        if not item:
+            return
+
+        downloaded_count = asyncio.run(
+            _download_and_apply_media_updates(
+                db,
+                item,
+                media_list=media_list,
+                content_blocks=content_blocks,
+                content_html=content_html,
+                referer=referer,
+                user_id=user_id,
+            )
+        )
+        db.commit()
+        logger.info("后台媒体处理完成 %d 个文件 (item: %s)", downloaded_count, item_id)
+
+        background_auto_sync(item_id, user_id)
+    except Exception as exc:
+        db.rollback()
+        logger.error("后台媒体处理失败 %s: %s", item_id, exc)
+    finally:
+        db.close()
+
+
 def _store_shared_text_capture(
     request: ExtractRequest,
     db: Session,
@@ -158,7 +329,7 @@ def ingest_page(request: IngestRequest, background_tasks: BackgroundTasks, db: S
 
 
 @router.post("/extract", response_model=ExtractResponse, status_code=status.HTTP_201_CREATED)
-async def extract_page(request: ExtractRequest, background_tasks: BackgroundTasks, db: Session = Depends(get_db)):
+async def extract_page(request: ExtractRequest, http_request: Request, background_tasks: BackgroundTasks, db: Session = Depends(get_db)):
     """服务端提取：优先提取 URL，兼容快捷指令 text 载荷并支持文本兜底入库"""
     user_id = get_current_user_id()
     resolved_url = _resolve_extract_url(request)
@@ -189,91 +360,38 @@ async def extract_page(request: ExtractRequest, background_tasks: BackgroundTask
             status="ready",
         )
         db.add(new_item)
+        _store_initial_extracted_content(new_item, result.content_blocks, result.content_html)
         db.commit()
         db.refresh(new_item)
 
-        # 下载媒体文件（图片/视频）
-        media_count = 0
+        media_count = len(result.media_urls or [])
         if result.media_urls:
             referer = result.final_url or resolved_url
-            downloaded = await download_media_list(
-                item_id=new_item.id,
-                media_list=result.media_urls,
-                referer=referer,
-                user_id=user_id,
-            )
-            # Build original_url → local_url map for substituting into content_blocks
-            url_map: dict[str, str] = {}
-            for dl in downloaded:
-                media_record = Media(
-                    user_id=user_id,
-                    item_id=new_item.id,
-                    type=dl["type"],
-                    original_url=dl["original_url"],
-                    local_path=dl["local_path"],
-                    file_size=dl["file_size"],
-                    display_order=dl["display_order"],
-                    inline_position=dl.get("inline_position", -1.0),
+            if await _should_background_media_processing(http_request, result.media_urls, referer):
+                background_tasks.add_task(
+                    background_finalize_extracted_media,
+                    new_item.id,
+                    result.media_urls,
+                    result.content_blocks,
+                    result.content_html,
+                    referer,
+                    user_id,
                 )
-                db.add(media_record)
-                url_map[dl["original_url"]] = f"/static/{dl['local_path']}" if dl["local_path"] else dl["original_url"]
-
-            # Save content_blocks_json with local URLs substituted in
-            if result.content_blocks:
-                import json as _json
-                final_blocks = []
-                for block in result.content_blocks:
-                    if block["type"] in {"image", "video"}:
-                        local_url = url_map.get(block["url"])
-                        if local_url:
-                            final_blocks.append({"type": block["type"], "url": local_url})
-                    else:
-                        final_blocks.append(block)
-                if final_blocks:
-                    new_item.content_blocks_json = _json.dumps(final_blocks, ensure_ascii=False)
-                    db.add(new_item)
-
-            # Build and save canonical_html with replaced image URLs
-            if result.content_html:
-                from bs4 import BeautifulSoup
-                soup = BeautifulSoup(result.content_html, "html.parser")
-                for img in soup.find_all("img"):
-                    src = img.get("src", "")
-                    # Match normalized URL to url_map
-                    local_url = url_map.get(src)
-                    if local_url:
-                        img["src"] = local_url
-                    else:
-                        img.decompose()  # Remove if it wasn't downloaded
-
-                for video in soup.find_all("video"):
-                    src = video.get("src", "")
-                    if src:
-                        local_url = url_map.get(src)
-                        if local_url:
-                            video["src"] = local_url
-                    for source in video.find_all("source"):
-                        source_src = source.get("src", "")
-                        if not source_src:
-                            continue
-                        local_url = url_map.get(source_src)
-                        if local_url:
-                            source["src"] = local_url
-
-                for iframe in soup.find_all("iframe"):
-                    src = iframe.get("src", "")
-                    local_url = url_map.get(src)
-                    if local_url:
-                        iframe["src"] = local_url
-                
-                new_item.canonical_html = str(soup)
-                db.add(new_item)
-
-            db.commit()
-            media_count = len(downloaded)
-            logger.info("已下载 %d 个媒体文件 (item: %s)", media_count, new_item.id)
-
-        background_tasks.add_task(background_auto_sync, new_item.id, user_id)
+            else:
+                media_count = await _download_and_apply_media_updates(
+                    db,
+                    new_item,
+                    result.media_urls,
+                    result.content_blocks,
+                    result.content_html,
+                    referer,
+                    user_id,
+                )
+                db.commit()
+                logger.info("同步媒体处理完成 %d 个文件 (item: %s)", media_count, new_item.id)
+                background_tasks.add_task(background_auto_sync, new_item.id, user_id)
+        else:
+            background_tasks.add_task(background_auto_sync, new_item.id, user_id)
 
         return ExtractResponse(
             item_id=new_item.id,

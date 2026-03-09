@@ -13,8 +13,14 @@ from fastapi.responses import StreamingResponse
 from sqlalchemy import func, or_
 from sqlalchemy.orm import Session
 from database import get_db
-from models import Item
-from schemas import ItemResponse, MediaResponse
+from models import Folder, Item
+from schemas import (
+    BulkFolderUpdateRequest,
+    BulkFolderUpdateResponse,
+    ItemFolderUpdateRequest,
+    ItemResponse,
+    MediaResponse,
+)
 from paths import STATIC_DIR
 
 router = APIRouter(
@@ -229,6 +235,8 @@ def serialize_items(items: list[Item]) -> list[ItemResponse]:
             platform=item.platform,
             notion_page_id=item.notion_page_id,
             obsidian_path=item.obsidian_path,
+            folder_id=item.folder_id,
+            folder_name=item.folder.name if item.folder else None,
             media=media_list,
         ))
     return results
@@ -265,6 +273,26 @@ def apply_platform_filter(query, platform: str):
         return query.filter(platform_expr.in_(["x", "twitter"]))
 
     return query.filter(platform_expr == normalized)
+
+
+def apply_folder_filter(query, folder_scope: str = "all", folder_id: Optional[str] = None):
+    if folder_id:
+        return query.filter(Item.folder_id == folder_id)
+
+    normalized_scope = (folder_scope or "all").strip().lower()
+    if normalized_scope == "unfiled":
+        return query.filter(Item.folder_id.is_(None))
+    return query
+
+
+def resolve_folder(db: Session, folder_id: Optional[str]) -> Optional[Folder]:
+    if not folder_id:
+        return None
+
+    folder = db.query(Folder).filter(Folder.id == folder_id).first()
+    if not folder:
+        raise HTTPException(status_code=404, detail="Folder not found")
+    return folder
 
 
 def normalize_search_text(value: str) -> str:
@@ -480,6 +508,8 @@ def get_items(
     limit: int = 100,
     q: Optional[str] = None,
     platform: str = "all",
+    folder_scope: str = "all",
+    folder_id: Optional[str] = None,
     db: Session = Depends(get_db),
 ):
     safe_limit = max(1, min(limit, 200))
@@ -488,16 +518,20 @@ def get_items(
     raw_query = (q or "").strip()
     if raw_query:
         candidate_rows = (
-            apply_platform_filter(
-                db.query(
-                    Item.id,
-                    Item.title,
-                    Item.canonical_text,
-                    Item.source_url,
-                    Item.platform,
-                    Item.created_at,
+            apply_folder_filter(
+                apply_platform_filter(
+                    db.query(
+                        Item.id,
+                        Item.title,
+                        Item.canonical_text,
+                        Item.source_url,
+                        Item.platform,
+                        Item.created_at,
+                    ),
+                    platform,
                 ),
-                platform,
+                folder_scope,
+                folder_id,
             )
             .all()
         )
@@ -513,7 +547,11 @@ def get_items(
         else:
             items = []
     else:
-        items_query = apply_platform_filter(db.query(Item), platform)
+        items_query = apply_folder_filter(
+            apply_platform_filter(db.query(Item), platform),
+            folder_scope,
+            folder_id,
+        )
         visible_count = items_query.count()
         items = (
             items_query
@@ -527,6 +565,50 @@ def get_items(
     response.headers["X-Visible-Count"] = str(visible_count)
     response.headers["X-Returned-Count"] = str(len(items))
     return serialize_items(items)
+
+
+@router.patch("/items/{item_id}/folder", response_model=ItemResponse)
+def update_item_folder(
+    item_id: str,
+    request: ItemFolderUpdateRequest,
+    db: Session = Depends(get_db),
+):
+    item = db.query(Item).filter(Item.id == item_id).first()
+    if not item:
+        raise HTTPException(status_code=404, detail="Item not found")
+
+    folder = resolve_folder(db, request.folder_id)
+    item.folder_id = folder.id if folder else None
+    if folder:
+        folder.updated_at = datetime.utcnow()
+
+    db.commit()
+    db.refresh(item)
+    return serialize_items([item])[0]
+
+
+@router.post("/items/bulk-folder", response_model=BulkFolderUpdateResponse)
+def bulk_update_item_folder(
+    request: BulkFolderUpdateRequest,
+    db: Session = Depends(get_db),
+):
+    item_ids = [item_id for item_id in request.item_ids if item_id]
+    if not item_ids:
+        raise HTTPException(status_code=400, detail="item_ids is required")
+
+    folder = resolve_folder(db, request.folder_id)
+    items = db.query(Item).filter(Item.id.in_(item_ids)).all()
+    if not items:
+        raise HTTPException(status_code=404, detail="Items not found")
+
+    for item in items:
+        item.folder_id = folder.id if folder else None
+
+    if folder:
+        folder.updated_at = datetime.utcnow()
+
+    db.commit()
+    return BulkFolderUpdateResponse(updated_count=len(items))
 
 @router.delete("/items/{item_id}", status_code=204)
 def delete_item(item_id: str, db: Session = Depends(get_db)):

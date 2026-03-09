@@ -25,8 +25,10 @@ class Item(Base):
     obsidian_path = Column(String, nullable=True)
     debug_json = Column(String, nullable=True)
     content_blocks_json = Column(String, nullable=True)  # JSON: [{type:text|image, content|url}]
+    folder_id = Column(String, ForeignKey("folders.id"), nullable=True, index=True)
 
     media = relationship("Media", back_populates="item", cascade="all, delete-orphan", lazy="joined")
+    folder = relationship("Folder", back_populates="items", lazy="joined")
 
 
 class Media(Base):
@@ -42,6 +44,18 @@ class Media(Base):
     inline_position = Column(Float, default=-1.0)  # 0.0-1.0 fractional position within article body; -1 = unknown
 
     item = relationship("Item", back_populates="media")
+
+
+class Folder(Base):
+    __tablename__ = "folders"
+
+    id = Column(String, primary_key=True, index=True, default=generate_uuid)
+    name = Column(String, nullable=False, unique=True, index=True)
+    created_at = Column(DateTime, default=datetime.datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.datetime.utcnow)
+
+    items = relationship("Item", back_populates="folder")
+
 
 class Settings(Base):
     __tablename__ = "settings"

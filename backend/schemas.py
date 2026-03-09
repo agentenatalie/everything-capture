@@ -40,6 +40,8 @@ class ItemResponse(BaseModel):
     platform: str
     notion_page_id: Optional[str] = None
     obsidian_path: Optional[str] = None
+    folder_id: Optional[str] = None
+    folder_name: Optional[str] = None
     media: list[MediaResponse] = []
     
     class Config:
@@ -91,3 +93,41 @@ class SettingsUpdateRequest(BaseModel):
     obsidian_api_key: Optional[str] = None
     obsidian_folder_path: Optional[str] = None
     auto_sync_target: Optional[str] = None
+
+
+class FolderResponse(BaseModel):
+    id: str
+    name: str
+    created_at: datetime
+    updated_at: datetime
+    item_count: int = 0
+
+    class Config:
+        from_attributes = True
+
+
+class FolderListResponse(BaseModel):
+    folders: list[FolderResponse] = Field(default_factory=list)
+    total_count: int = 0
+    unfiled_count: int = 0
+
+
+class FolderCreateRequest(BaseModel):
+    name: str
+
+
+class FolderUpdateRequest(BaseModel):
+    name: str
+
+
+class ItemFolderUpdateRequest(BaseModel):
+    folder_id: Optional[str] = None
+
+
+class BulkFolderUpdateRequest(BaseModel):
+    item_ids: list[str] = Field(default_factory=list)
+    folder_id: Optional[str] = None
+
+
+class BulkFolderUpdateResponse(BaseModel):
+    updated_count: int

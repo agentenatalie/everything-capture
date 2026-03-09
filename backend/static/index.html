@@ -40,6 +40,9 @@
             --glass-radius: 24px;
             --card-hover-shadow: 0 20px 40px -5px rgba(0, 0, 0, 0.1);
             --panel-radius: 1rem;
+            --sidebar-width: 240px;
+            --sidebar-collapsed-width: 64px;
+            --sidebar-transition: 0.3s cubic-bezier(0.4, 0, 0.2, 1);
         }
 
         * {
@@ -57,8 +60,8 @@
             scrollbar-width: thin;
             scrollbar-color: rgba(0, 0, 0, 0.1) transparent;
             background:
-                radial-gradient(1300px 700px at -10% -20%, rgba(255, 255, 255, 0.94), rgba(255, 255, 255, 0.4) 55%, transparent 70%),
-                radial-gradient(1100px 700px at 120% 110%, rgba(220, 231, 246, 0.6), rgba(225, 236, 249, 0.14) 55%, transparent 70%),
+                radial-gradient(1200px 640px at -10% -20%, rgba(255, 255, 255, 0.92), rgba(255, 255, 255, 0.52) 55%, transparent 72%),
+                radial-gradient(1000px 620px at 120% 110%, rgba(220, 231, 246, 0.42), rgba(225, 236, 249, 0.08) 55%, transparent 72%),
                 linear-gradient(165deg, var(--bg-base) 0%, var(--bg-overlay) 100%);
         }
 
@@ -81,7 +84,7 @@
         }
 
         .bg-shapes {
-            display: block;
+            display: none;
             position: fixed;
             inset: 0;
             pointer-events: none;
@@ -125,19 +128,17 @@
 
         .extract-btn {
             padding: 11px 19px;
-            border: 1px solid rgba(255, 255, 255, 0.4);
+            border: 1px solid rgba(214, 220, 228, 0.96);
             border-radius: 999px;
-            background: rgba(255, 255, 255, 0.5);
+            background: #ffffff;
             color: #334155;
             font-size: 0.84rem;
             font-weight: 650;
             cursor: pointer;
             transition: all 0.2s ease;
             white-space: nowrap;
-            backdrop-filter: blur(10px);
-            -webkit-backdrop-filter: blur(10px);
             position: relative;
-            box-shadow: 0 8px 18px -18px rgba(15, 23, 42, 0.45);
+            box-shadow: 0 6px 16px -16px rgba(15, 23, 42, 0.28);
         }
 
         .extract-btn:hover:not(:disabled) {
@@ -183,7 +184,7 @@
             padding: 14px 18px;
             border-radius: var(--glass-radius);
             border: 1px solid var(--glass-border);
-            background: var(--glass-bg);
+            background: rgba(255, 255, 255, 0.96);
             font-size: 0.88rem;
             font-weight: 600;
             z-index: 200;
@@ -191,9 +192,7 @@
             transition: transform 0.42s cubic-bezier(0.22, 1, 0.36, 1);
             max-width: 420px;
             color: #293043;
-            box-shadow: 0 20px 34px -24px rgba(15, 23, 42, 0.42), inset 0 1px 0 rgba(255, 255, 255, 0.7);
-            backdrop-filter: saturate(185%) blur(20px);
-            -webkit-backdrop-filter: saturate(185%) blur(20px);
+            box-shadow: 0 20px 34px -24px rgba(15, 23, 42, 0.28);
         }
 
         .toast.show {
@@ -222,8 +221,6 @@
             position: fixed;
             inset: 0;
             background: rgba(15, 23, 42, 0.2);
-            backdrop-filter: blur(8px);
-            -webkit-backdrop-filter: blur(8px);
             display: flex;
             align-items: center;
             justify-content: center;
@@ -241,12 +238,10 @@
 
         .command-panel {
             width: min(600px, 100%);
-            background: rgba(255, 255, 255, 0.8);
-            backdrop-filter: blur(24px) saturate(220%);
-            -webkit-backdrop-filter: blur(24px) saturate(220%);
+            background: rgba(255, 255, 255, 0.98);
             border: 1px solid rgba(255, 255, 255, 0.6);
             border-radius: 24px;
-            box-shadow: 0 30px 56px -34px rgba(15, 23, 42, 0.62);
+            box-shadow: 0 24px 48px -34px rgba(15, 23, 42, 0.32);
             overflow: hidden;
             opacity: 0;
             transform: translateY(8px) scale(0.985);
@@ -463,16 +458,364 @@
         }
 
         main {
-            width: min(1400px, 92%);
-            margin: 0 auto;
-            padding: 1.6rem 0 2.6rem;
-            min-height: auto;
+            width: auto;
+            margin: 0;
+            padding: 1.6rem 1.6rem 2.6rem calc(272px + 1.6rem);
+            min-height: 100vh;
+            transition: padding-left 0.28s cubic-bezier(0.22, 1, 0.36, 1);
+        }
+
+        body.sidebar-collapsed main {
+            padding-left: 1.6rem;
         }
 
         .toolbar-left {
             display: flex;
             align-items: center;
             gap: 10px;
+        }
+
+        .board-shell {
+            display: block;
+        }
+
+        .board-content {
+            min-width: 0;
+            width: min(1460px, 100%);
+            margin: 0 auto;
+            transition: width 0.28s cubic-bezier(0.22, 1, 0.36, 1);
+        }
+
+        .folder-sidebar {
+            position: fixed;
+            top: 0;
+            left: 0;
+            bottom: 0;
+            width: 272px;
+            z-index: 40;
+            transition: transform 0.28s cubic-bezier(0.22, 1, 0.36, 1), opacity 0.2s ease;
+        }
+
+        body.sidebar-collapsed .folder-sidebar {
+            transform: translateX(-100%);
+            opacity: 0;
+            pointer-events: none;
+        }
+
+        .folder-panel {
+            background: #ffffff;
+            border-right: 1px solid rgba(235, 236, 239, 0.95);
+            border-radius: 0;
+            min-height: 100vh;
+            height: 100%;
+            display: flex;
+            flex-direction: column;
+            box-shadow: none;
+            overflow: hidden;
+        }
+
+        .folder-panel-header {
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+            padding: 16px 20px;
+            border-bottom: 1px solid rgba(235, 236, 239, 0.95);
+        }
+
+        .folder-panel-title-row {
+            width: 100%;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 12px;
+        }
+
+        .folder-panel-actions {
+            display: inline-flex;
+            align-items: center;
+            gap: 10px;
+            flex-shrink: 0;
+        }
+
+        .folder-panel-title {
+            font-size: 0.92rem;
+            font-weight: 600;
+            color: #2a2c2e;
+        }
+
+        .folder-sidebar-toggle {
+            width: 34px;
+            height: 34px;
+            padding: 0;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            border: 1px solid rgba(229, 231, 235, 0.96);
+            border-radius: 10px;
+            background: #ffffff;
+            color: #71767a;
+            transition: background 0.2s ease, color 0.2s ease, border-color 0.2s ease, transform 0.2s ease;
+        }
+
+        .folder-sidebar-toggle svg {
+            width: 14px;
+            height: 14px;
+            stroke: currentColor;
+        }
+
+        .folder-create-btn {
+            padding: 7px 12px;
+            border: 1px solid rgba(235, 236, 239, 0.95);
+            background: #ffffff;
+        }
+
+        .folder-sidebar-toggle:hover {
+            background: #f8fafc;
+            color: #111827;
+            border-color: rgba(209, 213, 219, 0.96);
+            transform: translateY(-1px);
+        }
+
+        .folder-search {
+            width: 100%;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 10px 12px;
+            border-radius: 10px;
+            background: #f3f4f6;
+            border: 1px solid transparent;
+            color: #71767a;
+        }
+
+        .folder-search svg {
+            width: 16px;
+            height: 16px;
+            stroke: currentColor;
+            flex-shrink: 0;
+        }
+
+        .folder-search input {
+            width: 100%;
+            border: none;
+            background: transparent;
+            color: #2a2c2e;
+            font-size: 0.9rem;
+            outline: none;
+        }
+
+        .folder-search input::placeholder {
+            color: #a0a5aa;
+        }
+
+        .folder-list {
+            display: flex;
+            flex-direction: column;
+            gap: 2px;
+            flex: 1;
+            overflow-y: auto;
+            padding: 16px 12px;
+        }
+
+        .folder-loading {
+            padding: 10px 12px;
+            font-size: 0.84rem;
+            color: #71767a;
+        }
+
+        .folder-empty {
+            padding: 10px 12px 2px;
+            font-size: 0.8rem;
+            color: #a0a5aa;
+        }
+
+        .folder-section-label {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 0 12px;
+            margin-bottom: 10px;
+            color: #71767a;
+            font-size: 0.78rem;
+            font-weight: 600;
+        }
+
+        .folder-section-label svg {
+            width: 10px;
+            height: 10px;
+            fill: currentColor;
+            opacity: 0.7;
+        }
+
+        .folder-item {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            padding: 10px 12px;
+            border-radius: 10px;
+            border: 1px solid transparent;
+            background: transparent;
+            color: #2a2c2e;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            min-width: 0;
+            margin-bottom: 2px;
+            position: relative;
+        }
+
+        .folder-item:hover {
+            background: #f3f4f6;
+            color: #2a2c2e;
+            border-color: rgba(229, 231, 235, 0.96);
+        }
+
+        .folder-item.active {
+            background: #eef2f6;
+            color: #111827;
+            border-color: rgba(209, 213, 219, 0.98);
+            box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.6);
+        }
+
+        .folder-item.active::before {
+            content: "";
+            position: absolute;
+            left: -12px;
+            top: 8px;
+            bottom: 8px;
+            width: 3px;
+            border-radius: 999px;
+            background: #2a2c2e;
+        }
+
+        .folder-item-name {
+            flex: 1;
+            min-width: 0;
+            font-size: 0.9rem;
+            font-weight: 500;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+
+        .folder-item-count {
+            font-size: 0.76rem;
+            color: #8b94a6;
+            padding: 2px 0;
+            border-radius: 999px;
+            flex-shrink: 0;
+            font-variant-numeric: tabular-nums;
+        }
+
+        .folder-item-menu {
+            border: none;
+            background: transparent;
+            color: #8b94a6;
+            cursor: pointer;
+            font-size: 1rem;
+            line-height: 1;
+            padding: 2px 4px;
+            border-radius: 8px;
+            flex-shrink: 0;
+        }
+
+        .folder-item-menu:hover {
+            color: #1f232b;
+            background: rgba(148, 163, 184, 0.12);
+        }
+
+        .folder-mobile-strip {
+            display: none;
+            gap: 8px;
+            overflow-x: auto;
+            padding-bottom: 4px;
+            margin-bottom: 12px;
+        }
+
+        .folder-chip {
+            border: 1px solid rgba(255, 255, 255, 0.42);
+            background: rgba(255, 255, 255, 0.55);
+            color: #556071;
+            border-radius: 999px;
+            padding: 8px 12px;
+            font-size: 0.8rem;
+            font-weight: 600;
+            white-space: nowrap;
+            cursor: pointer;
+            box-shadow: 0 8px 18px -18px rgba(15, 23, 42, 0.45);
+        }
+
+        .folder-chip.active {
+            background: #ffffff;
+            color: #111827;
+        }
+
+        .sidebar-user {
+            padding: 16px 20px;
+            border-top: 1px solid rgba(235, 236, 239, 0.95);
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 12px;
+        }
+
+        .sidebar-user-profile {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+
+        .sidebar-avatar-container {
+            position: relative;
+        }
+
+        .sidebar-avatar {
+            width: 24px;
+            height: 24px;
+            border-radius: 999px;
+            overflow: hidden;
+            background: #ebecef;
+        }
+
+        .sidebar-avatar img {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            display: block;
+        }
+
+        .sidebar-status-dot {
+            position: absolute;
+            right: -2px;
+            bottom: -2px;
+            width: 8px;
+            height: 8px;
+            border-radius: 999px;
+            background: #23a559;
+            border: 2px solid #ffffff;
+        }
+
+        .sidebar-user-actions {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            color: #71767a;
+        }
+
+        .sidebar-user-actions button {
+            border: none;
+            background: transparent;
+            color: inherit;
+            cursor: pointer;
+            padding: 0;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .sidebar-user-actions svg {
+            width: 18px;
+            height: 18px;
+            stroke: currentColor;
         }
 
         .grid {
@@ -497,7 +840,7 @@
 
         @media (min-width: 1024px) {
             main {
-                width: min(1440px, 95%);
+                width: auto;
             }
 
             .board-toolbar,
@@ -519,19 +862,18 @@
             gap: 10px;
             width: min(700px, 100%);
             justify-content: flex-end;
+            flex-wrap: wrap;
         }
 
         .view-switch {
             display: inline-flex;
             align-items: center;
             padding: 4px;
-            border: 1px solid rgba(255, 255, 255, 0.2);
+            border: 1px solid rgba(226, 232, 240, 0.95);
             border-radius: 999px;
-            background: rgba(0, 0, 0, 0.05);
+            background: #ffffff;
             gap: 4px;
-            box-shadow: 0 14px 24px -22px rgba(15, 23, 42, 0.46), inset 0 1px 0 rgba(255, 255, 255, 0.45);
-            backdrop-filter: saturate(var(--glass-sat)) blur(var(--glass-blur-sm));
-            -webkit-backdrop-filter: saturate(var(--glass-sat)) blur(var(--glass-blur-sm));
+            box-shadow: 0 8px 18px -18px rgba(15, 23, 42, 0.18);
         }
 
         .view-btn {
@@ -559,8 +901,8 @@
         }
 
         .delete-btn {
-            background: rgba(255, 255, 255, 0.58);
-            border: 1px solid rgba(255, 255, 255, 0.7);
+            background: #ffffff;
+            border: 1px solid rgba(214, 220, 228, 0.96);
             color: #7d879a;
             font-size: 1.1rem;
             cursor: pointer;
@@ -571,8 +913,6 @@
             align-items: center;
             justify-content: center;
             border-radius: 10px;
-            backdrop-filter: blur(6px);
-            -webkit-backdrop-filter: blur(6px);
         }
 
         .delete-btn svg {
@@ -594,17 +934,15 @@
         .filter-input {
             width: min(460px, 100%);
             max-width: 100%;
-            border: 1px solid rgba(255, 255, 255, 0.4);
-            background: rgba(255, 255, 255, 0.5);
+            border: 1px solid rgba(214, 220, 228, 0.96);
+            background: #ffffff;
             color: var(--text-primary);
             border-radius: 999px;
             font-size: 0.83rem;
             padding: 11px 17px;
             outline: none;
             transition: border-color 0.2s, box-shadow 0.2s;
-            box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.66), 0 8px 18px -18px rgba(15, 23, 42, 0.52);
-            backdrop-filter: saturate(var(--glass-sat)) blur(var(--glass-blur-sm));
-            -webkit-backdrop-filter: saturate(var(--glass-sat)) blur(var(--glass-blur-sm));
+            box-shadow: 0 6px 16px -16px rgba(15, 23, 42, 0.2);
         }
 
         .filter-input:focus {
@@ -619,17 +957,15 @@
 
         .platform-select {
             width: 116px;
-            border: 1px solid rgba(255, 255, 255, 0.4);
-            background: rgba(255, 255, 255, 0.5);
+            border: 1px solid rgba(214, 220, 228, 0.96);
+            background: #ffffff;
             color: var(--text-primary);
             border-radius: 999px;
             font-size: 0.83rem;
             padding: 10px 30px 10px 12px;
             outline: none;
             transition: border-color 0.2s, box-shadow 0.2s;
-            box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.66), 0 8px 18px -18px rgba(15, 23, 42, 0.52);
-            backdrop-filter: saturate(var(--glass-sat)) blur(var(--glass-blur-sm));
-            -webkit-backdrop-filter: saturate(var(--glass-sat)) blur(var(--glass-blur-sm));
+            box-shadow: 0 6px 16px -16px rgba(15, 23, 42, 0.2);
             appearance: none;
             -webkit-appearance: none;
             background-image:
@@ -655,20 +991,23 @@
         }
 
         .card {
-            background: var(--glass-bg);
-            backdrop-filter: blur(20px) saturate(140%);
-            -webkit-backdrop-filter: blur(20px) saturate(140%);
-            border: 1px solid var(--glass-border);
+            background: #ffffff;
+            border: 1px solid rgba(226, 232, 240, 0.94);
             border-radius: var(--glass-radius);
             padding: 1.34rem;
-            transition: all 0.3s cubic-bezier(0.25, 0.8, 0.25, 1);
+            transition: border-color 0.2s ease, box-shadow 0.2s ease, background 0.2s ease;
             display: flex;
             flex-direction: column;
             gap: 0.86rem;
             position: relative;
             overflow: hidden;
             cursor: pointer;
-            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05), 0 2px 4px -1px rgba(0, 0, 0, 0.03);
+            box-shadow: 0 10px 24px -24px rgba(15, 23, 42, 0.18);
+        }
+
+        .card.is-selectable,
+        .list-row.is-selectable {
+            cursor: pointer;
         }
 
         /*
@@ -685,14 +1024,41 @@
 
         .card:hover {
             background: #ffffff;
-            transform: translateY(-2px) scale(1.02);
-            box-shadow: var(--card-hover-shadow);
-            border-color: rgba(255, 255, 255, 0.9);
+            box-shadow: 0 16px 30px -24px rgba(15, 23, 42, 0.2);
+            border-color: rgba(203, 213, 225, 0.95);
         }
 
         .card-header {
             display: flex;
             align-items: flex-start;
+            justify-content: space-between;
+            gap: 12px;
+        }
+
+        .select-indicator {
+            width: 22px;
+            height: 22px;
+            border-radius: 999px;
+            border: 1px solid rgba(148, 163, 184, 0.45);
+            background: rgba(255, 255, 255, 0.84);
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            color: transparent;
+            flex-shrink: 0;
+            box-shadow: 0 10px 16px -18px rgba(15, 23, 42, 0.4);
+        }
+
+        .select-indicator.is-selected {
+            background: var(--accent);
+            border-color: var(--accent);
+            color: #ffffff;
+        }
+
+        .select-indicator svg {
+            width: 12px;
+            height: 12px;
+            stroke: currentColor;
         }
 
         .title {
@@ -735,6 +1101,18 @@
             font-size: 0.8rem;
             color: #788295;
             flex-wrap: wrap;
+        }
+
+        .folder-tag {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            padding: 6px 10px;
+            border-radius: 999px;
+            background: rgba(0, 113, 227, 0.08);
+            color: #195fb2;
+            font-size: 0.76rem;
+            font-weight: 600;
         }
 
         .meta-item {
@@ -807,14 +1185,12 @@
             display: flex;
             flex-direction: column;
             gap: 4px;
-            background: var(--glass-bg);
-            border: 1px solid var(--glass-border);
+            background: #ffffff;
+            border: 1px solid rgba(226, 232, 240, 0.94);
             border-radius: 28px;
             overflow: visible;
-            box-shadow: 0 16px 28px -28px rgba(15, 23, 42, 0.28);
+            box-shadow: 0 14px 28px -28px rgba(15, 23, 42, 0.16);
             padding: 8px;
-            backdrop-filter: blur(20px) saturate(160%);
-            -webkit-backdrop-filter: blur(20px) saturate(160%);
         }
 
         .list-row {
@@ -829,15 +1205,14 @@
             box-shadow: none;
             cursor: pointer;
             transform-origin: center center;
-            transition: all 0.3s cubic-bezier(0.25, 0.8, 0.25, 1);
+            transition: border-color 0.2s ease, box-shadow 0.2s ease, background 0.2s ease;
             position: relative;
         }
 
         .list-row:hover {
             background: #ffffff;
             border-color: rgba(226, 232, 240, 0.95);
-            transform: translateY(-2px) scale(1.01);
-            box-shadow: 0 18px 34px -26px rgba(15, 23, 42, 0.24);
+            box-shadow: 0 14px 24px -24px rgba(15, 23, 42, 0.16);
         }
 
         .list-row.is-active,
@@ -870,11 +1245,6 @@
             height: 100%;
             object-fit: cover;
             display: block;
-            transition: transform 0.7s ease-out;
-        }
-
-        .list-row:hover .list-thumb img {
-            transform: scale(1.05);
         }
 
         .list-content {
@@ -882,6 +1252,10 @@
             display: flex;
             flex-direction: column;
             gap: 6px;
+        }
+
+        .list-main .select-indicator {
+            margin-right: 2px;
         }
 
         .list-title-row {
@@ -943,12 +1317,10 @@
             text-align: center;
             padding: 3rem;
             grid-column: 1 / -1;
-            background: var(--glass-bg);
-            border: 1px solid var(--glass-border);
+            background: #ffffff;
+            border: 1px solid rgba(226, 232, 240, 0.94);
             border-radius: var(--glass-radius);
-            box-shadow: 0 12px 22px -20px rgba(15, 23, 42, 0.32);
-            backdrop-filter: blur(20px);
-            -webkit-backdrop-filter: blur(20px);
+            box-shadow: 0 10px 22px -20px rgba(15, 23, 42, 0.14);
         }
 
         .skeleton {
@@ -975,8 +1347,6 @@
             width: 100%;
             height: 100%;
             background: rgba(15, 23, 42, 0.28);
-            backdrop-filter: blur(8px);
-            -webkit-backdrop-filter: blur(8px);
             z-index: 100;
             display: flex;
             justify-content: center;
@@ -1194,11 +1564,6 @@
             width: 100%;
             height: 100%;
             object-fit: cover;
-            transition: transform 0.7s ease-out;
-        }
-
-        .card:hover .card-media img {
-            transform: scale(1.05);
         }
 
         .card-media .media-badge {
@@ -1212,8 +1577,6 @@
             background: rgba(28, 33, 42, 0.58);
             border: 1px solid rgba(255, 255, 255, 0.22);
             color: #fff;
-            backdrop-filter: blur(8px);
-            -webkit-backdrop-filter: blur(8px);
         }
 
         .modal-media {
@@ -1272,6 +1635,102 @@
 
         .settings-modal .modal-body {
             flex: 0 1 auto;
+        }
+
+        .folder-picker-modal {
+            max-width: 520px !important;
+            height: auto;
+            max-height: min(82vh, 760px);
+        }
+
+        .folder-picker-body {
+            display: flex;
+            flex-direction: column;
+            gap: 14px;
+            white-space: normal;
+        }
+
+        .folder-picker-list {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+
+        .folder-picker-option {
+            width: 100%;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 14px;
+            padding: 12px 14px;
+            border-radius: 16px;
+            border: 1px solid rgba(226, 232, 240, 0.9);
+            background: rgba(248, 250, 252, 0.9);
+            color: #334155;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            text-align: left;
+        }
+
+        .folder-picker-option:hover {
+            background: #ffffff;
+            transform: translateY(-1px);
+        }
+
+        .folder-picker-option.active {
+            border-color: rgba(0, 113, 227, 0.28);
+            background: rgba(0, 113, 227, 0.08);
+            color: #0f3c77;
+        }
+
+        .folder-picker-option-meta {
+            font-size: 0.75rem;
+            color: #8b94a6;
+            flex-shrink: 0;
+        }
+
+        .folder-picker-create {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .folder-context-menu {
+            position: fixed;
+            min-width: 148px;
+            padding: 6px;
+            border-radius: 16px;
+            background: rgba(255, 255, 255, 0.92);
+            border: 1px solid rgba(255, 255, 255, 0.75);
+            box-shadow: 0 18px 30px -28px rgba(15, 23, 42, 0.24);
+            z-index: 160;
+            display: none;
+        }
+
+        .folder-context-menu.show {
+            display: block;
+        }
+
+        .folder-context-menu button {
+            width: 100%;
+            border: none;
+            background: transparent;
+            color: #334155;
+            font-size: 0.83rem;
+            font-weight: 600;
+            text-align: left;
+            padding: 10px 12px;
+            border-radius: 12px;
+            cursor: pointer;
+        }
+
+        .folder-context-menu button:hover {
+            background: rgba(248, 250, 252, 0.96);
+        }
+
+        .folder-context-menu button.is-danger:hover {
+            background: rgba(255, 240, 240, 0.96);
+            color: #b42318;
         }
 
         .settings-body {
@@ -1456,19 +1915,816 @@
             word-wrap: break-word;
         }
 
+        /* Design sync overrides: align the production UI with the provided reference
+           without changing the existing data flow or interaction model. */
+        :root {
+            --bg-base: #f9fafb;
+            --bg-overlay: #f9fafb;
+            --surface-bg: #ffffff;
+            --surface-strong: #ffffff;
+            --card-bg: #ffffff;
+            --card-border: #ebecef;
+            --text-primary: #2a2c2e;
+            --text-secondary: #71767a;
+            --accent: #2a2c2e;
+            --accent-hover: #111827;
+            --glass-radius: 12px;
+            --panel-radius: 12px;
+            --focus-ring: 0 0 0 3px rgba(42, 44, 46, 0.08);
+        }
+
+        body {
+            background: #f9fafb;
+            overflow-x: hidden;
+            overflow-y: auto;
+        }
+
+        .bg-shapes {
+            display: none !important;
+        }
+
+        main {
+            padding: 0;
+            min-height: 100vh;
+        }
+
+        body.sidebar-collapsed main {
+            padding-left: 0;
+        }
+
+        .board-shell {
+            display: flex;
+            align-items: flex-start;
+            min-height: 100vh;
+            background: #f9fafb;
+            width: 100%;
+        }
+
+        .folder-sidebar {
+            position: sticky;
+            top: 0;
+            width: var(--sidebar-width);
+            flex: 0 0 var(--sidebar-width);
+            align-self: flex-start;
+            height: 100vh;
+            z-index: 30;
+            overflow: visible;
+            transition: width var(--sidebar-transition), flex-basis var(--sidebar-transition);
+        }
+
+        body.sidebar-collapsed .folder-sidebar {
+            width: var(--sidebar-collapsed-width);
+            flex-basis: var(--sidebar-collapsed-width);
+            transform: none;
+            opacity: 1;
+            pointer-events: auto;
+        }
+
+        .folder-panel {
+            background: #ffffff;
+            border-right: 1px solid #ebecef;
+            box-shadow: none;
+            min-height: 100vh;
+            height: 100vh;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+            position: relative;
+        }
+
+        .folder-panel-header {
+            padding: 20px 20px 16px;
+            gap: 16px;
+            border-bottom: none;
+            overflow: hidden;
+        }
+
+        .folder-panel-title {
+            font-size: 12px;
+            font-weight: 600;
+            letter-spacing: 0.05em;
+            text-transform: uppercase;
+            color: #a0a5aa;
+        }
+
+        .folder-panel-actions {
+            gap: 8px;
+        }
+
+        .folder-panel-title-row {
+            min-height: 24px;
+        }
+
+        .folder-create-btn {
+            padding: 0;
+            border: none;
+            background: none;
+            color: #71767a;
+            font-size: 14px;
+            font-weight: 500;
+            box-shadow: none;
+        }
+
+        .folder-create-btn:hover {
+            color: #2a2c2e;
+            background: none;
+        }
+
+        .folder-sidebar-toggle {
+            position: absolute;
+            right: -12px;
+            top: 24px;
+            padding: 0;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            width: 24px;
+            height: 24px;
+            border-radius: 999px;
+            border: 1px solid #ebecef;
+            color: #71767a;
+            background: #ffffff;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
+            z-index: 5;
+        }
+
+        .folder-sidebar-toggle:hover {
+            background: #ffffff;
+            color: #2a2c2e;
+            border-color: #d1d5db;
+            transform: none;
+        }
+
+        .folder-sidebar-toggle-icon {
+            display: block;
+            font-size: 15px;
+            font-weight: 700;
+            line-height: 1;
+            transition: transform var(--sidebar-transition);
+        }
+
+        body.sidebar-collapsed .folder-sidebar-toggle-icon {
+            transform: rotate(180deg);
+        }
+
+        .folder-search {
+            background: #f3f4f6;
+            border: none;
+            border-radius: 6px;
+            padding: 8px 12px;
+            color: #71767a;
+        }
+
+        .folder-search input {
+            font-size: 14px;
+        }
+
+        body.sidebar-collapsed .folder-panel-header {
+            padding: 20px 12px 16px;
+        }
+
+        body.sidebar-collapsed .folder-panel-title,
+        body.sidebar-collapsed .folder-create-btn {
+            display: none;
+        }
+
+        body.sidebar-collapsed .folder-search {
+            padding: 8px;
+            justify-content: center;
+        }
+
+        body.sidebar-collapsed .folder-search input {
+            display: none;
+        }
+
+        .folder-list {
+            padding: 0 12px 16px;
+            gap: 0;
+        }
+
+        body.sidebar-collapsed .folder-list {
+            padding: 0 8px 16px;
+        }
+
+        body.sidebar-collapsed .folder-loading,
+        body.sidebar-collapsed .folder-empty {
+            padding: 12px 0;
+            font-size: 0;
+            color: transparent;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        body.sidebar-collapsed .folder-loading::before,
+        body.sidebar-collapsed .folder-empty::before {
+            content: "";
+            width: 6px;
+            height: 6px;
+            border-radius: 999px;
+            background: #cbd5e1;
+        }
+
+        .folder-section-label {
+            transition: opacity 0.18s ease;
+        }
+
+        body.sidebar-collapsed .folder-section-label {
+            opacity: 0;
+            height: 0;
+            margin: 0;
+            padding: 0;
+            overflow: hidden;
+        }
+
+        .folder-item {
+            gap: 10px;
+            padding: 8px 12px;
+            margin-bottom: 2px;
+            border-radius: 6px;
+            border: none;
+            color: #2a2c2e;
+        }
+
+        .folder-item:hover,
+        .folder-item.active {
+            background: #f3f4f6;
+            border: none;
+            box-shadow: none;
+        }
+
+        .folder-item.active::before {
+            display: none;
+        }
+
+        .folder-item-glyph {
+            width: 20px;
+            height: 20px;
+            border-radius: 999px;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            flex-shrink: 0;
+            background: #f3f4f6;
+            color: #71767a;
+            font-size: 11px;
+            font-weight: 700;
+            text-transform: uppercase;
+        }
+
+        .folder-item.active .folder-item-glyph {
+            background: #ffffff;
+            color: #2a2c2e;
+        }
+
+        .folder-item-name {
+            font-size: 14px;
+            font-weight: 500;
+        }
+
+        .folder-item-count {
+            color: #8b94a6;
+            font-size: 12px;
+        }
+
+        .folder-item-menu {
+            color: #a0a5aa;
+        }
+
+        body.sidebar-collapsed .folder-item {
+            justify-content: center;
+            padding: 8px;
+        }
+
+        body.sidebar-collapsed .folder-item-name,
+        body.sidebar-collapsed .folder-item-count,
+        body.sidebar-collapsed .folder-item-menu {
+            display: none;
+        }
+
+        .sidebar-user {
+            padding: 16px;
+            border-top: 1px solid #ebecef;
+        }
+
+        body.sidebar-collapsed .sidebar-user {
+            justify-content: center;
+            padding: 12px 8px;
+        }
+
+        body.sidebar-collapsed .sidebar-user-actions {
+            display: none;
+        }
+
+        .board-content {
+            width: 100%;
+            min-width: 0;
+            display: flex;
+            flex-direction: column;
+            background: #f9fafb;
+        }
+
+        .board-toolbar {
+            height: 68px;
+            margin: 0;
+            padding: 0 24px;
+            background: #ffffff;
+            border-bottom: 1px solid #ebecef;
+            gap: 16px;
+            width: 100%;
+            max-width: none;
+        }
+
+        .toolbar-left {
+            gap: 16px;
+            min-width: 0;
+        }
+
+        .toolbar-filters {
+            flex: 1;
+            width: auto;
+            min-width: 0;
+            max-width: none;
+            justify-content: flex-end;
+            gap: 10px;
+        }
+
+        .view-switch {
+            padding: 4px 8px;
+            border: none;
+            border-radius: 999px;
+            background: #f3f4f6;
+            box-shadow: none;
+            gap: 6px;
+        }
+
+        .view-btn {
+            padding: 4px 14px;
+            border-radius: 999px;
+            color: #71767a;
+            font-size: 13px;
+            font-weight: 500;
+            box-shadow: none;
+        }
+
+        .view-btn:hover {
+            background: transparent;
+            color: #2a2c2e;
+        }
+
+        .view-btn.active {
+            background: #ffffff;
+            color: #2a2c2e;
+            box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
+        }
+
+        .stats {
+            gap: 8px;
+            font-size: 14px;
+            color: #71767a;
+            white-space: nowrap;
+        }
+
+        .stats::before,
+        .stats.is-plain::before {
+            display: none;
+        }
+
+        .stats strong {
+            color: #2a2c2e;
+        }
+
+        #selectionModeBtn,
+        #settingsBtn,
+        #bulkMoveBtn {
+            min-height: 36px;
+            padding: 8px 14px;
+            border: 1px solid #ebecef;
+            border-radius: 999px;
+            background: #ffffff;
+            color: #2a2c2e;
+        }
+
+        #settingsBtn {
+            width: 36px !important;
+            height: 36px !important;
+            padding: 0 !important;
+        }
+
+        .filter-input {
+            width: min(480px, 100%);
+            border: none;
+            border-radius: 8px;
+            background: #f3f4f6;
+            box-shadow: none;
+            color: #2a2c2e;
+            font-size: 14px;
+            padding: 8px 14px;
+        }
+
+        .filter-input:focus {
+            background-color: #f3f4f6;
+            box-shadow: var(--focus-ring);
+        }
+
+        #filterInput {
+            padding-left: 38px;
+            background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%2371767A' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Ccircle cx='11' cy='11' r='7'/%3E%3Cpath d='m20 20-3.5-3.5'/%3E%3C/svg%3E");
+            background-repeat: no-repeat;
+            background-position: 12px center;
+            background-size: 16px 16px;
+        }
+
+        .platform-select {
+            width: 116px;
+            border: 1px solid #ebecef;
+            border-radius: 999px;
+            background-color: #ffffff;
+            box-shadow: none;
+            color: #2a2c2e;
+            font-size: 14px;
+            padding: 7px 32px 7px 14px;
+        }
+
+        .platform-select:focus {
+            box-shadow: var(--focus-ring);
+            border-color: #d1d5db;
+        }
+
+        .folder-mobile-strip {
+            padding: 12px 24px 0;
+            margin-bottom: 0;
+        }
+
+        .folder-chip {
+            border: 1px solid #ebecef;
+            background: #ffffff;
+            color: #71767a;
+            box-shadow: none;
+        }
+
+        .folder-chip.active {
+            color: #2a2c2e;
+            border-color: #d1d5db;
+            background: #f3f4f6;
+        }
+
+        #grid.grid {
+            width: 100%;
+            max-width: none;
+            margin: 0;
+            padding: 32px;
+            gap: 24px;
+            align-content: start;
+            overflow: visible;
+            grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+        }
+
+        .list-view {
+            width: 100%;
+            max-width: none;
+            margin: 0;
+            padding: 32px;
+            display: flex;
+            flex-direction: column;
+            gap: 0;
+            overflow: hidden;
+            background: #ffffff;
+            border: 1px solid #ebecef;
+            border-radius: 18px;
+            box-shadow: 0 14px 32px -30px rgba(15, 23, 42, 0.12);
+        }
+
+        .list-row {
+            border: none;
+            border-bottom: 1px solid #ebecef;
+            border-radius: 0;
+            background: #ffffff;
+            box-shadow: none;
+            transition: background 0.18s ease, transform 0.18s ease;
+        }
+
+        .list-row:last-child {
+            border-bottom: none;
+        }
+
+        .list-row:hover {
+            background: #f8fafc;
+            box-shadow: none;
+            transform: translateX(2px);
+        }
+
+        .list-row.is-active,
+        .card.is-active {
+            background: #ffffff;
+            box-shadow: 0 0 0 1px rgba(209, 213, 219, 0.55), 0 12px 30px -22px rgba(15, 23, 42, 0.22);
+        }
+
+        .card {
+            padding: 0;
+            gap: 0;
+            border: 1px solid #ebecef;
+            border-radius: 12px;
+            background: #ffffff;
+            box-shadow: none;
+            overflow: hidden;
+            height: 100%;
+            transition: transform 0.24s cubic-bezier(0.22, 1, 0.36, 1), box-shadow 0.24s ease, border-color 0.24s ease;
+        }
+
+        .card:hover {
+            background: #ffffff;
+            border-color: #d1d5db;
+            box-shadow: 0 18px 32px -24px rgba(15, 23, 42, 0.24);
+            transform: translateY(-4px);
+        }
+
+        .card-preview {
+            height: 160px;
+            position: relative;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            overflow: hidden;
+            background: #f3f4f6;
+            color: #d1d5db;
+        }
+
+        .card-preview img {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            display: block;
+            transition: transform 0.34s cubic-bezier(0.22, 1, 0.36, 1), filter 0.24s ease;
+        }
+
+        .card:hover .card-preview img {
+            transform: scale(1.035);
+            filter: saturate(1.04);
+        }
+
+        .card-preview-placeholder {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            width: 48px;
+            height: 48px;
+        }
+
+        .card-preview-placeholder svg {
+            width: 40px;
+            height: 40px;
+            stroke: currentColor;
+        }
+
+        .select-indicator.card-selection {
+            position: absolute;
+            left: 12px;
+            top: 12px;
+            z-index: 2;
+        }
+
+        .select-indicator.card-selection {
+            background: rgba(255, 255, 255, 0.92);
+            border-color: rgba(148, 163, 184, 0.28);
+            box-shadow: 0 2px 6px rgba(0, 0, 0, 0.08);
+        }
+
+        .card-icon {
+            position: absolute;
+            top: 12px;
+            right: 12px;
+            min-width: 22px;
+            height: 22px;
+            padding: 4px;
+            border-radius: 4px;
+            background: #ffffff;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            color: #2a2c2e;
+            z-index: 2;
+        }
+
+        .platform-glyph {
+            font-size: 10px;
+            font-weight: 700;
+            line-height: 1;
+        }
+
+        .card-media-badge {
+            position: absolute;
+            bottom: 10px;
+            right: 10px;
+            z-index: 2;
+            padding: 3px 8px;
+            border-radius: 999px;
+            background: rgba(42, 44, 46, 0.78);
+            color: #ffffff;
+            font-size: 11px;
+            font-weight: 600;
+        }
+
+        .card-content {
+            padding: 16px;
+            min-height: 132px;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .card-meta-row {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 10px;
+            margin-bottom: 8px;
+        }
+
+        .card-meta {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            min-width: 0;
+            font-size: 12px;
+            color: #71767a;
+        }
+
+        .card-meta span {
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+
+        .knowledge-dots {
+            gap: 5px;
+        }
+
+        .knowledge-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background: #d1d5db;
+            box-shadow: none;
+        }
+
+        .knowledge-dot.notion.is-ready {
+            background: #2a2c2e;
+        }
+
+        .knowledge-dot.obsidian.is-ready {
+            background: #a78bfa;
+        }
+
+        .card-title {
+            margin-bottom: 12px;
+            font-size: 14px;
+            font-weight: 600;
+            line-height: 1.4;
+            color: #2a2c2e;
+            display: -webkit-box;
+            -webkit-line-clamp: 2;
+            -webkit-box-orient: vertical;
+            overflow: hidden;
+        }
+
+        .card-bottom-row {
+            display: flex;
+            align-items: flex-end;
+            justify-content: space-between;
+            gap: 12px;
+            margin-top: auto;
+            padding-top: 12px;
+        }
+
+        .tags {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 6px;
+            min-width: 0;
+        }
+
+        .tag,
+        .folder-tag {
+            display: inline-flex;
+            align-items: center;
+            gap: 0;
+            padding: 2px 8px;
+            border-radius: 4px;
+            background: #f3f4f6;
+            color: #71767a;
+            font-size: 11px;
+            font-weight: 500;
+            border: none;
+        }
+
+        .folder-tag svg {
+            display: none;
+        }
+
+        .card-footer-actions {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            opacity: 0;
+            transition: opacity 0.15s;
+            margin-left: auto;
+            flex-shrink: 0;
+        }
+
+        .card:hover .card-footer-actions {
+            opacity: 1;
+        }
+
+        .folder-action-btn,
+        .card-footer-actions .delete-btn,
+        .card-footer-actions .source-link {
+            padding: 0;
+            border: none;
+            border-radius: 0;
+            background: none;
+            box-shadow: none;
+            font-size: 12px;
+            color: #71767a;
+            min-height: auto;
+            width: auto;
+            height: auto;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+        }
+
+        .folder-action-btn:hover {
+            transform: none;
+            background: none;
+            border: none;
+            box-shadow: none;
+            color: #0071e3;
+        }
+
+        .card-footer-actions .delete-btn:hover {
+            transform: none;
+            background: none;
+            border: none;
+            box-shadow: none;
+            color: #ef4444;
+        }
+
+        .card-footer-actions .source-link:hover {
+            color: #2a2c2e;
+            text-decoration: none;
+        }
+
+        .modal-overlay {
+            background: rgba(0, 0, 0, 0.3);
+        }
+
+        .modal {
+            border-radius: 16px;
+            border: none;
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.12);
+        }
+
+        .reader-toolbar,
+        .modal-header,
+        .modal-body,
+        .modal-footer {
+            background: #ffffff;
+        }
+
+        .modal-footer {
+            border-top: 1px solid #ebecef;
+        }
+
         @media (max-width: 860px) {
             main {
-                padding: 1.4rem 4%;
+                padding: 0;
                 min-height: auto;
+            }
+
+            .board-shell {
+                grid-template-columns: minmax(0, 1fr);
+            }
+
+            .folder-sidebar {
+                display: none;
+            }
+
+            .folder-mobile-strip {
+                display: flex;
             }
 
             .toolbar-left {
                 justify-content: space-between;
+                flex-wrap: wrap;
             }
 
             .board-toolbar {
                 flex-direction: column;
                 align-items: stretch;
+                height: auto;
+                padding: 16px;
             }
 
             .toolbar-filters {
@@ -1480,9 +2736,19 @@
                 width: 100%;
             }
 
+            #grid.grid,
+            .list-view {
+                padding: 16px;
+            }
+
             .platform-select {
                 width: 112px;
                 flex-shrink: 0;
+            }
+
+            .folder-picker-create {
+                flex-direction: column;
+                align-items: stretch;
             }
 
             .command-overlay {
@@ -1597,53 +2863,110 @@
     </div>
 
     <main>
-        <div class="board-toolbar">
-            <div class="toolbar-left">
-                <div class="view-switch">
-                    <button class="view-btn active" id="galleryViewBtn" type="button">画廊</button>
-                    <button class="view-btn" id="listViewBtn" type="button">列表</button>
-                </div>
-                <div class="stats is-plain" id="stats">加载中...</div>
-                <button id="settingsBtn" class="view-btn"
-                    style="display: flex; align-items: center; justify-content: center; width: 34px; height: 34px; padding: 0;"
-                    title="集成设置">
-                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
-                        stroke-linecap="round" stroke-linejoin="round">
-                        <path
-                            d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z">
-                        </path>
-                        <circle cx="12" cy="12" r="3"></circle>
-                    </svg>
+        <div class="board-shell" id="boardShell">
+            <aside class="folder-sidebar">
+                <button id="toggleSidebarBtn" class="view-btn folder-sidebar-toggle" type="button" title="收起侧边栏" aria-label="收起侧边栏">
+                    <span class="folder-sidebar-toggle-icon" aria-hidden="true">‹</span>
                 </button>
-            </div>
-            <div class="toolbar-filters">
-                <input id="filterInput" class="filter-input" type="text" placeholder="搜索标题、正文、链接" />
-                <select id="platformFilter" class="platform-select" aria-label="筛选平台">
-                    <option value="all">全部</option>
-                    <option value="wechat">公众号</option>
-                    <option value="douyin">抖音</option>
-                    <option value="xiaohongshu">小红书</option>
-                    <option value="web">网页</option>
-                </select>
-            </div>
-        </div>
-        <div class="grid" id="grid">
-            <!-- Skeletons -->
-            <div class="card">
-                <div class="skeleton" style="height:24px;width:80%;margin-bottom:1rem;"></div>
-                <div class="skeleton" style="height:60px;width:100%;margin-bottom:1rem;"></div>
-                <div class="skeleton" style="height:20px;width:40%;"></div>
-            </div>
-            <div class="card">
-                <div class="skeleton" style="height:24px;width:90%;margin-bottom:1rem;"></div>
-                <div class="skeleton" style="height:60px;width:100%;margin-bottom:1rem;"></div>
-                <div class="skeleton" style="height:20px;width:50%;"></div>
-            </div>
-            <div class="card">
-                <div class="skeleton" style="height:24px;width:70%;margin-bottom:1rem;"></div>
-                <div class="skeleton" style="height:60px;width:100%;margin-bottom:1rem;"></div>
-                <div class="skeleton" style="height:20px;width:30%;"></div>
-            </div>
+                <div class="folder-panel">
+                    <div class="folder-panel-header">
+                        <div class="folder-panel-title-row">
+                            <div class="folder-panel-title">文件夹</div>
+                            <div class="folder-panel-actions">
+                                <button id="createFolderBtn" class="view-btn folder-create-btn" type="button">+ 新建</button>
+                            </div>
+                        </div>
+                        <label class="folder-search">
+                            <svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                                <circle cx="11" cy="11" r="7"></circle>
+                                <path d="m20 20-3.5-3.5"></path>
+                            </svg>
+                            <input id="folderSearchInput" type="text" placeholder="搜索文件夹..." />
+                        </label>
+                    </div>
+                    <div class="folder-list" id="folderList">
+                        <div class="folder-loading">加载中...</div>
+                    </div>
+                    <div class="sidebar-user" id="sidebarUserArea">
+                        <div class="sidebar-user-profile">
+                            <div class="sidebar-avatar-container">
+                                <div class="sidebar-avatar">
+                                    <img src="data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' fill='%23EBECEF'/><circle cx='50' cy='40' r='20' fill='%23A0A5AA'/><path d='M20 100 C20 70, 80 70, 80 100' fill='%23A0A5AA'/></svg>" alt="用户占位头像">
+                                </div>
+                                <div class="sidebar-status-dot"></div>
+                            </div>
+                        </div>
+                        <div class="sidebar-user-actions">
+                            <button type="button" title="帮助">
+                                <svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                                    <circle cx="12" cy="12" r="10"></circle>
+                                    <path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"></path>
+                                    <line x1="12" y1="17" x2="12.01" y2="17"></line>
+                                </svg>
+                            </button>
+                            <button type="button" title="通知">
+                                <svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                                    <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"></path>
+                                    <path d="M13.73 21a2 2 0 0 1-3.46 0"></path>
+                                </svg>
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </aside>
+            <section class="board-content">
+                <div class="board-toolbar">
+                    <div class="toolbar-left">
+                        <div class="view-switch">
+                            <button class="view-btn active" id="galleryViewBtn" type="button">画廊</button>
+                            <button class="view-btn" id="listViewBtn" type="button">列表</button>
+                        </div>
+                        <div class="stats is-plain" id="stats">加载中...</div>
+                        <button id="selectionModeBtn" class="view-btn" type="button">选择</button>
+                        <button id="settingsBtn" class="view-btn"
+                            style="display: flex; align-items: center; justify-content: center; width: 34px; height: 34px; padding: 0;"
+                            title="集成设置">
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                                stroke-linecap="round" stroke-linejoin="round">
+                                <path
+                                    d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z">
+                                </path>
+                                <circle cx="12" cy="12" r="3"></circle>
+                            </svg>
+                        </button>
+                    </div>
+                    <div class="toolbar-filters">
+                        <input id="filterInput" class="filter-input" type="text" placeholder="搜索标题、正文、链接" />
+                        <select id="platformFilter" class="platform-select" aria-label="筛选平台">
+                            <option value="all">全部</option>
+                            <option value="wechat">公众号</option>
+                            <option value="douyin">抖音</option>
+                            <option value="xiaohongshu">小红书</option>
+                            <option value="web">网页</option>
+                        </select>
+                        <button id="bulkMoveBtn" class="extract-btn" type="button" hidden>加入文件夹</button>
+                    </div>
+                </div>
+                <div class="folder-mobile-strip" id="folderMobileStrip"></div>
+                <div class="grid" id="grid">
+                    <!-- Skeletons -->
+                    <div class="card">
+                        <div class="skeleton" style="height:24px;width:80%;margin-bottom:1rem;"></div>
+                        <div class="skeleton" style="height:60px;width:100%;margin-bottom:1rem;"></div>
+                        <div class="skeleton" style="height:20px;width:40%;"></div>
+                    </div>
+                    <div class="card">
+                        <div class="skeleton" style="height:24px;width:90%;margin-bottom:1rem;"></div>
+                        <div class="skeleton" style="height:60px;width:100%;margin-bottom:1rem;"></div>
+                        <div class="skeleton" style="height:20px;width:50%;"></div>
+                    </div>
+                    <div class="card">
+                        <div class="skeleton" style="height:24px;width:70%;margin-bottom:1rem;"></div>
+                        <div class="skeleton" style="height:60px;width:100%;margin-bottom:1rem;"></div>
+                        <div class="skeleton" style="height:20px;width:30%;"></div>
+                    </div>
+                </div>
+            </section>
         </div>
     </main>
 
@@ -1783,6 +3106,26 @@
         </div>
     </div>
 
+    <div class="modal-overlay" id="folderPickerOverlay">
+        <div class="modal folder-picker-modal">
+            <div class="modal-header">
+                <h2 class="modal-title" id="folderPickerTitle">加入文件夹</h2>
+                <div class="modal-header-actions">
+                    <button class="close-btn" id="closeFolderPicker" type="button">×</button>
+                </div>
+            </div>
+            <div class="modal-body folder-picker-body">
+                <div class="folder-picker-list" id="folderPickerList"></div>
+                <div class="folder-picker-create">
+                    <input type="text" id="folderCreateInput" class="filter-input" style="width: 100%;" placeholder="新文件夹名称" />
+                    <button id="folderCreateConfirmBtn" class="extract-btn" type="button">新建并加入</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="folder-context-menu" id="folderContextMenu"></div>
+
     <script>
         const grid = document.getElementById('grid');
         const stats = document.getElementById('stats');
@@ -1808,6 +3151,21 @@
         const platformFilter = document.getElementById('platformFilter');
         const galleryViewBtn = document.getElementById('galleryViewBtn');
         const listViewBtn = document.getElementById('listViewBtn');
+        const folderList = document.getElementById('folderList');
+        const folderMobileStrip = document.getElementById('folderMobileStrip');
+        const createFolderBtn = document.getElementById('createFolderBtn');
+        const folderSearchInput = document.getElementById('folderSearchInput');
+        const boardShell = document.getElementById('boardShell');
+        const toggleSidebarBtn = document.getElementById('toggleSidebarBtn');
+        const selectionModeBtn = document.getElementById('selectionModeBtn');
+        const bulkMoveBtn = document.getElementById('bulkMoveBtn');
+        const folderPickerOverlay = document.getElementById('folderPickerOverlay');
+        const folderPickerTitle = document.getElementById('folderPickerTitle');
+        const folderPickerList = document.getElementById('folderPickerList');
+        const closeFolderPicker = document.getElementById('closeFolderPicker');
+        const folderCreateInput = document.getElementById('folderCreateInput');
+        const folderCreateConfirmBtn = document.getElementById('folderCreateConfirmBtn');
+        const folderContextMenu = document.getElementById('folderContextMenu');
 
         // Settings elements
         const settingsBtn = document.getElementById('settingsBtn');
@@ -1836,12 +3194,27 @@
         let latestVisibleCount = 0;
         let latestReturnedCount = 0;
         let latestTotalCount = 0;
+        let foldersData = [];
+        let totalFolderCount = 0;
+        let unfiledFolderCount = 0;
+        let currentFolderScope = 'all';
+        let currentFolderId = null;
+        let folderSearchQuery = '';
+        let sidebarExpanded = true;
+        let selectionMode = false;
+        let selectedItemIds = new Set();
+        let folderPickerTargetIds = [];
         let librarySearchTimer = null;
         let commandSearchTimer = null;
         let libraryRequestId = 0;
         let commandRequestId = 0;
+        const REMOTE_SYNC_REFRESH_INTERVAL_MS = 5 * 60 * 1000;
+        const REMOTE_SYNC_REFRESH_COOLDOWN_MS = 60 * 1000;
         let remoteSyncRefreshTimer = null;
+        let remoteSyncRefreshQueuedTimer = null;
         let remoteSyncRefreshInFlight = false;
+        let lastRemoteSyncRefreshAt = 0;
+        let hasWindowFocusedOnce = false;
 
         // Settings Logic
         function setNotionStatus(data) {
@@ -2162,18 +3535,22 @@
         };
 
         window.addEventListener('focus', () => {
-            triggerRemoteSyncRefresh();
+            if (!hasWindowFocusedOnce) {
+                hasWindowFocusedOnce = true;
+                return;
+            }
+            scheduleRemoteSyncRefresh({ delay: 1000 });
         });
 
         document.addEventListener('visibilitychange', () => {
             if (document.visibilityState === 'visible') {
-                triggerRemoteSyncRefresh();
+                scheduleRemoteSyncRefresh({ delay: 1000 });
             }
         });
 
         remoteSyncRefreshTimer = window.setInterval(() => {
-            triggerRemoteSyncRefresh();
-        }, 15000);
+            scheduleRemoteSyncRefresh();
+        }, REMOTE_SYNC_REFRESH_INTERVAL_MS);
 
         function openCommandPalette() {
             commandOverlay.classList.add('active');
@@ -2236,20 +3613,386 @@
         }
 
         function setStatsSummary(total, visible, returned, hasFilter) {
+            const folderLabel = getCurrentFolderLabel();
+            const selectionCount = selectedItemIds.size;
             stats.classList.remove('is-plain');
+            if (selectionMode) {
+                stats.innerHTML = `已选择 <strong>${selectionCount}</strong> 条 <span class="stats-secondary">${folderLabel}</span>`;
+                return;
+            }
             if (hasFilter) {
                 if (visible > returned) {
-                    stats.innerHTML = `已收录 <strong>${total}</strong> 篇 <span class="stats-secondary">匹配 <strong>${visible}</strong> 篇，当前显示最新 <strong>${returned}</strong> 篇</span>`;
+                    stats.innerHTML = `已收录 <strong>${total}</strong> 篇 <span class="stats-secondary">${folderLabel} · 匹配 <strong>${visible}</strong> 篇，当前显示最新 <strong>${returned}</strong> 篇</span>`;
                     return;
                 }
-                stats.innerHTML = `已收录 <strong>${total}</strong> 篇 <span class="stats-secondary">显示 <strong>${visible}</strong> 篇</span>`;
+                stats.innerHTML = `已收录 <strong>${total}</strong> 篇 <span class="stats-secondary">${folderLabel} · 显示 <strong>${visible}</strong> 篇</span>`;
                 return;
             }
             if (total > returned) {
-                stats.innerHTML = `已收录 <strong>${total}</strong> 篇 <span class="stats-secondary">当前显示最新 <strong>${returned}</strong> 篇</span>`;
+                stats.innerHTML = `已收录 <strong>${total}</strong> 篇 <span class="stats-secondary">${folderLabel} · 当前显示最新 <strong>${returned}</strong> 篇</span>`;
                 return;
             }
-            stats.innerHTML = `已收录 <strong>${total}</strong> 篇内容`;
+            stats.innerHTML = `已收录 <strong>${total}</strong> 篇内容 <span class="stats-secondary">${folderLabel}</span>`;
+        }
+
+        function folderIconSvg() {
+            return '<svg class="folder-item-icon" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M3.75 6.75A2.25 2.25 0 0 1 6 4.5h3.2a2.25 2.25 0 0 1 1.59.66l1.05 1.05c.28.28.66.44 1.06.44H18A2.25 2.25 0 0 1 20.25 8.9v7.6A2.25 2.25 0 0 1 18 18.75H6A2.25 2.25 0 0 1 3.75 16.5v-9.75Z" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/></svg>';
+        }
+
+        function checkSvg() {
+            return '<svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="m5 12 4.2 4.2L19 6.5" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+        }
+
+        function getCurrentFolderLabel() {
+            if (currentFolderScope === 'unfiled') return '未分类';
+            if (currentFolderScope === 'folder') {
+                const folder = foldersData.find((entry) => entry.id === currentFolderId);
+                return folder ? `文件夹：${folder.name}` : '文件夹';
+            }
+            return '全部内容';
+        }
+
+        function getCurrentFolderName(item) {
+            return item?.folder_name ? item.folder_name : '';
+        }
+
+        function updateSelectionUI() {
+            selectionModeBtn.textContent = selectionMode ? '取消选择' : '选择';
+            bulkMoveBtn.hidden = !selectionMode;
+            bulkMoveBtn.disabled = selectedItemIds.size === 0;
+            bulkMoveBtn.textContent = selectedItemIds.size > 0 ? `加入文件夹 (${selectedItemIds.size})` : '加入文件夹';
+        }
+
+        function clearSelection() {
+            selectedItemIds = new Set();
+            updateSelectionUI();
+        }
+
+        function setSelectionMode(nextValue) {
+            selectionMode = typeof nextValue === 'boolean' ? nextValue : !selectionMode;
+            if (!selectionMode) {
+                clearSelection();
+            } else {
+                updateSelectionUI();
+            }
+            setStatsSummary(
+                latestTotalCount || itemsData.length,
+                latestVisibleCount || itemsData.length,
+                latestReturnedCount || itemsData.length,
+                !!filterInput.value.trim() || platformFilter.value !== 'all' || currentFolderScope !== 'all'
+            );
+            renderItems(filteredEntries);
+        }
+
+        function toggleItemSelection(itemId) {
+            if (!selectionMode) return;
+            if (selectedItemIds.has(itemId)) selectedItemIds.delete(itemId);
+            else selectedItemIds.add(itemId);
+            updateSelectionUI();
+            setStatsSummary(
+                latestTotalCount || itemsData.length,
+                latestVisibleCount || itemsData.length,
+                latestReturnedCount || itemsData.length,
+                !!filterInput.value.trim() || platformFilter.value !== 'all' || currentFolderScope !== 'all'
+            );
+            renderItems(filteredEntries);
+        }
+
+        function handleItemPrimaryAction(itemId) {
+            if (selectionMode) {
+                toggleItemSelection(itemId);
+                return;
+            }
+            openModalById(itemId);
+        }
+
+        function renderSelectionIndicator(itemId) {
+            if (!selectionMode) return '';
+            const isSelected = selectedItemIds.has(itemId);
+            return `<span class="select-indicator${isSelected ? ' is-selected' : ''}">${checkSvg()}</span>`;
+        }
+
+        function renderFolderTag(item) {
+            if (!item.folder_name) return '';
+            return `<span class="folder-tag">${folderIconSvg()}<span>${escapeHtml(item.folder_name)}</span></span>`;
+        }
+
+        function renderFolderActionButton(item) {
+            return `
+                <button onclick="openFolderPicker(['${item.id}'], ${item.folder_id ? `'${item.folder_id}'` : 'null'}, '加入文件夹'); event.stopPropagation();" class="folder-action-btn" title="加入文件夹">
+                    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M3.75 6.75A2.25 2.25 0 0 1 6 4.5h3.2a2.25 2.25 0 0 1 1.59.66l1.05 1.05c.28.28.66.44 1.06.44H18A2.25 2.25 0 0 1 20.25 8.9v7.6A2.25 2.25 0 0 1 18 18.75H6A2.25 2.25 0 0 1 3.75 16.5v-9.75Z"></path>
+                    </svg>
+                </button>
+            `;
+        }
+
+        function setActiveFolder(scope, folderId = null) {
+            currentFolderScope = scope;
+            currentFolderId = scope === 'folder' ? folderId : null;
+            clearSelection();
+            renderFolderNavigation();
+            fetchItems();
+        }
+
+        function renderFolderNavItem(label, scope, count, folderId = null, options = {}) {
+            const active = currentFolderScope === scope && (scope !== 'folder' || currentFolderId === folderId);
+            const menuButton = options.menu
+                ? `<button class="folder-item-menu" type="button" onclick="openFolderContextMenu('${folderId}', event)">···</button>`
+                : '';
+            const glyph = getFolderGlyph(label, scope);
+            return `
+                <div class="folder-item${active ? ' active' : ''}" role="button" tabindex="0" title="${escapeAttribute(label)}" onclick="setActiveFolder('${scope}', ${folderId ? `'${folderId}'` : 'null'})" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();setActiveFolder('${scope}', ${folderId ? `'${folderId}'` : 'null'});}">
+                    <span class="folder-item-glyph" aria-hidden="true">${escapeHtml(glyph)}</span>
+                    <span class="folder-item-name">${escapeHtml(label)}</span>
+                    <span class="folder-item-count">${count}</span>
+                    ${menuButton}
+                </div>
+            `;
+        }
+
+        function updateSidebarState() {
+            document.body.classList.toggle('sidebar-collapsed', !sidebarExpanded);
+            const toggleLabel = sidebarExpanded ? '收起侧边栏' : '展开侧边栏';
+            toggleSidebarBtn.title = toggleLabel;
+            toggleSidebarBtn.setAttribute('aria-label', toggleLabel);
+        }
+
+        function getFolderGlyph(label, scope) {
+            if (scope === 'all') return '全';
+            if (scope === 'unfiled') return '未';
+            const normalized = String(label || '').trim();
+            if (!normalized) return '文';
+            return normalized[0].toUpperCase();
+        }
+
+        function renderFolderNavigation() {
+            const normalizedQuery = folderSearchQuery.trim().toLowerCase();
+            const baseItems = [
+                { label: '全部内容', scope: 'all', count: totalFolderCount },
+                { label: '未分类', scope: 'unfiled', count: unfiledFolderCount },
+            ];
+            const userItems = foldersData.map((folder) => ({
+                label: folder.name,
+                scope: 'folder',
+                count: folder.item_count || 0,
+                id: folder.id,
+            }));
+            const visibleItems = [...baseItems, ...userItems].filter((entry) => {
+                if (!normalizedQuery) return true;
+                return String(entry.label || '').toLowerCase().includes(normalizedQuery);
+            });
+
+            folderList.innerHTML = visibleItems.length
+                ? visibleItems.map((entry) => renderFolderNavItem(entry.label, entry.scope, entry.count, entry.id || null, { menu: entry.scope === 'folder' })).join('')
+                : '<div class="folder-empty">没有匹配的文件夹</div>';
+
+            const mobileItems = [
+                { label: '全部', scope: 'all', count: totalFolderCount },
+                { label: '未分类', scope: 'unfiled', count: unfiledFolderCount },
+                ...foldersData.map((folder) => ({ label: folder.name, scope: 'folder', count: folder.item_count || 0, id: folder.id })),
+            ];
+            folderMobileStrip.innerHTML = mobileItems.map((item) => {
+                const active = currentFolderScope === item.scope && (item.scope !== 'folder' || currentFolderId === item.id);
+                const folderId = item.id ? `'${item.id}'` : 'null';
+                return `<button class="folder-chip${active ? ' active' : ''}" type="button" onclick="setActiveFolder('${item.scope}', ${folderId})">${escapeHtml(item.label)} · ${item.count}</button>`;
+            }).join('') + '<button class="folder-chip" type="button" onclick="openCreateFolderPrompt()">+ 新建</button>';
+        }
+
+        async function fetchFolders() {
+            try {
+                const response = await fetch('/api/folders');
+                if (!response.ok) throw new Error('API Error');
+                const data = await response.json();
+                foldersData = Array.isArray(data.folders) ? data.folders : [];
+                totalFolderCount = Number(data.total_count || 0);
+                unfiledFolderCount = Number(data.unfiled_count || 0);
+                if (currentFolderScope === 'folder' && currentFolderId && !foldersData.some((folder) => folder.id === currentFolderId)) {
+                    currentFolderScope = 'all';
+                    currentFolderId = null;
+                }
+                renderFolderNavigation();
+            } catch (error) {
+                folderList.innerHTML = '<div class="folder-loading">文件夹加载失败</div>';
+                folderMobileStrip.innerHTML = '';
+            }
+        }
+
+        async function createFolder(name) {
+            const trimmedName = String(name || '').trim();
+            if (!trimmedName) return null;
+            const response = await fetch('/api/folders', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ name: trimmedName }),
+            });
+            const data = await response.json().catch(() => ({}));
+            if (!response.ok) {
+                throw new Error(data.detail || '创建文件夹失败');
+            }
+            await fetchFolders();
+            return data;
+        }
+
+        function openCreateFolderPrompt() {
+            folderCreateInput.value = '';
+            folderPickerTargetIds = [];
+            folderPickerTitle.textContent = '新建文件夹';
+            renderFolderPickerOptions(null);
+            folderCreateConfirmBtn.textContent = '新建';
+            folderPickerOverlay.classList.add('active');
+            requestAnimationFrame(() => folderCreateInput.focus());
+        }
+
+        function openFolderPicker(itemIds = [], preferredFolderId = null, title = '加入文件夹') {
+            folderPickerTargetIds = Array.isArray(itemIds) ? itemIds.filter(Boolean) : [];
+            folderPickerTitle.textContent = title;
+            folderCreateInput.value = '';
+            folderCreateConfirmBtn.textContent = folderPickerTargetIds.length > 0 ? '新建并加入' : '新建';
+            renderFolderPickerOptions(preferredFolderId);
+            folderPickerOverlay.classList.add('active');
+        }
+
+        function closeFolderPickerDialog() {
+            folderPickerOverlay.classList.remove('active');
+            folderPickerTargetIds = [];
+            folderCreateInput.value = '';
+        }
+
+        function renderFolderPickerOptions(preferredFolderId = null) {
+            const selectedFolderId = preferredFolderId || (folderPickerTargetIds.length === 1
+                ? itemsData.find((item) => item.id === folderPickerTargetIds[0])?.folder_id || null
+                : null);
+            const options = [
+                { id: null, label: '未分类', count: unfiledFolderCount },
+                ...foldersData.map((folder) => ({ id: folder.id, label: folder.name, count: folder.item_count || 0 })),
+            ];
+            folderPickerList.innerHTML = options.map((option) => {
+                const active = option.id === selectedFolderId;
+                const idValue = option.id ? `'${option.id}'` : 'null';
+                return `
+                    <button class="folder-picker-option${active ? ' active' : ''}" type="button" onclick="applyFolderSelection(${idValue})">
+                        <span>${escapeHtml(option.label)}</span>
+                        <span class="folder-picker-option-meta">${option.count} 条</span>
+                    </button>
+                `;
+            }).join('');
+        }
+
+        async function applyFolderSelection(folderId) {
+            try {
+                if (folderPickerTargetIds.length > 1) {
+                    const response = await fetch('/api/items/bulk-folder', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ item_ids: folderPickerTargetIds, folder_id: folderId }),
+                    });
+                    const data = await response.json();
+                    if (!response.ok) throw new Error(data.detail || '批量归类失败');
+                    showToast(`已整理 ${data.updated_count} 条内容`, 'success');
+                } else if (folderPickerTargetIds.length === 1) {
+                    const response = await fetch(`/api/items/${folderPickerTargetIds[0]}/folder`, {
+                        method: 'PATCH',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ folder_id: folderId }),
+                    });
+                    const data = await response.json();
+                    if (!response.ok) throw new Error(data.detail || '归类失败');
+                    showToast(data.folder_name ? `已加入 ${data.folder_name}` : '已移到未分类', 'success');
+                } else {
+                    closeFolderPickerDialog();
+                    return;
+                }
+                closeFolderPickerDialog();
+                clearSelection();
+                await Promise.all([fetchFolders(), fetchItems()]);
+            } catch (error) {
+                showToast(error.message, 'error');
+            }
+        }
+
+        async function createFolderAndApply() {
+            try {
+                const folder = await createFolder(folderCreateInput.value);
+                if (!folder) return;
+                if (folderPickerTargetIds.length > 0) {
+                    await applyFolderSelection(folder.id);
+                } else {
+                    showToast(`已创建文件夹：${folder.name}`, 'success');
+                    closeFolderPickerDialog();
+                    setActiveFolder('folder', folder.id);
+                }
+            } catch (error) {
+                showToast(error.message, 'error');
+            }
+        }
+
+        function openFolderContextMenu(folderId, event) {
+            event.stopPropagation();
+            const folder = foldersData.find((entry) => entry.id === folderId);
+            if (!folder) return;
+            folderContextMenu.innerHTML = `
+                <button type="button" onclick="renameFolderPrompt('${folderId}')">重命名</button>
+                <button type="button" class="is-danger" onclick="deleteFolderPrompt('${folderId}')">删除文件夹</button>
+            `;
+            folderContextMenu.style.top = `${event.clientY + 8}px`;
+            folderContextMenu.style.left = `${Math.min(event.clientX - 120, window.innerWidth - 170)}px`;
+            folderContextMenu.classList.add('show');
+        }
+
+        function closeFolderContextMenu() {
+            folderContextMenu.classList.remove('show');
+        }
+
+        async function renameFolderPrompt(folderId) {
+            closeFolderContextMenu();
+            const folder = foldersData.find((entry) => entry.id === folderId);
+            if (!folder) return;
+            const nextName = window.prompt('重命名文件夹', folder.name);
+            if (nextName === null) return;
+            try {
+                const response = await fetch(`/api/folders/${folderId}`, {
+                    method: 'PATCH',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ name: nextName }),
+                });
+                const data = await response.json();
+                if (!response.ok) throw new Error(data.detail || '重命名失败');
+                showToast('文件夹已重命名', 'success');
+                await fetchFolders();
+                if (currentFolderId === folderId) {
+                    setStatsSummary(
+                        latestTotalCount || itemsData.length,
+                        latestVisibleCount || itemsData.length,
+                        latestReturnedCount || itemsData.length,
+                        !!filterInput.value.trim() || platformFilter.value !== 'all' || currentFolderScope !== 'all'
+                    );
+                }
+            } catch (error) {
+                showToast(error.message, 'error');
+            }
+        }
+
+        async function deleteFolderPrompt(folderId) {
+            closeFolderContextMenu();
+            const folder = foldersData.find((entry) => entry.id === folderId);
+            if (!folder) return;
+            if (!window.confirm(`删除文件夹“${folder.name}”？其中内容会回到未分类。`)) return;
+            try {
+                const response = await fetch(`/api/folders/${folderId}`, { method: 'DELETE' });
+                if (!response.ok) {
+                    const data = await response.json().catch(() => ({}));
+                    throw new Error(data.detail || '删除文件夹失败');
+                }
+                showToast('文件夹已删除', 'deleted');
+                if (currentFolderId === folderId) {
+                    currentFolderScope = 'all';
+                    currentFolderId = null;
+                }
+                await Promise.all([fetchFolders(), fetchItems()]);
+            } catch (error) {
+                showToast(error.message, 'error');
+            }
         }
 
         function escapeHtml(value) {
@@ -2316,6 +4059,11 @@
             params.set('limit', String(limit));
             if (keyword) params.set('q', keyword);
             if (platform !== 'all') params.set('platform', platform);
+            if (currentFolderScope === 'unfiled') {
+                params.set('folder_scope', 'unfiled');
+            } else if (currentFolderScope === 'folder' && currentFolderId) {
+                params.set('folder_id', currentFolderId);
+            }
             return params;
         }
 
@@ -2734,6 +4482,10 @@
                 if (commandOverlay.classList.contains('active')) closeCommandPalette();
                 else openCommandPalette();
             }
+            if (e.key === 'Escape' && folderPickerOverlay.classList.contains('active')) {
+                closeFolderPickerDialog();
+                return;
+            }
             if (e.key === 'Escape' && commandOverlay.classList.contains('active')) {
                 closeCommandPalette();
                 return;
@@ -2800,6 +4552,78 @@
             return platform || 'web';
         }
 
+        function formatRelativeTime(dateStr) {
+            const value = new Date(dateStr);
+            if (Number.isNaN(value.getTime())) return formatDate(dateStr);
+
+            const diffMs = Date.now() - value.getTime();
+            const diffMinutes = Math.max(0, Math.floor(diffMs / (1000 * 60)));
+            const diffHours = Math.max(0, Math.floor(diffMinutes / 60));
+            const diffDays = Math.max(1, Math.floor(diffHours / 24));
+
+            if (diffMinutes < 5) return '刚刚';
+            if (diffMinutes < 60) return `${diffMinutes}分钟前`;
+            if (diffHours < 24) return `${diffHours}小时前`;
+            return `${diffDays}天前`;
+        }
+
+        function renderPlatformMark(item) {
+            const platform = normalizePlatform(item.platform || '', (item.source_url || '').toLowerCase());
+            switch (platform) {
+                case 'wechat':
+                    return '<span class="platform-glyph">微</span>';
+                case 'douyin':
+                    return '<span class="platform-glyph">抖</span>';
+                case 'xiaohongshu':
+                    return '<span class="platform-glyph">红</span>';
+                case 'x':
+                    return '<span class="platform-glyph">X</span>';
+                default:
+                    return '<span class="platform-glyph">W</span>';
+            }
+        }
+
+        function renderCardTags(item, length) {
+            const values = [];
+            const platform = platformDisplayLabel(item);
+            if (platform) values.push(platform);
+            if (item.folder_name) values.push(item.folder_name);
+            if (!values.length && length > 0) values.push(`${length}字`);
+
+            return uniquePreserveOrder(values)
+                .slice(0, 3)
+                .map((tag) => `<span class="tag">${escapeHtml(tag)}</span>`)
+                .join('');
+        }
+
+        function renderCardPreview(item) {
+            const media = Array.isArray(item.media) ? item.media : [];
+            const images = media.filter((entry) => entry.type === 'image');
+            const videos = media.filter((entry) => entry.type === 'video');
+            const thumb = getItemThumbnail(item);
+            const badge = images.length > 1
+                ? `<span class="card-media-badge">${images.length} 张图片</span>`
+                : (videos.length > 0 ? '<span class="card-media-badge">视频</span>' : '');
+            const previewBody = thumb
+                ? `<img src="${escapeAttribute(thumb.url)}" loading="lazy" alt="">`
+                : `<div class="card-preview-placeholder">
+                        <svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                            <rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect>
+                            <circle cx="8.5" cy="8.5" r="1.5"></circle>
+                            <path d="m21 15-5-5L5 21"></path>
+                        </svg>
+                    </div>`;
+
+            return `
+                <div class="card-preview">
+                    ${previewBody}
+                    ${renderSelectionIndicator(item.id).replace('select-indicator', 'select-indicator card-selection')}
+                    <div class="card-icon">${renderPlatformMark(item)}</div>
+                    ${badge}
+                </div>
+            `;
+        }
+
         async function fetchItems() {
             const requestId = ++libraryRequestId;
             try {
@@ -2817,14 +4641,14 @@
                 latestReturnedCount = returnedCount || itemsData.length;
                 const hasKeyword = !!filterInput.value.trim();
                 const hasPlatformFilter = platformFilter.value !== 'all';
+                const hasFolderFilter = currentFolderScope !== 'all';
                 setStatsSummary(
                     latestTotalCount || itemsData.length,
                     latestVisibleCount || itemsData.length,
                     latestReturnedCount || itemsData.length,
-                    hasKeyword || hasPlatformFilter
+                    hasKeyword || hasPlatformFilter || hasFolderFilter
                 );
                 renderItems(filteredEntries);
-                refreshRemoteSyncStatus(nextItems.map((item) => item.id), requestId);
             } catch (error) {
                 setStatsMessage('加载失败');
                 grid.className = 'grid';
@@ -2893,16 +4717,43 @@
             }
         }
 
-        function triggerRemoteSyncRefresh() {
-            if (!Array.isArray(itemsData) || itemsData.length === 0) return;
-            refreshRemoteSyncStatus(itemsData.map((item) => item.id), libraryRequestId);
+        function getTrackedRemoteSyncItemIds(entries = itemsData) {
+            return (entries || [])
+                .filter((item) => item.notion_page_id || item.obsidian_path)
+                .map((item) => item.id);
+        }
+
+        function scheduleRemoteSyncRefresh(options = {}) {
+            const { delay = 0, force = false, itemIds = null } = options;
+            if (remoteSyncRefreshQueuedTimer) {
+                window.clearTimeout(remoteSyncRefreshQueuedTimer);
+            }
+            remoteSyncRefreshQueuedTimer = window.setTimeout(() => {
+                remoteSyncRefreshQueuedTimer = null;
+                triggerRemoteSyncRefresh({ force, itemIds });
+            }, delay);
+        }
+
+        function triggerRemoteSyncRefresh(options = {}) {
+            const { force = false, itemIds = null } = options;
+            if (document.visibilityState === 'hidden') return;
+            if (remoteSyncRefreshInFlight) return;
+
+            const nextItemIds = Array.isArray(itemIds) ? itemIds.filter(Boolean) : getTrackedRemoteSyncItemIds();
+            if (nextItemIds.length === 0) return;
+
+            const now = Date.now();
+            if (!force && now - lastRemoteSyncRefreshAt < REMOTE_SYNC_REFRESH_COOLDOWN_MS) return;
+
+            lastRemoteSyncRefreshAt = now;
+            refreshRemoteSyncStatus(nextItemIds, libraryRequestId);
         }
 
         function renderItems(entries) {
             if (entries.length === 0) {
                 grid.className = currentView === 'gallery' ? 'grid' : 'list-view';
-                grid.innerHTML = filterInput.value.trim() || platformFilter.value !== 'all'
-                    ? '<div class="empty-state">没有找到匹配内容，请换个关键词或平台试试。</div>'
+                grid.innerHTML = filterInput.value.trim() || platformFilter.value !== 'all' || currentFolderScope !== 'all'
+                    ? `<div class="empty-state">${currentFolderScope === 'folder' && !filterInput.value.trim() && platformFilter.value === 'all' ? '这个文件夹里还没有内容。' : '没有找到匹配内容，请换个关键词或平台试试。'}</div>`
                     : '<div class="empty-state">暂无收录内容，请在 App 中添加。</div>';
                 return;
             }
@@ -2914,12 +4765,14 @@
                     const length = item.canonical_text ? item.canonical_text.length : 0;
                     const thumb = getItemThumbnail(item);
                     const activeClass = currentOpenItemId === item.id ? ' is-active' : '';
+                    const selectableClass = selectionMode ? ' is-selectable' : '';
                     const thumbHtml = thumb
                         ? `<div class="list-thumb"><img src="${thumb.url}" loading="lazy" alt=""></div>`
                         : `<div class="list-thumb"></div>`;
                     return `
-                        <div class="list-row${activeClass}" onclick="openModalById('${item.id}')">
+                        <div class="list-row${activeClass}${selectableClass}" onclick="handleItemPrimaryAction('${item.id}')">
                             <div class="list-main">
+                                ${renderSelectionIndicator(item.id)}
                                 ${thumbHtml}
                                 <div class="list-content">
                                     <div class="list-title-row">
@@ -2933,9 +4786,11 @@
                                     <span class="list-stat">${platformDisplayLabel(item)}</span>
                                     <span class="list-stat">${formatDate(item.created_at)}</span>
                                     <span class="list-stat">${length} 字</span>
+                                    ${renderFolderTag(item)}
                                 </div>
                                 <div class="list-actions">
                                     ${renderSyncBadges(item)}
+                                    ${renderFolderActionButton(item)}
                                     <button onclick="deleteItem('${item.id}', event)" class="delete-btn" title="删除">
                                         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2M10 11v6M14 11v6"/></svg>
                                     </button>
@@ -2950,42 +4805,40 @@
 
             grid.className = 'grid';
             grid.innerHTML = entries.map((item) => {
-                const textPreview = item.canonical_text ? item.canonical_text.substring(0, 150) + '...' : '无正文内容';
                 const length = item.canonical_text ? item.canonical_text.length : 0;
                 const activeClass = currentOpenItemId === item.id ? ' is-active' : '';
-
-                // 生成媒体缩略图
-                let thumbnailHtml = '';
-                const thumb = getItemThumbnail(item);
-                if (thumb) {
-                    const images = item.media.filter(m => m.type === 'image');
-                    const videos = item.media.filter(m => m.type === 'video');
-                    let badge = '';
-                    if (images.length > 1) badge = `<span class="media-badge">${images.length} 张图片</span>`;
-                    else if (videos.length > 0) badge = `<span class="media-badge">▶ 视频</span>`;
-                    thumbnailHtml = `<div class="card-media"><img src="${thumb.url}" loading="lazy" alt="">${badge}</div>`;
-                }
+                const selectableClass = selectionMode ? ' is-selectable' : '';
+                const title = escapeHtml(item.title || '无标题');
+                const sourceLabel = escapeHtml(`来自 ${platformDisplayLabel(item)}`);
+                const relativeTime = escapeHtml(formatRelativeTime(item.created_at));
+                const tagsHtml = renderCardTags(item, length) || '<span class="tag">未分类</span>';
 
                 return `
-                    <div class="card${activeClass}" onclick="openModalById('${item.id}')">
-                        ${thumbnailHtml}
-                        <div class="card-header">
-                            <h3 class="title">${item.title || '无标题'}</h3>
-                        </div>
-                        <div class="preview">${textPreview}</div>
-                        <div class="footer">
-                            <div class="meta">
-                                <span class="meta-item">${iconCalendar}${formatDate(item.created_at)}</span>
-                                <span class="meta-item">${iconText}${length} </span>
-                            </div>
-                            <div class="footer-actions">
+                    <div class="card${activeClass}${selectableClass}" onclick="handleItemPrimaryAction('${item.id}')">
+                        ${renderCardPreview(item)}
+                        <div class="card-content">
+                            <div class="card-meta-row">
+                                <div class="card-meta">
+                                    <span>${sourceLabel}</span>
+                                    <span>•</span>
+                                    <span>${relativeTime}</span>
+                                </div>
                                 ${renderSyncBadges(item)}
-                                <button onclick="deleteItem('${item.id}', event)" class="delete-btn" title="删除">
-                                    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2M10 11v6M14 11v6"/></svg>
-                                </button>
-                                <a href="${item.source_url}" target="_blank" class="source-link" onclick="event.stopPropagation()">
-                                    原文 ↗
+                            </div>
+                            <h3 class="card-title">${title}</h3>
+                            <div class="card-bottom-row">
+                                <div class="tags">
+                                    ${tagsHtml}
+                                </div>
+                                <div class="card-footer-actions">
+                                    ${renderFolderActionButton(item)}
+                                    <button onclick="deleteItem('${item.id}', event)" class="delete-btn" title="删除">
+                                        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2M10 11v6M14 11v6"/></svg>
+                                    </button>
+                                    <a href="${item.source_url}" target="_blank" class="source-link" onclick="event.stopPropagation()">
+                                        原文 ↗
                                 </a>
+                                </div>
                             </div>
                         </div>
                     </div>
@@ -3007,6 +4860,25 @@
         });
         galleryViewBtn.addEventListener('click', () => setView('gallery'));
         listViewBtn.addEventListener('click', () => setView('list'));
+        selectionModeBtn.addEventListener('click', () => setSelectionMode());
+        bulkMoveBtn.addEventListener('click', () => openFolderPicker(Array.from(selectedItemIds), null, '批量加入文件夹'));
+        createFolderBtn.addEventListener('click', () => openCreateFolderPrompt());
+        folderSearchInput.addEventListener('input', (e) => {
+            folderSearchQuery = e.target.value || '';
+            renderFolderNavigation();
+        });
+        toggleSidebarBtn.addEventListener('click', () => {
+            sidebarExpanded = !sidebarExpanded;
+            updateSidebarState();
+        });
+        closeFolderPicker.addEventListener('click', () => closeFolderPickerDialog());
+        folderCreateConfirmBtn.addEventListener('click', () => createFolderAndApply());
+        folderCreateInput.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') {
+                e.preventDefault();
+                createFolderAndApply();
+            }
+        });
 
         async function deleteItem(id, event) {
             event.stopPropagation();
@@ -3016,7 +4888,8 @@
                 const response = await fetch(`/api/items/${id}`, { method: 'DELETE' });
                 if (response.ok) {
                     showToast('已删除', 'deleted');
-                    fetchItems();
+                    clearSelection();
+                    await Promise.all([fetchFolders(), fetchItems()]);
                 } else {
                     const data = await response.json();
                     showToast('删除失败: ' + (data.detail || '未知错误'), 'error');
@@ -3066,6 +4939,7 @@
 
             modalFooter.innerHTML = `
                 <div class="modal-footer-actions">
+                    <button onclick="openFolderPicker(['${item.id}'], ${item.folder_id ? `'${item.folder_id}'` : 'null'}, '移动到文件夹')" class="extract-btn modal-action-btn">移动到文件夹</button>
                     <button onclick="syncItem('${item.id}', 'notion')" class="extract-btn modal-action-btn">${item.notion_page_id ? '再次检查 Notion 同步' : '同步至 Notion'}</button>
                     <button onclick="syncItem('${item.id}', 'obsidian')" class="extract-btn modal-action-btn">${item.obsidian_path ? '再次检查 Obsidian 同步' : '同步至 Obsidian'}</button>
                     <button onclick="downloadZip('${item.id}')" class="extract-btn modal-action-btn">下载 ZIP</button>
@@ -3147,6 +5021,20 @@
         settingsOverlay.onclick = (e) => {
             if (e.target === settingsOverlay) closeSettingsModal.onclick();
         };
+        folderPickerOverlay.onclick = (e) => {
+            if (e.target === folderPickerOverlay) closeFolderPickerDialog();
+        };
+
+        window.addEventListener('beforeunload', () => {
+            if (remoteSyncRefreshTimer) window.clearInterval(remoteSyncRefreshTimer);
+            if (remoteSyncRefreshQueuedTimer) window.clearTimeout(remoteSyncRefreshQueuedTimer);
+        });
+
+        document.addEventListener('click', (e) => {
+            if (!folderContextMenu.contains(e.target)) {
+                closeFolderContextMenu();
+            }
+        });
 
         toggleFullscreenBtn.onclick = () => {
             setModalFullscreen();
@@ -3160,6 +5048,8 @@
         });
 
         // Fetch on load
+        updateSidebarState();
+        fetchFolders();
         fetchItems();
         updateCommandPaletteState();
 

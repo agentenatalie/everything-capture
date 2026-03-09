@@ -15,6 +15,26 @@ Base = declarative_base()
 
 def ensure_runtime_schema():
     with engine.begin() as connection:
+        connection.exec_driver_sql(
+            """
+            CREATE TABLE IF NOT EXISTS folders (
+                id VARCHAR PRIMARY KEY,
+                name VARCHAR NOT NULL UNIQUE,
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+            )
+            """
+        )
+        connection.exec_driver_sql("CREATE UNIQUE INDEX IF NOT EXISTS idx_folders_name ON folders(name)")
+
+        item_columns = {
+            row[1]
+            for row in connection.exec_driver_sql("PRAGMA table_info(items)").fetchall()
+        }
+        if "folder_id" not in item_columns:
+            connection.exec_driver_sql("ALTER TABLE items ADD COLUMN folder_id VARCHAR REFERENCES folders(id)")
+        connection.exec_driver_sql("CREATE INDEX IF NOT EXISTS idx_items_folder_id ON items(folder_id)")
+
         settings_columns = {
             row[1]
             for row in connection.exec_driver_sql("PRAGMA table_info(settings)").fetchall()

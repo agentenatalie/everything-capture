@@ -1,3 +1,6 @@
+from contextlib import AsyncExitStack
+from time import monotonic
+
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from database import get_db
@@ -32,6 +35,8 @@ NOTION_RICH_TEXT_LIMIT = 2000
 NOTION_CHILDREN_LIMIT = 100
 OBSIDIAN_MEDIA_FOLDER = "EverythingCapture_Media"
 DISPLAY_TIMEZONE = ZoneInfo("America/New_York")
+SYNC_STATUS_CACHE_TTL_SECONDS = 300
+SYNC_STATUS_CHECK_TIMEOUT_SECONDS = 4.0
 NOTION_SYNC_PROPERTY_SPECS = {
     "Date": {"type": "rich_text", "rich_text": {}},
     "Source": {"type": "url", "url": {}},
@@ -39,6 +44,7 @@ NOTION_SYNC_PROPERTY_SPECS = {
 }
 
 _NOTION_ID_RE = re.compile(r"([0-9a-fA-F]{32}|[0-9a-fA-F]{8}(?:-[0-9a-fA-F]{4}){3}-[0-9a-fA-F]{12})")
+_SYNC_STATUS_CACHE: dict[str, dict[str, object]] = {}
 
 
 class SyncStatusRefreshRequest(BaseModel):
@@ -474,11 +480,13 @@ async def _notion_page_exists(
     client: httpx.AsyncClient,
     headers: dict[str, str],
     page_id: str,
+    *,
+    timeout: float = 20.0,
 ) -> bool | None:
     response = await client.get(
         f"https://api.notion.com/v1/pages/{page_id}",
         headers=headers,
-        timeout=20.0,
+        timeout=timeout,
     )
     if response.status_code == 200:
         payload = response.json()
@@ -772,11 +780,13 @@ async def _obsidian_note_exists(
     url_base: str,
     api_key: str,
     vault_path: str,
+    *,
+    timeout: float = 20.0,
 ) -> tuple[str, str | None]:
     response = await client.get(
         f"{url_base}/vault/{_encode_obsidian_vault_path(vault_path)}",
         headers=_obsidian_headers(api_key, "text/markdown"),
-        timeout=20.0,
+        timeout=timeout,
     )
     if 200 <= response.status_code < 300:
         return "exists", response.text
@@ -796,6 +806,46 @@ def _obsidian_note_matches_item(note_content: str, item: Item) -> bool:
     if source_url and f"source: {source_url}" in note_content:
         return True
     return False
+
+
+def _sync_status_cache_key(item: Item) -> str:
+    return "|".join(
+        [
+            item.id or "",
+            item.notion_page_id or "",
+            item.obsidian_path or "",
+        ]
+    )
+
+
+def _get_cached_sync_status(item: Item) -> dict[str, str | None] | None:
+    cache_key = _sync_status_cache_key(item)
+    cached = _SYNC_STATUS_CACHE.get(cache_key)
+    if not cached:
+        return None
+
+    checked_at = cached.get("checked_at")
+    if not isinstance(checked_at, (int, float)):
+        _SYNC_STATUS_CACHE.pop(cache_key, None)
+        return None
+
+    if monotonic() - checked_at > SYNC_STATUS_CACHE_TTL_SECONDS:
+        _SYNC_STATUS_CACHE.pop(cache_key, None)
+        return None
+
+    return {
+        "id": item.id,
+        "notion_page_id": cached.get("notion_page_id"),
+        "obsidian_path": cached.get("obsidian_path"),
+    }
+
+
+def _store_sync_status_cache(item: Item) -> None:
+    _SYNC_STATUS_CACHE[_sync_status_cache_key(item)] = {
+        "checked_at": monotonic(),
+        "notion_page_id": item.notion_page_id,
+        "obsidian_path": item.obsidian_path,
+    }
 
 
 def _build_obsidian_note(item: Item, media_references: dict[str, str]) -> str:
@@ -1510,53 +1560,79 @@ async def refresh_sync_status(request: SyncStatusRefreshRequest, db: Session = D
     notion_headers = _notion_headers(notion_token) if notion_token else None
     status_payload = []
     dirty = False
+    uncached_items: list[Item] = []
+    for item in items:
+        cached = _get_cached_sync_status(item)
+        if cached:
+            status_payload.append(cached)
+            continue
+        uncached_items.append(item)
 
-    async with httpx.AsyncClient() as notion_client:
-        for item in items:
-            if item.notion_page_id and notion_headers:
-                try:
-                    page_exists = await _notion_page_exists(notion_client, notion_headers, item.notion_page_id)
-                    if page_exists is False:
-                        item.notion_page_id = None
-                        dirty = True
-                except httpx.RequestError as exc:
-                    logger.warning("Failed to refresh Notion sync status for %s: %s", item.id, exc)
+    if uncached_items:
+        obsidian_bases = _obsidian_candidate_bases(obsidian_url) if obsidian_url and obsidian_api_key else []
 
-            if item.obsidian_path and obsidian_url and obsidian_api_key:
-                note_state = "unknown"
-                note_content = None
-                for url_base in _obsidian_candidate_bases(obsidian_url):
+        async with AsyncExitStack() as stack:
+            notion_client = await stack.enter_async_context(httpx.AsyncClient()) if notion_headers else None
+            obsidian_clients = {
+                url_base: await stack.enter_async_context(httpx.AsyncClient(**_obsidian_client_kwargs(url_base)))
+                for url_base in obsidian_bases
+            }
+
+            for item in uncached_items:
+                if item.notion_page_id and notion_headers and notion_client is not None:
                     try:
-                        async with httpx.AsyncClient(**_obsidian_client_kwargs(url_base)) as obsidian_client:
+                        page_exists = await _notion_page_exists(
+                            notion_client,
+                            notion_headers,
+                            item.notion_page_id,
+                            timeout=SYNC_STATUS_CHECK_TIMEOUT_SECONDS,
+                        )
+                        if page_exists is False:
+                            item.notion_page_id = None
+                            dirty = True
+                    except httpx.RequestError as exc:
+                        logger.warning("Failed to refresh Notion sync status for %s: %s", item.id, exc)
+
+                if item.obsidian_path and obsidian_api_key and obsidian_clients:
+                    note_state = "unknown"
+                    note_content = None
+                    for url_base, obsidian_client in obsidian_clients.items():
+                        try:
                             note_state, note_content = await _obsidian_note_exists(
                                 obsidian_client,
                                 url_base,
                                 obsidian_api_key,
                                 item.obsidian_path,
+                                timeout=SYNC_STATUS_CHECK_TIMEOUT_SECONDS,
                             )
-                    except httpx.RequestError as exc:
-                        logger.warning("Failed to refresh Obsidian sync status for %s via %s: %s", item.id, url_base, exc)
-                        continue
+                        except httpx.RequestError as exc:
+                            logger.warning("Failed to refresh Obsidian sync status for %s via %s: %s", item.id, url_base, exc)
+                            continue
 
-                    if note_state != "unknown":
-                        break
+                        if note_state != "unknown":
+                            break
 
-                if note_state == "missing" or (note_state == "exists" and note_content and not _obsidian_note_matches_item(note_content, item)):
-                    item.obsidian_path = None
-                    dirty = True
+                    if note_state == "missing" or (
+                        note_state == "exists" and note_content and not _obsidian_note_matches_item(note_content, item)
+                    ):
+                        item.obsidian_path = None
+                        dirty = True
 
-            status_payload.append(
-                {
-                    "id": item.id,
-                    "notion_page_id": item.notion_page_id,
-                    "obsidian_path": item.obsidian_path,
-                }
-            )
+                _store_sync_status_cache(item)
+                status_payload.append(
+                    {
+                        "id": item.id,
+                        "notion_page_id": item.notion_page_id,
+                        "obsidian_path": item.obsidian_path,
+                    }
+                )
 
     if dirty:
         db.commit()
 
-    return {"items": status_payload}
+    status_lookup = {entry["id"]: entry for entry in status_payload}
+    ordered_status_payload = [status_lookup[item_id] for item_id in item_ids if item_id in status_lookup]
+    return {"items": ordered_status_payload}
 
 
 @router.post("/obsidian/test")

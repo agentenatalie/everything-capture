@@ -253,6 +253,52 @@ class ExtractorMediaTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(results), 1)
         self.assertEqual(results[0]["local_path"], "media/test-youtube/video_000.mp4")
 
+    async def test_download_media_list_uses_user_scoped_media_path(self) -> None:
+        item_dir = os.path.abspath(
+            os.path.join(
+                os.path.dirname(__file__),
+                "..",
+                "static",
+                "media",
+                "users",
+                "user-123",
+                "test-youtube-user",
+            )
+        )
+        os.makedirs(item_dir, exist_ok=True)
+        final_path = os.path.join(item_dir, "video_000.mp4")
+        with open(final_path, "wb") as fp:
+            fp.write(b"video")
+
+        try:
+            with patch(
+                "services.downloader._download_with_ytdlp",
+                return_value=(Path(final_path), 5),
+            ):
+                results = await download_media_list(
+                    "test-youtube-user",
+                    [{"type": "video", "url": "https://www.youtube.com/watch?v=dQw4w9WgXcQ", "order": 0}],
+                    referer="https://example.com/article",
+                    user_id="user-123",
+                )
+        finally:
+            if os.path.exists(final_path):
+                os.remove(final_path)
+            current_dir = item_dir
+            for _ in range(4):
+                if os.path.isdir(current_dir):
+                    try:
+                        os.rmdir(current_dir)
+                    except OSError:
+                        break
+                current_dir = os.path.dirname(current_dir)
+
+        self.assertEqual(len(results), 1)
+        self.assertEqual(
+            results[0]["local_path"],
+            "media/users/user-123/test-youtube-user/video_000.mp4",
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

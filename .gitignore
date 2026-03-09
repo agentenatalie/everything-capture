@@ -6,6 +6,7 @@ backend/static/media/
 
 # Python
 backend/venv/
+backend/.local/
 **/__pycache__/
 *.py[cod]
 *$py.class

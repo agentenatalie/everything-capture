@@ -1,0 +1,18 @@
+DEFAULT_USER_ID = "local-default-user"
+DEFAULT_USER_EMAIL = "local@example.com"
+DEFAULT_USER_NAME = "Local User"
+
+DEFAULT_WORKSPACE_ID = "local-default-workspace"
+DEFAULT_WORKSPACE_NAME = "Local Workspace"
+DEFAULT_WORKSPACE_SLUG = "local"
+
+
+def get_current_user_id() -> str:
+    from auth import get_current_user_id as _get_current_user_id
+
+    return _get_current_user_id()
+
+
+def get_current_workspace_id() -> str:
+    # Transitional compatibility for the previous workspace-scoped slice.
+    return DEFAULT_WORKSPACE_ID

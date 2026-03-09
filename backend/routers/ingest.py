@@ -5,6 +5,7 @@ from models import Item, Media, Settings
 from schemas import IngestRequest, IngestResponse, ExtractRequest, ExtractResponse
 from services.extractor import extract_content
 from services.downloader import download_media_list
+from tenant import get_current_user_id
 import logging
 
 logger = logging.getLogger(__name__)
@@ -17,10 +18,10 @@ router = APIRouter(
 import asyncio
 from routers.connect import sync_to_notion, sync_to_obsidian
 
-def background_auto_sync(item_id: str):
+def background_auto_sync(item_id: str, user_id: str):
     db = SessionLocal()
     try:
-        settings = db.query(Settings).first()
+        settings = db.query(Settings).filter(Settings.user_id == user_id).first()
         if not settings or settings.auto_sync_target == "none":
             return
             
@@ -46,8 +47,10 @@ def background_auto_sync(item_id: str):
 
 @router.post("/ingest", response_model=IngestResponse, status_code=status.HTTP_201_CREATED)
 def ingest_page(request: IngestRequest, background_tasks: BackgroundTasks, db: Session = Depends(get_db)):
+    user_id = get_current_user_id()
     try:
         new_item = Item(
+            user_id=user_id,
             source_url=request.source_url,
             final_url=request.final_url,
             title=request.title,
@@ -60,7 +63,7 @@ def ingest_page(request: IngestRequest, background_tasks: BackgroundTasks, db: S
         db.commit()
         db.refresh(new_item)
         
-        background_tasks.add_task(background_auto_sync, new_item.id)
+        background_tasks.add_task(background_auto_sync, new_item.id, user_id)
         
         return IngestResponse(item_id=new_item.id, status="ready")
     except Exception as e:
@@ -71,6 +74,7 @@ def ingest_page(request: IngestRequest, background_tasks: BackgroundTasks, db: S
 @router.post("/extract", response_model=ExtractResponse, status_code=status.HTTP_201_CREATED)
 async def extract_page(request: ExtractRequest, background_tasks: BackgroundTasks, db: Session = Depends(get_db)):
     """服务端提取：传入 URL，后端抓取内容并存储"""
+    user_id = get_current_user_id()
     try:
         result = await extract_content(request.url)
         has_media = bool(result.media_urls)
@@ -85,6 +89,7 @@ async def extract_page(request: ExtractRequest, background_tasks: BackgroundTask
             )
 
         new_item = Item(
+            user_id=user_id,
             source_url=request.url,
             final_url=result.final_url,
             title=result.title,
@@ -105,11 +110,13 @@ async def extract_page(request: ExtractRequest, background_tasks: BackgroundTask
                 item_id=new_item.id,
                 media_list=result.media_urls,
                 referer=referer,
+                user_id=user_id,
             )
             # Build original_url → local_url map for substituting into content_blocks
             url_map: dict[str, str] = {}
             for dl in downloaded:
                 media_record = Media(
+                    user_id=user_id,
                     item_id=new_item.id,
                     type=dl["type"],
                     original_url=dl["original_url"],
@@ -176,7 +183,7 @@ async def extract_page(request: ExtractRequest, background_tasks: BackgroundTask
             media_count = len(downloaded)
             logger.info("已下载 %d 个媒体文件 (item: %s)", media_count, new_item.id)
 
-        background_tasks.add_task(background_auto_sync, new_item.id)
+        background_tasks.add_task(background_auto_sync, new_item.id, user_id)
 
         return ExtractResponse(
             item_id=new_item.id,

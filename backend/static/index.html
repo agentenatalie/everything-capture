@@ -762,6 +762,32 @@
             display: flex;
             align-items: center;
             gap: 12px;
+            min-width: 0;
+            flex: 1;
+        }
+
+        .sidebar-user-meta {
+            display: flex;
+            flex-direction: column;
+            gap: 2px;
+            min-width: 0;
+        }
+
+        .sidebar-user-name {
+            font-size: 0.88rem;
+            font-weight: 600;
+            color: #111827;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        .sidebar-user-subtitle {
+            font-size: 0.74rem;
+            color: #8b94a6;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
         }
 
         .sidebar-avatar-container {
@@ -794,22 +820,38 @@
             border: 2px solid #ffffff;
         }
 
+        .sidebar-status-dot.is-offline {
+            background: #9ca3af;
+        }
+
         .sidebar-user-actions {
             display: flex;
             align-items: center;
-            gap: 12px;
+            gap: 10px;
             color: #71767a;
         }
 
         .sidebar-user-actions button {
-            border: none;
-            background: transparent;
+            border: 1px solid rgba(226, 232, 240, 0.95);
+            background: rgba(255, 255, 255, 0.92);
             color: inherit;
             cursor: pointer;
-            padding: 0;
+            padding: 6px;
             display: inline-flex;
             align-items: center;
             justify-content: center;
+            border-radius: 10px;
+            transition: background 0.2s ease, color 0.2s ease, border-color 0.2s ease;
+        }
+
+        .sidebar-user-actions button:hover {
+            color: #111827;
+            border-color: rgba(148, 163, 184, 0.45);
+            background: #ffffff;
+        }
+
+        .sidebar-user-actions button.is-hidden {
+            display: none;
         }
 
         .sidebar-user-actions svg {
@@ -1359,6 +1401,232 @@
         .modal-overlay.active {
             opacity: 1;
             pointer-events: auto;
+        }
+
+        .auth-overlay {
+            position: fixed;
+            inset: 0;
+            z-index: 120;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 28px;
+            background:
+                radial-gradient(circle at top, rgba(255, 255, 255, 0.85), rgba(246, 248, 251, 0.96) 56%, rgba(241, 245, 249, 0.98) 100%);
+            opacity: 0;
+            pointer-events: none;
+            transition: opacity 0.24s ease;
+        }
+
+        .auth-overlay.active {
+            opacity: 1;
+            pointer-events: auto;
+        }
+
+        .auth-panel {
+            width: min(460px, 100%);
+            border-radius: 28px;
+            border: 1px solid rgba(226, 232, 240, 0.95);
+            background:
+                linear-gradient(180deg, rgba(255, 255, 255, 0.98), rgba(247, 249, 252, 0.96));
+            box-shadow: 0 36px 64px -36px rgba(15, 23, 42, 0.42);
+            padding: 30px;
+            display: flex;
+            flex-direction: column;
+            gap: 18px;
+        }
+
+        .auth-kicker {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 0.76rem;
+            font-weight: 700;
+            letter-spacing: 0.08em;
+            text-transform: uppercase;
+            color: #5c6472;
+        }
+
+        .auth-kicker::before {
+            content: "";
+            width: 10px;
+            height: 10px;
+            border-radius: 999px;
+            background: linear-gradient(135deg, #111827, #475569);
+        }
+
+        .auth-title {
+            font-size: 1.9rem;
+            line-height: 1.05;
+            letter-spacing: -0.03em;
+            font-weight: 700;
+            color: #0f172a;
+        }
+
+        .auth-description {
+            color: #596273;
+            font-size: 0.95rem;
+            line-height: 1.6;
+        }
+
+        .auth-google-btn {
+            width: 100%;
+            border: 1px solid rgba(15, 23, 42, 0.1);
+            background: #ffffff;
+            color: #111827;
+            border-radius: 16px;
+            padding: 14px 18px;
+            font-size: 0.95rem;
+            font-weight: 600;
+            cursor: pointer;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            gap: 10px;
+            transition: transform 0.18s ease, box-shadow 0.18s ease, border-color 0.18s ease;
+        }
+
+        .auth-google-btn:hover:not(:disabled) {
+            transform: translateY(-1px);
+            border-color: rgba(15, 23, 42, 0.18);
+            box-shadow: 0 18px 28px -26px rgba(15, 23, 42, 0.4);
+        }
+
+        .auth-google-btn:disabled,
+        .auth-submit-btn:disabled,
+        .auth-code-btn:disabled,
+        .auth-method-switch button:disabled {
+            cursor: not-allowed;
+            opacity: 0.56;
+        }
+
+        .auth-divider {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            color: #8b94a6;
+            font-size: 0.8rem;
+            font-weight: 600;
+        }
+
+        .auth-divider::before,
+        .auth-divider::after {
+            content: "";
+            flex: 1;
+            height: 1px;
+            background: rgba(203, 213, 225, 0.9);
+        }
+
+        .auth-method-switch {
+            display: inline-flex;
+            gap: 8px;
+            padding: 6px;
+            border-radius: 16px;
+            background: rgba(226, 232, 240, 0.48);
+        }
+
+        .auth-method-switch button {
+            flex: 1;
+            border: none;
+            background: transparent;
+            color: #6b7280;
+            border-radius: 12px;
+            padding: 10px 14px;
+            font-size: 0.88rem;
+            font-weight: 600;
+            cursor: pointer;
+            transition: background 0.18s ease, color 0.18s ease, box-shadow 0.18s ease;
+        }
+
+        .auth-method-switch button.active {
+            color: #0f172a;
+            background: #ffffff;
+            box-shadow: 0 10px 20px -18px rgba(15, 23, 42, 0.5);
+        }
+
+        .auth-form {
+            display: none;
+            gap: 12px;
+            flex-direction: column;
+        }
+
+        .auth-form.active {
+            display: flex;
+        }
+
+        .auth-field {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+
+        .auth-field label {
+            font-size: 0.82rem;
+            font-weight: 600;
+            color: #4b5563;
+        }
+
+        .auth-field input {
+            width: 100%;
+            border: 1px solid rgba(203, 213, 225, 0.95);
+            border-radius: 14px;
+            padding: 13px 14px;
+            font-size: 0.95rem;
+            background: rgba(255, 255, 255, 0.94);
+            color: #111827;
+        }
+
+        .auth-field input:focus {
+            outline: none;
+            border-color: rgba(17, 24, 39, 0.35);
+            box-shadow: 0 0 0 4px rgba(15, 23, 42, 0.06);
+        }
+
+        .auth-code-row {
+            display: grid;
+            grid-template-columns: minmax(0, 1fr) auto;
+            gap: 10px;
+        }
+
+        .auth-code-btn,
+        .auth-submit-btn {
+            border: none;
+            border-radius: 14px;
+            padding: 13px 16px;
+            font-size: 0.9rem;
+            font-weight: 600;
+            cursor: pointer;
+        }
+
+        .auth-code-btn {
+            background: rgba(15, 23, 42, 0.06);
+            color: #0f172a;
+            white-space: nowrap;
+        }
+
+        .auth-submit-btn {
+            background: #0f172a;
+            color: #ffffff;
+        }
+
+        .auth-status {
+            min-height: 20px;
+            font-size: 0.82rem;
+            color: #6b7280;
+        }
+
+        .auth-status.is-error {
+            color: #b42318;
+        }
+
+        .auth-status.is-success {
+            color: #1f7a4d;
+        }
+
+        .auth-provider-hint {
+            color: #6b7280;
+            font-size: 0.82rem;
+            line-height: 1.55;
         }
 
         .modal {
@@ -2212,6 +2480,10 @@
             padding: 12px 8px;
         }
 
+        body.sidebar-collapsed .sidebar-user-meta {
+            display: none;
+        }
+
         body.sidebar-collapsed .sidebar-user-actions {
             display: none;
         }
@@ -2802,6 +3074,23 @@
                 flex-direction: column;
                 align-items: stretch;
             }
+
+            .auth-overlay {
+                padding: 16px;
+            }
+
+            .auth-panel {
+                padding: 22px 18px;
+                border-radius: 22px;
+            }
+
+            .auth-title {
+                font-size: 1.55rem;
+            }
+
+            .auth-code-row {
+                grid-template-columns: minmax(0, 1fr);
+            }
         }
 
         @media (prefers-reduced-motion: reduce) {
@@ -2862,6 +3151,61 @@
         </div>
     </div>
 
+    <div class="auth-overlay" id="authOverlay">
+        <div class="auth-panel">
+            <div class="auth-kicker">Everything Grabber</div>
+            <div class="auth-title">登录后进入你的私人资料库</div>
+            <div class="auth-description">
+                当前系统已经切到真实用户会话。登录后才会加载你的收藏、Notion 配置和 Obsidian 同步目标。
+            </div>
+            <button class="auth-google-btn" id="authGoogleBtn" type="button">
+                <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true">
+                    <path fill="#4285F4" d="M21.81 12.23c0-.72-.06-1.42-.2-2.09H12v3.96h5.5a4.7 4.7 0 0 1-2.04 3.09v2.56h3.3c1.93-1.78 3.05-4.4 3.05-7.52Z"></path>
+                    <path fill="#34A853" d="M12 22c2.76 0 5.07-.91 6.76-2.45l-3.3-2.56c-.92.62-2.1.99-3.46.99-2.66 0-4.92-1.8-5.73-4.21H2.86v2.64A10 10 0 0 0 12 22Z"></path>
+                    <path fill="#FBBC05" d="M6.27 13.77A5.98 5.98 0 0 1 5.95 12c0-.61.11-1.2.32-1.77V7.6H2.86A10 10 0 0 0 2 12c0 1.61.38 3.14 1.06 4.41l3.21-2.64Z"></path>
+                    <path fill="#EA4335" d="M12 6.02c1.5 0 2.84.52 3.9 1.54l2.93-2.93C17.06 2.97 14.75 2 12 2A10 10 0 0 0 2.86 7.6l3.41 2.63C7.08 7.82 9.34 6.02 12 6.02Z"></path>
+                </svg>
+                <span>使用 Google 登录</span>
+            </button>
+            <div class="auth-divider">或使用验证码</div>
+            <div class="auth-method-switch">
+                <button type="button" id="authModeEmailBtn" class="active">邮箱</button>
+                <button type="button" id="authModePhoneBtn">手机号</button>
+            </div>
+            <form class="auth-form active" id="emailAuthForm">
+                <div class="auth-field">
+                    <label for="authEmailInput">邮箱</label>
+                    <input id="authEmailInput" type="email" placeholder="you@example.com" autocomplete="email" />
+                </div>
+                <div class="auth-code-row">
+                    <div class="auth-field">
+                        <label for="authEmailCodeInput">验证码</label>
+                        <input id="authEmailCodeInput" type="text" inputmode="numeric" placeholder="输入 6 位验证码" autocomplete="one-time-code" />
+                    </div>
+                    <button class="auth-code-btn" id="authEmailRequestBtn" type="button">发送验证码</button>
+                </div>
+                <button class="auth-submit-btn" id="authEmailVerifyBtn" type="submit">邮箱登录</button>
+                <div class="auth-status" id="authEmailStatus"></div>
+            </form>
+            <form class="auth-form" id="phoneAuthForm">
+                <div class="auth-field">
+                    <label for="authPhoneInput">手机号</label>
+                    <input id="authPhoneInput" type="tel" placeholder="+1 555 123 4567" autocomplete="tel" />
+                </div>
+                <div class="auth-code-row">
+                    <div class="auth-field">
+                        <label for="authPhoneCodeInput">验证码</label>
+                        <input id="authPhoneCodeInput" type="text" inputmode="numeric" placeholder="输入 6 位验证码" autocomplete="one-time-code" />
+                    </div>
+                    <button class="auth-code-btn" id="authPhoneRequestBtn" type="button">发送验证码</button>
+                </div>
+                <button class="auth-submit-btn" id="authPhoneVerifyBtn" type="submit">手机号登录</button>
+                <div class="auth-status" id="authPhoneStatus"></div>
+            </form>
+            <div class="auth-provider-hint" id="authProviderHint"></div>
+        </div>
+    </div>
+
     <main>
         <div class="board-shell" id="boardShell">
             <aside class="folder-sidebar">
@@ -2891,23 +3235,27 @@
                         <div class="sidebar-user-profile">
                             <div class="sidebar-avatar-container">
                                 <div class="sidebar-avatar">
-                                    <img src="data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' fill='%23EBECEF'/><circle cx='50' cy='40' r='20' fill='%23A0A5AA'/><path d='M20 100 C20 70, 80 70, 80 100' fill='%23A0A5AA'/></svg>" alt="用户占位头像">
+                                    <img id="sidebarAvatarImage" src="data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' fill='%23EBECEF'/><circle cx='50' cy='40' r='20' fill='%23A0A5AA'/><path d='M20 100 C20 70, 80 70, 80 100' fill='%23A0A5AA'/></svg>" alt="用户头像">
                                 </div>
-                                <div class="sidebar-status-dot"></div>
+                                <div class="sidebar-status-dot is-offline" id="sidebarUserStatusDot"></div>
+                            </div>
+                            <div class="sidebar-user-meta">
+                                <div class="sidebar-user-name" id="sidebarUserName">未登录</div>
+                                <div class="sidebar-user-subtitle" id="sidebarUserSubtitle">请先登录</div>
                             </div>
                         </div>
                         <div class="sidebar-user-actions">
-                            <button type="button" title="帮助">
+                            <button type="button" id="sidebarSettingsBtn" title="集成设置">
                                 <svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                                    <circle cx="12" cy="12" r="10"></circle>
-                                    <path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"></path>
-                                    <line x1="12" y1="17" x2="12.01" y2="17"></line>
+                                    <path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"></path>
+                                    <circle cx="12" cy="12" r="3"></circle>
                                 </svg>
                             </button>
-                            <button type="button" title="通知">
+                            <button type="button" id="sidebarLogoutBtn" class="is-hidden" title="退出登录">
                                 <svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                                    <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"></path>
-                                    <path d="M13.73 21a2 2 0 0 1-3.46 0"></path>
+                                    <path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4"></path>
+                                    <path d="M10 17l5-5-5-5"></path>
+                                    <path d="M15 12H3"></path>
                                 </svg>
                             </button>
                         </div>
@@ -3007,6 +3355,33 @@
             <div class="modal-body settings-body">
                 <div class="settings-group">
                     <div class="settings-section">
+                        <h3>Google 登录</h3>
+                        <div class="settings-help" style="margin-bottom: 12px;">这是全局部署级配置。保存后，登录页会直接启用 Google OAuth。</div>
+                        <div class="settings-field">
+                            <label class="settings-label">Google OAuth Client ID</label>
+                            <input type="text" id="googleOauthClientId" class="filter-input" style="width: 100%;"
+                                placeholder="1234567890-xxxxx.apps.googleusercontent.com" />
+                        </div>
+                        <div class="settings-field">
+                            <label class="settings-label">Google OAuth Client Secret</label>
+                            <input type="password" id="googleOauthClientSecret" class="filter-input" style="width: 100%;"
+                                placeholder="GOCSPX-..." />
+                            <div class="settings-help">出于安全原因不会回显已保存的 Secret。留空时保留当前值。</div>
+                        </div>
+                        <div class="settings-field">
+                            <label class="settings-label">Google Redirect URI</label>
+                            <input type="text" id="googleOauthRedirectUri" class="filter-input" style="width: 100%;"
+                                placeholder="http://127.0.0.1:8000/api/auth/google/callback" />
+                            <div class="settings-help">不填时，后端会回退到当前服务的 `/api/auth/google/callback`。</div>
+                        </div>
+                        <div id="googleOauthStatusText" class="settings-status" style="color: #6b7280;">状态：未配置</div>
+                    </div>
+                </div>
+
+                <hr class="settings-divider">
+
+                <div class="settings-group">
+                    <div class="settings-section">
                         <h3>Notion 集成</h3>
                         <div class="settings-field">
                             <label class="settings-label">Client ID (OAuth)</label>
@@ -3017,6 +3392,7 @@
                             <label class="settings-label">Client Secret (OAuth)</label>
                             <input type="password" id="notionClientSecret" class="filter-input" style="width: 100%;"
                                 placeholder="secret_..." />
+                            <div class="settings-help">出于安全原因不会回显已保存的 Secret。留空时保留当前值。</div>
                         </div>
                         <div class="settings-field">
                             <label class="settings-label">Redirect URI</label>
@@ -3027,6 +3403,7 @@
                             <label class="settings-label">API Token (Auto-filled by OAuth)</label>
                             <input type="password" id="notionApiToken" class="filter-input"
                                 style="width: 100%; background: #f5f7fa;" placeholder="Not connected" disabled />
+                            <div class="settings-help">OAuth 成功后会安全保存在后端，这里只显示是否已保存，不回显明文。</div>
                         </div>
                         <div class="settings-actions">
                             <button id="connectNotionBtn" class="extract-btn"
@@ -3068,6 +3445,7 @@
                             <label class="settings-label">API Key</label>
                             <input type="password" id="obsidianApiKey" class="filter-input" style="width: 100%;"
                                 placeholder="Your API Key" />
+                            <div class="settings-help">出于安全原因不会回显已保存的 API Key。留空时保留当前值。</div>
                         </div>
                         <div class="settings-field">
                             <label class="settings-label">目标文件夹（可选）</label>
@@ -3166,12 +3544,39 @@
         const folderCreateInput = document.getElementById('folderCreateInput');
         const folderCreateConfirmBtn = document.getElementById('folderCreateConfirmBtn');
         const folderContextMenu = document.getElementById('folderContextMenu');
+        const authOverlay = document.getElementById('authOverlay');
+        const authGoogleBtn = document.getElementById('authGoogleBtn');
+        const authModeEmailBtn = document.getElementById('authModeEmailBtn');
+        const authModePhoneBtn = document.getElementById('authModePhoneBtn');
+        const emailAuthForm = document.getElementById('emailAuthForm');
+        const phoneAuthForm = document.getElementById('phoneAuthForm');
+        const authEmailInput = document.getElementById('authEmailInput');
+        const authEmailCodeInput = document.getElementById('authEmailCodeInput');
+        const authEmailRequestBtn = document.getElementById('authEmailRequestBtn');
+        const authEmailVerifyBtn = document.getElementById('authEmailVerifyBtn');
+        const authEmailStatus = document.getElementById('authEmailStatus');
+        const authPhoneInput = document.getElementById('authPhoneInput');
+        const authPhoneCodeInput = document.getElementById('authPhoneCodeInput');
+        const authPhoneRequestBtn = document.getElementById('authPhoneRequestBtn');
+        const authPhoneVerifyBtn = document.getElementById('authPhoneVerifyBtn');
+        const authPhoneStatus = document.getElementById('authPhoneStatus');
+        const authProviderHint = document.getElementById('authProviderHint');
+        const sidebarAvatarImage = document.getElementById('sidebarAvatarImage');
+        const sidebarUserStatusDot = document.getElementById('sidebarUserStatusDot');
+        const sidebarUserName = document.getElementById('sidebarUserName');
+        const sidebarUserSubtitle = document.getElementById('sidebarUserSubtitle');
+        const sidebarSettingsBtn = document.getElementById('sidebarSettingsBtn');
+        const sidebarLogoutBtn = document.getElementById('sidebarLogoutBtn');
 
         // Settings elements
         const settingsBtn = document.getElementById('settingsBtn');
         const settingsOverlay = document.getElementById('settingsOverlay');
         const closeSettingsModal = document.getElementById('closeSettingsModal');
         const btnSaveSettings = document.getElementById('saveSettingsBtn');
+        const googleOauthClientIdInput = document.getElementById('googleOauthClientId');
+        const googleOauthClientSecretInput = document.getElementById('googleOauthClientSecret');
+        const googleOauthRedirectUriInput = document.getElementById('googleOauthRedirectUri');
+        const googleOauthStatusText = document.getElementById('googleOauthStatusText');
         const notionStatusText = document.getElementById('notionStatusText');
         const obsidianStatusText = document.getElementById('obsidianStatusText');
         const obsidianFolderPathInput = document.getElementById('obsidianFolderPath');
@@ -3215,8 +3620,507 @@
         let remoteSyncRefreshInFlight = false;
         let lastRemoteSyncRefreshAt = 0;
         let hasWindowFocusedOnce = false;
+        let latestSettings = null;
+        let authState = {
+            authenticated: false,
+            user: null,
+            providers: {
+                google_enabled: false,
+                email_enabled: false,
+                phone_enabled: false,
+                email_delivery_mode: 'disabled',
+                phone_delivery_mode: 'disabled',
+            },
+        };
+        let authMode = 'email';
+        let hasLoadedAuthenticatedData = false;
+        let authBootstrapComplete = false;
+        let authUnauthorizedNoticeShown = false;
+        const nativeFetch = window.fetch.bind(window);
+        const defaultSidebarAvatar = sidebarAvatarImage ? sidebarAvatarImage.getAttribute('src') : '';
+
+        function getRequestUrl(input) {
+            if (typeof input === 'string') return input;
+            if (input instanceof Request) return input.url;
+            return input?.url || '';
+        }
+
+        function createEmptyAuthState(overrides = {}) {
+            const nextProviders = overrides.providers || authState.providers || {};
+            return {
+                authenticated: false,
+                user: null,
+                providers: {
+                    google_enabled: Boolean(nextProviders.google_enabled),
+                    email_enabled: Boolean(nextProviders.email_enabled),
+                    phone_enabled: Boolean(nextProviders.phone_enabled),
+                    email_delivery_mode: nextProviders.email_delivery_mode || 'disabled',
+                    phone_delivery_mode: nextProviders.phone_delivery_mode || 'disabled',
+                },
+                ...overrides,
+            };
+        }
+
+        function isAuthEndpoint(url) {
+            return String(url || '').includes('/api/auth/');
+        }
+
+        window.fetch = async function authAwareFetch(input, init) {
+            const response = await nativeFetch(input, init);
+            const requestUrl = getRequestUrl(input);
+            if (response.status === 401 && !isAuthEndpoint(requestUrl)) {
+                handleUnauthorizedState();
+            }
+            return response;
+        };
+
+        function setAuthStatus(element, message = '', tone = '') {
+            if (!element) return;
+            element.textContent = message;
+            element.className = 'auth-status';
+            if (tone) element.classList.add(`is-${tone}`);
+        }
+
+        function updateAuthProviderHint(providers) {
+            const hints = [];
+            if (providers.google_enabled) {
+                hints.push('Google OAuth 已启用');
+            } else {
+                hints.push('Google OAuth 尚未配置，可先用邮箱或手机号登录后到设置页启用');
+            }
+            if (providers.email_enabled) {
+                hints.push(providers.email_delivery_mode === 'dev' ? '邮箱验证码当前走开发模式' : '邮箱验证码将通过邮件发送');
+            }
+            if (providers.phone_enabled) {
+                hints.push(providers.phone_delivery_mode === 'dev' ? '短信验证码当前走开发模式' : '短信验证码将通过 Twilio 发送');
+            }
+            authProviderHint.textContent = hints.length
+                ? hints.join(' · ')
+                : '当前没有可用登录方式。请先配置 Google OAuth、SMTP 或 Twilio。';
+        }
+
+        function setAuthMode(mode = 'email') {
+            const nextMode = mode === 'phone' ? 'phone' : 'email';
+            const providers = authState.providers || {};
+            if (nextMode === 'phone' && !providers.phone_enabled && providers.email_enabled) {
+                authMode = 'email';
+            } else if (nextMode === 'email' && !providers.email_enabled && providers.phone_enabled) {
+                authMode = 'phone';
+            } else {
+                authMode = nextMode;
+            }
+
+            const emailActive = authMode === 'email';
+            authModeEmailBtn.classList.toggle('active', emailActive);
+            authModePhoneBtn.classList.toggle('active', !emailActive);
+            emailAuthForm.classList.toggle('active', emailActive);
+            phoneAuthForm.classList.toggle('active', !emailActive);
+            emailAuthForm.hidden = !emailActive;
+            phoneAuthForm.hidden = emailActive;
+        }
+
+        function applyAuthProviderAvailability(providers) {
+            authGoogleBtn.disabled = !providers.google_enabled;
+            authModeEmailBtn.disabled = !providers.email_enabled;
+            authModePhoneBtn.disabled = !providers.phone_enabled;
+            authEmailRequestBtn.disabled = !providers.email_enabled;
+            authEmailVerifyBtn.disabled = !providers.email_enabled;
+            authPhoneRequestBtn.disabled = !providers.phone_enabled;
+            authPhoneVerifyBtn.disabled = !providers.phone_enabled;
+
+            if (authMode === 'email' && !providers.email_enabled && providers.phone_enabled) {
+                setAuthMode('phone');
+            } else if (authMode === 'phone' && !providers.phone_enabled && providers.email_enabled) {
+                setAuthMode('email');
+            } else {
+                setAuthMode(authMode);
+            }
+            updateAuthProviderHint(providers);
+        }
+
+        function formatAuthPrimary(user) {
+            if (!user) return '未登录';
+            return user.display_name || user.email || user.phone_e164 || '已登录';
+        }
+
+        function formatAuthSecondary(user) {
+            if (!user) return '请先登录';
+            return user.email || user.phone_e164 || '已登录';
+        }
+
+        function applyAuthState(sessionData) {
+            authState = createEmptyAuthState(sessionData || {});
+            applyAuthProviderAvailability(authState.providers);
+
+            const user = authState.user;
+            sidebarUserName.textContent = formatAuthPrimary(user);
+            sidebarUserSubtitle.textContent = formatAuthSecondary(user);
+            sidebarAvatarImage.src = user?.avatar_url || defaultSidebarAvatar;
+            sidebarUserStatusDot.classList.toggle('is-offline', !authState.authenticated);
+            sidebarLogoutBtn.classList.toggle('is-hidden', !authState.authenticated);
+        }
+
+        function focusAuthInput() {
+            const target = authMode === 'phone' ? authPhoneInput : authEmailInput;
+            requestAnimationFrame(() => target?.focus());
+        }
+
+        function closeTransientPanels() {
+            if (commandOverlay.classList.contains('active')) closeCommandPalette();
+            if (folderPickerOverlay.classList.contains('active')) closeFolderPickerDialog();
+            if (settingsOverlay.classList.contains('active')) settingsOverlay.classList.remove('active');
+            if (modalOverlay.classList.contains('active')) closeModalDialog();
+        }
+
+        function showAuthOverlay(mode = authMode) {
+            closeTransientPanels();
+            setAuthMode(mode);
+            authOverlay.classList.add('active');
+            focusAuthInput();
+        }
+
+        function hideAuthOverlay() {
+            authOverlay.classList.remove('active');
+        }
+
+        function resetAuthenticatedAppState(message = '请先登录后查看你的资料库。') {
+            hasLoadedAuthenticatedData = false;
+            latestSettings = null;
+            itemsData = [];
+            filteredEntries = [];
+            commandSearchResults = [];
+            foldersData = [];
+            totalFolderCount = 0;
+            unfiledFolderCount = 0;
+            latestVisibleCount = 0;
+            latestReturnedCount = 0;
+            latestTotalCount = 0;
+            currentFolderScope = 'all';
+            currentFolderId = null;
+            clearSelection();
+            closeTransientPanels();
+            setStatsMessage('请先登录');
+            grid.className = currentView === 'gallery' ? 'grid' : 'list-view';
+            grid.innerHTML = `<div class="empty-state">${message}</div>`;
+            folderList.innerHTML = '<div class="folder-loading">登录后显示文件夹</div>';
+            folderMobileStrip.innerHTML = '';
+        }
+
+        function ensureAuthenticated(options = {}) {
+            const { showOverlay = true, mode = authMode } = options;
+            if (authState.authenticated) return true;
+            if (showOverlay) showAuthOverlay(mode);
+            return false;
+        }
+
+        async function refreshAuthSession(options = {}) {
+            const { silent = false } = options;
+            try {
+                const response = await nativeFetch('/api/auth/session');
+                const data = response.ok ? await response.json() : createEmptyAuthState();
+                applyAuthState(data);
+                if (authState.authenticated) {
+                    hideAuthOverlay();
+                } else if (!silent) {
+                    showAuthOverlay(authMode);
+                }
+                return authState;
+            } catch (error) {
+                console.error('Failed to refresh auth session', error);
+                applyAuthState(createEmptyAuthState());
+                if (!silent) {
+                    showAuthOverlay(authMode);
+                    showToast('无法连接到认证服务', 'error');
+                }
+                return authState;
+            }
+        }
+
+        async function bootstrapAuthenticatedData(options = {}) {
+            const { force = false } = options;
+            if (!authState.authenticated) {
+                resetAuthenticatedAppState();
+                return;
+            }
+            if (hasLoadedAuthenticatedData && !force) return;
+            hasLoadedAuthenticatedData = true;
+            await Promise.all([fetchFolders(), fetchItems()]);
+        }
+
+        function clearAuthInputs() {
+            authEmailCodeInput.value = '';
+            authPhoneCodeInput.value = '';
+            setAuthStatus(authEmailStatus);
+            setAuthStatus(authPhoneStatus);
+        }
+
+        async function handleAuthenticatedSession(sessionData, successMessage) {
+            applyAuthState(sessionData);
+            clearAuthInputs();
+            hideAuthOverlay();
+            await bootstrapAuthenticatedData({ force: true });
+            if (successMessage) showToast(successMessage, 'success');
+        }
+
+        function handleUnauthorizedState() {
+            if (authUnauthorizedNoticeShown) return;
+            authUnauthorizedNoticeShown = true;
+            const providerSnapshot = authState.providers;
+            applyAuthState(createEmptyAuthState({ providers: providerSnapshot }));
+            resetAuthenticatedAppState('登录已失效，请重新登录后继续使用。');
+            showAuthOverlay(authMode);
+            nativeFetch('/api/auth/session')
+                .then((response) => (response.ok ? response.json() : createEmptyAuthState({ providers: providerSnapshot })))
+                .then((data) => applyAuthState(data))
+                .catch(() => {});
+            if (authBootstrapComplete) {
+                showToast('登录已失效，请重新登录。', 'info');
+            }
+            window.setTimeout(() => {
+                authUnauthorizedNoticeShown = false;
+            }, 1500);
+        }
+
+        async function logoutCurrentUser() {
+            sidebarLogoutBtn.disabled = true;
+            try {
+                await fetch('/api/auth/logout', { method: 'POST' });
+            } catch (error) {
+                console.error('Failed to logout', error);
+            } finally {
+                sidebarLogoutBtn.disabled = false;
+            }
+            applyAuthState(createEmptyAuthState({ providers: authState.providers }));
+            resetAuthenticatedAppState('你已退出登录。重新登录后可继续访问你的资料库。');
+            await refreshAuthSession({ silent: true });
+            showAuthOverlay(authMode);
+            showToast('已退出登录', 'success');
+        }
+
+        function openSettingsPanel() {
+            if (!ensureAuthenticated({ mode: 'email' })) return;
+            settingsOverlay.classList.add('active');
+            loadSettings();
+        }
+
+        async function requestEmailCode() {
+            const email = authEmailInput.value.trim();
+            if (!email) {
+                setAuthStatus(authEmailStatus, '请输入邮箱地址', 'error');
+                return;
+            }
+
+            authEmailRequestBtn.disabled = true;
+            setAuthStatus(authEmailStatus, '发送中...');
+            try {
+                const response = await fetch('/api/auth/email/request-code', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ email }),
+                });
+                const data = await response.json().catch(() => ({}));
+                if (!response.ok) {
+                    throw new Error(data.detail || '发送验证码失败');
+                }
+                let message = `验证码已发送到 ${data.target_masked}。`;
+                if (data.dev_code) {
+                    authEmailCodeInput.value = data.dev_code;
+                    message += ` 开发模式验证码：${data.dev_code}`;
+                }
+                setAuthStatus(authEmailStatus, message, 'success');
+                authEmailCodeInput.focus();
+            } catch (error) {
+                setAuthStatus(authEmailStatus, error.message, 'error');
+            } finally {
+                authEmailRequestBtn.disabled = false;
+            }
+        }
+
+        async function verifyEmailCode(event) {
+            event.preventDefault();
+            const email = authEmailInput.value.trim();
+            const code = authEmailCodeInput.value.trim();
+            if (!email || !code) {
+                setAuthStatus(authEmailStatus, '请输入邮箱和验证码', 'error');
+                return;
+            }
+
+            authEmailVerifyBtn.disabled = true;
+            setAuthStatus(authEmailStatus, '登录中...');
+            try {
+                const response = await fetch('/api/auth/email/verify-code', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ email, code }),
+                });
+                const data = await response.json().catch(() => ({}));
+                if (!response.ok) {
+                    throw new Error(data.detail || '邮箱登录失败');
+                }
+                await handleAuthenticatedSession(data, '邮箱登录成功');
+            } catch (error) {
+                setAuthStatus(authEmailStatus, error.message, 'error');
+            } finally {
+                authEmailVerifyBtn.disabled = false;
+            }
+        }
+
+        async function requestPhoneCode() {
+            const phone = authPhoneInput.value.trim();
+            if (!phone) {
+                setAuthStatus(authPhoneStatus, '请输入手机号', 'error');
+                return;
+            }
+
+            authPhoneRequestBtn.disabled = true;
+            setAuthStatus(authPhoneStatus, '发送中...');
+            try {
+                const response = await fetch('/api/auth/phone/request-code', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ phone }),
+                });
+                const data = await response.json().catch(() => ({}));
+                if (!response.ok) {
+                    throw new Error(data.detail || '发送验证码失败');
+                }
+                let message = `验证码已发送到 ${data.target_masked}。`;
+                if (data.dev_code) {
+                    authPhoneCodeInput.value = data.dev_code;
+                    message += ` 开发模式验证码：${data.dev_code}`;
+                }
+                setAuthStatus(authPhoneStatus, message, 'success');
+                authPhoneCodeInput.focus();
+            } catch (error) {
+                setAuthStatus(authPhoneStatus, error.message, 'error');
+            } finally {
+                authPhoneRequestBtn.disabled = false;
+            }
+        }
+
+        async function verifyPhoneCode(event) {
+            event.preventDefault();
+            const phone = authPhoneInput.value.trim();
+            const code = authPhoneCodeInput.value.trim();
+            if (!phone || !code) {
+                setAuthStatus(authPhoneStatus, '请输入手机号和验证码', 'error');
+                return;
+            }
+
+            authPhoneVerifyBtn.disabled = true;
+            setAuthStatus(authPhoneStatus, '登录中...');
+            try {
+                const response = await fetch('/api/auth/phone/verify-code', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ phone, code }),
+                });
+                const data = await response.json().catch(() => ({}));
+                if (!response.ok) {
+                    throw new Error(data.detail || '手机号登录失败');
+                }
+                await handleAuthenticatedSession(data, '手机号登录成功');
+            } catch (error) {
+                setAuthStatus(authPhoneStatus, error.message, 'error');
+            } finally {
+                authPhoneVerifyBtn.disabled = false;
+            }
+        }
+
+        async function handleUrlCallbacks(currentSession = authState) {
+            const urlParams = new URLSearchParams(window.location.search);
+            const authResult = urlParams.get('auth');
+            const authProvider = urlParams.get('provider');
+            const notionAuth = urlParams.get('notion_auth');
+            let handled = false;
+
+            if (authResult === 'success' && authProvider === 'google') {
+                handled = true;
+                if (currentSession.authenticated) {
+                    showToast('Google 登录成功', 'success');
+                }
+            } else if (authResult === 'failed') {
+                handled = true;
+                const errorStr = urlParams.get('error') || 'unknown_error';
+                showToast(`Google 登录失败: ${errorStr}`, 'error');
+                showAuthOverlay('email');
+            }
+
+            if (notionAuth === 'success') {
+                handled = true;
+                if (currentSession.authenticated) {
+                    const settings = await loadSettings();
+                    if (settings?.notion_ready) {
+                        showToast('Notion 授权成功，已可直接同步。', 'success');
+                    } else {
+                        showToast('Notion 授权成功，但还需要选择一个同步目标才能同步。', 'info');
+                    }
+                }
+            } else if (notionAuth === 'partial') {
+                handled = true;
+                if (currentSession.authenticated) {
+                    await loadSettings();
+                    showToast('Notion 授权成功，但当前还缺少同步目标。请在设置里选择一个页面或数据库。', 'info');
+                }
+            } else if (notionAuth === 'failed') {
+                handled = true;
+                const errorStr = urlParams.get('error') || 'Unknown error';
+                showToast(`Notion Authentication Failed: ${errorStr}`, 'error');
+            }
+
+            if (handled) {
+                window.history.replaceState({}, document.title, window.location.pathname);
+            }
+        }
+
+        async function bootstrapAuth() {
+            applyAuthState(createEmptyAuthState());
+            resetAuthenticatedAppState();
+            updateSidebarState();
+            updateCommandPaletteState();
+            const session = await refreshAuthSession({ silent: true });
+            if (session.authenticated) {
+                await bootstrapAuthenticatedData({ force: true });
+            } else {
+                showAuthOverlay('email');
+            }
+            await handleUrlCallbacks(session);
+            authBootstrapComplete = true;
+        }
 
         // Settings Logic
+        function applySecretInputState(input, hasSavedSecret, emptyPlaceholder, savedPlaceholder) {
+            if (!input) return;
+            input.value = '';
+            input.placeholder = hasSavedSecret ? savedPlaceholder : emptyPlaceholder;
+            input.dataset.hasSavedSecret = hasSavedSecret ? 'true' : 'false';
+        }
+
+        function setGoogleOAuthStatus(data) {
+            if (data?.google_oauth_ready) {
+                const managedBy = data.google_oauth_managed_by === 'env' ? '环境变量' : '设置页';
+                const redirectHint = data.google_oauth_redirect_uri
+                    ? ` Redirect URI：${data.google_oauth_redirect_uri}`
+                    : ' Redirect URI：使用当前服务默认回调地址。';
+                googleOauthStatusText.textContent = `状态：已配置，可在登录页使用 Google OAuth。来源：${managedBy}.${redirectHint}`;
+                googleOauthStatusText.style.color = '#1f7a4d';
+                return;
+            }
+
+            const missing = data?.google_oauth_missing_fields || [];
+            if (missing.length) {
+                const labels = [];
+                if (missing.includes('google_oauth_client_id')) labels.push('Client ID');
+                if (missing.includes('google_oauth_client_secret')) labels.push('Client Secret');
+                googleOauthStatusText.textContent = `状态：未完成配置，缺少 ${labels.join(' / ')}。`;
+                googleOauthStatusText.style.color = '#b7791f';
+                return;
+            }
+
+            googleOauthStatusText.textContent = '状态：未配置';
+            googleOauthStatusText.style.color = '#6b7280';
+        }
+
         function setNotionStatus(data) {
             if (data?.notion_ready) {
                 notionStatusText.textContent = '状态：已连接，可同步到 Notion。';
@@ -3224,7 +4128,7 @@
                 return;
             }
 
-            if (data?.notion_api_token) {
+            if (data?.notion_api_token_saved) {
                 const missingDatabase = (data.notion_missing_fields || []).includes('notion_database_id');
                 notionStatusText.textContent = missingDatabase
                     ? '状态：已完成 OAuth，但还没有选择同步目标，当前不能同步。'
@@ -3314,7 +4218,7 @@
 
         async function loadNotionDatabases(selectedValue = '') {
             notionDbSelect.innerHTML = '<option value="">先完成 OAuth，再从这里选择</option>';
-            const hasToken = document.getElementById('notionApiToken').value.trim();
+            const hasToken = Boolean(latestSettings?.notion_api_token_saved);
             if (!hasToken) {
                 setNotionTargetHint([], selectedValue);
                 return [];
@@ -3367,19 +4271,45 @@
         }
 
         async function loadSettings() {
+            if (!ensureAuthenticated({ showOverlay: false })) return null;
             try {
                 const res = await fetch('/api/settings');
                 if (res.ok) {
                     const data = await res.json();
-                    document.getElementById('notionApiToken').value = data.notion_api_token || '';
+                    latestSettings = data;
+                    googleOauthClientIdInput.value = data.google_oauth_client_id || '';
+                    applySecretInputState(
+                        googleOauthClientSecretInput,
+                        Boolean(data.google_oauth_client_secret_saved),
+                        'GOCSPX-...',
+                        '已保存，留空则保留当前 Client Secret'
+                    );
+                    googleOauthRedirectUriInput.value = data.google_oauth_redirect_uri || '';
+                    applySecretInputState(
+                        document.getElementById('notionApiToken'),
+                        Boolean(data.notion_api_token_saved),
+                        'Not connected',
+                        '已通过 OAuth 保存，出于安全原因不回显'
+                    );
                     document.getElementById('notionClientId').value = data.notion_client_id || '';
-                    document.getElementById('notionClientSecret').value = data.notion_client_secret || '';
+                    applySecretInputState(
+                        document.getElementById('notionClientSecret'),
+                        Boolean(data.notion_client_secret_saved),
+                        'secret_...',
+                        '已保存，留空则保留当前 Secret'
+                    );
                     document.getElementById('notionRedirectUri').value = data.notion_redirect_uri || '';
                     notionDbIdInput.value = data.notion_database_id || '';
                     document.getElementById('obsidianApiUrl').value = data.obsidian_rest_api_url || '';
-                    document.getElementById('obsidianApiKey').value = data.obsidian_api_key || '';
+                    applySecretInputState(
+                        document.getElementById('obsidianApiKey'),
+                        Boolean(data.obsidian_api_key_saved),
+                        'Your API Key',
+                        '已保存，留空则保留当前 API Key'
+                    );
                     document.getElementById('obsidianFolderPath').value = data.obsidian_folder_path || '';
                     document.getElementById('autoSyncTarget').value = data.auto_sync_target || 'none';
+                    setGoogleOAuthStatus(data);
                     setNotionStatus(data);
                     setObsidianStatus(data);
                     await loadNotionDatabases(data.notion_database_id || '');
@@ -3392,8 +4322,7 @@
         }
 
         settingsBtn.onclick = () => {
-            settingsOverlay.classList.add('active');
-            loadSettings();
+            openSettingsPanel();
         };
 
         closeSettingsModal.onclick = () => {
@@ -3402,15 +4331,21 @@
 
         btnSaveSettings.onclick = async () => {
             const payload = {
+                google_oauth_client_id: googleOauthClientIdInput.value.trim() || null,
+                google_oauth_redirect_uri: googleOauthRedirectUriInput.value.trim() || null,
                 notion_client_id: document.getElementById('notionClientId').value.trim() || null,
-                notion_client_secret: document.getElementById('notionClientSecret').value.trim() || null,
                 notion_redirect_uri: document.getElementById('notionRedirectUri').value.trim() || null,
                 notion_database_id: notionDbIdInput.value.trim() || null,
                 obsidian_rest_api_url: document.getElementById('obsidianApiUrl').value.trim() || null,
-                obsidian_api_key: document.getElementById('obsidianApiKey').value.trim() || null,
                 obsidian_folder_path: document.getElementById('obsidianFolderPath').value.trim() || null,
                 auto_sync_target: document.getElementById('autoSyncTarget').value
             };
+            const googleOauthClientSecret = googleOauthClientSecretInput.value.trim();
+            const notionClientSecret = document.getElementById('notionClientSecret').value.trim();
+            const obsidianApiKey = document.getElementById('obsidianApiKey').value.trim();
+            if (googleOauthClientSecret) payload.google_oauth_client_secret = googleOauthClientSecret;
+            if (notionClientSecret) payload.notion_client_secret = notionClientSecret;
+            if (obsidianApiKey) payload.obsidian_api_key = obsidianApiKey;
             btnSaveSettings.disabled = true;
             btnSaveSettings.innerText = "保存中...";
             try {
@@ -3421,11 +4356,16 @@
                 });
                 if (res.ok) {
                     const data = await res.json();
+                    latestSettings = data;
+                    setGoogleOAuthStatus(data);
                     setNotionStatus(data);
                     setObsidianStatus(data);
                     await loadNotionDatabases(data.notion_database_id || '');
+                    await refreshAuthSession({ silent: true });
                     if (data.notion_ready || data.obsidian_ready) {
                         showToast('设置已保存，集成已更新。', 'success');
+                    } else if (data.google_oauth_ready) {
+                        showToast('设置已保存，Google 登录已启用。', 'success');
                     } else {
                         showToast('设置已保存，但仍有未完成的集成配置。', 'info');
                     }
@@ -3449,9 +4389,10 @@
                 // First save the current OAuth credentials so the backend knows them
                 const payload = {
                     notion_client_id: document.getElementById('notionClientId').value.trim() || null,
-                    notion_client_secret: document.getElementById('notionClientSecret').value.trim() || null,
                     notion_redirect_uri: document.getElementById('notionRedirectUri').value.trim() || null
                 };
+                const notionClientSecret = document.getElementById('notionClientSecret').value.trim();
+                if (notionClientSecret) payload.notion_client_secret = notionClientSecret;
                 await fetch('/api/settings', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
@@ -3514,7 +4455,16 @@
             testObsidianBtn.disabled = true;
             testObsidianBtn.innerText = '验证中...';
             try {
-                const response = await fetch('/api/connect/obsidian/test', { method: 'POST' });
+                const obsidianApiKey = document.getElementById('obsidianApiKey').value.trim();
+                const response = await fetch('/api/connect/obsidian/test', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        obsidian_rest_api_url: document.getElementById('obsidianApiUrl').value.trim(),
+                        obsidian_api_key: obsidianApiKey || undefined,
+                        obsidian_folder_path: document.getElementById('obsidianFolderPath').value.trim(),
+                    })
+                });
                 const data = await response.json();
                 if (!response.ok) {
                     showToast(`Obsidian 验证失败: ${data.detail || '未知错误'}`, 'error');
@@ -3553,6 +4503,7 @@
         }, REMOTE_SYNC_REFRESH_INTERVAL_MS);
 
         function openCommandPalette() {
+            if (!ensureAuthenticated({ mode: 'email' })) return;
             commandOverlay.classList.add('active');
             updateCommandPaletteState();
             requestAnimationFrame(() => {
@@ -3567,6 +4518,7 @@
         }
 
         async function importFromClipboard() {
+            if (!ensureAuthenticated({ mode: 'email' })) return;
             if (!navigator.clipboard?.readText) {
                 showToast('当前浏览器不支持读取剪贴板', 'error');
                 return;
@@ -3800,6 +4752,11 @@
         }
 
         async function fetchFolders() {
+            if (!ensureAuthenticated({ showOverlay: false })) {
+                folderList.innerHTML = '<div class="folder-loading">登录后显示文件夹</div>';
+                folderMobileStrip.innerHTML = '';
+                return;
+            }
             try {
                 const response = await fetch('/api/folders');
                 if (!response.ok) throw new Error('API Error');
@@ -3813,6 +4770,7 @@
                 }
                 renderFolderNavigation();
             } catch (error) {
+                if (!authState.authenticated) return;
                 folderList.innerHTML = '<div class="folder-loading">文件夹加载失败</div>';
                 folderMobileStrip.innerHTML = '';
             }
@@ -4354,6 +5312,10 @@
                 clearCommandResults();
                 return;
             }
+            if (!ensureAuthenticated({ showOverlay: false })) {
+                clearCommandResults();
+                return;
+            }
 
             const requestId = ++commandRequestId;
             commandResults.innerHTML = '<div class="suggestion-empty">搜索中...</div>';
@@ -4387,6 +5349,7 @@
         }
 
         function applyCommandSearch() {
+            if (!ensureAuthenticated({ mode: 'email' })) return;
             const query = urlInput.value.trim();
             if (!query) {
                 showToast('请输入关键词', 'error');
@@ -4420,6 +5383,7 @@
         }
 
         async function extractURL(urlOverride = null) {
+            if (!ensureAuthenticated({ mode: 'email' })) return;
             const rawValue = urlOverride ?? urlInput.value.trim();
             const url = resolveCommandUrl(rawValue);
             if (!rawValue) { showToast('请输入链接', 'error'); return; }
@@ -4477,6 +5441,11 @@
         });
         document.addEventListener('keydown', e => {
             const key = e.key.toLowerCase();
+            if (authOverlay.classList.contains('active') && e.key === 'Escape') {
+                e.preventDefault();
+                focusAuthInput();
+                return;
+            }
             if ((e.metaKey || e.ctrlKey) && key === 'k') {
                 e.preventDefault();
                 if (commandOverlay.classList.contains('active')) closeCommandPalette();
@@ -4626,6 +5595,10 @@
 
         async function fetchItems() {
             const requestId = ++libraryRequestId;
+            if (!ensureAuthenticated({ showOverlay: false })) {
+                resetAuthenticatedAppState();
+                return;
+            }
             try {
                 const response = await fetch(`/api/items?${getActiveSearchParams(200).toString()}`);
                 if (!response.ok) throw new Error('API Error');
@@ -4650,6 +5623,7 @@
                 );
                 renderItems(filteredEntries);
             } catch (error) {
+                if (!authState.authenticated) return;
                 setStatsMessage('加载失败');
                 grid.className = 'grid';
                 grid.innerHTML = '<div class="empty-state">无法连接到后端 API</div>';
@@ -4736,6 +5710,7 @@
 
         function triggerRemoteSyncRefresh(options = {}) {
             const { force = false, itemIds = null } = options;
+            if (!authState.authenticated) return;
             if (document.visibilityState === 'hidden') return;
             if (remoteSyncRefreshInFlight) return;
 
@@ -4879,6 +5854,18 @@
                 createFolderAndApply();
             }
         });
+        authModeEmailBtn.addEventListener('click', () => setAuthMode('email'));
+        authModePhoneBtn.addEventListener('click', () => setAuthMode('phone'));
+        authGoogleBtn.addEventListener('click', () => {
+            if (authGoogleBtn.disabled) return;
+            window.location.href = '/api/auth/google/start';
+        });
+        authEmailRequestBtn.addEventListener('click', () => requestEmailCode());
+        authPhoneRequestBtn.addEventListener('click', () => requestPhoneCode());
+        emailAuthForm.addEventListener('submit', verifyEmailCode);
+        phoneAuthForm.addEventListener('submit', verifyPhoneCode);
+        sidebarSettingsBtn.addEventListener('click', () => openSettingsPanel());
+        sidebarLogoutBtn.addEventListener('click', () => logoutCurrentUser());
 
         async function deleteItem(id, event) {
             event.stopPropagation();
@@ -5047,38 +6034,7 @@
             }
         });
 
-        // Fetch on load
-        updateSidebarState();
-        fetchFolders();
-        fetchItems();
-        updateCommandPaletteState();
-
-        // Check URL for OAuth callback results
-        const urlParams = new URLSearchParams(window.location.search);
-        const notionAuth = urlParams.get('notion_auth');
-        if (notionAuth === 'success') {
-            setTimeout(async () => {
-                const settings = await loadSettings();
-                if (settings?.notion_ready) {
-                    showToast('Notion 授权成功，已可直接同步。', 'success');
-                } else {
-                    showToast('Notion 授权成功，但还需要选择一个同步目标才能同步。', 'info');
-                }
-            }, 500);
-            // Clean up URL
-            window.history.replaceState({}, document.title, window.location.pathname);
-        } else if (notionAuth === 'partial') {
-            setTimeout(async () => {
-                await loadSettings();
-                showToast('Notion 授权成功，但当前还缺少同步目标。请在设置里选择一个页面或数据库。', 'info');
-            }, 500);
-            // Clean up URL
-            window.history.replaceState({}, document.title, window.location.pathname);
-        } else if (notionAuth === 'failed') {
-            const errorStr = urlParams.get('error') || 'Unknown error';
-            setTimeout(() => showToast(`Notion Authentication Failed: ${errorStr}`, 'error'), 500);
-            window.history.replaceState({}, document.title, window.location.pathname);
-        }
+        bootstrapAuth();
     </script>
 </body>
 

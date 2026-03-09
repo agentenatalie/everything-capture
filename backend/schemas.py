@@ -66,13 +66,23 @@ class ExtractResponse(BaseModel):
     media_count: int = 0
 
 class SettingsResponse(BaseModel):
+    google_oauth_client_id: Optional[str] = None
+    google_oauth_client_secret: Optional[str] = None
+    google_oauth_client_secret_saved: bool = False
+    google_oauth_redirect_uri: Optional[str] = None
+    google_oauth_ready: bool = False
+    google_oauth_missing_fields: list[str] = Field(default_factory=list)
+    google_oauth_managed_by: str = "settings"
     notion_api_token: Optional[str] = None
+    notion_api_token_saved: bool = False
     notion_database_id: Optional[str] = None
     notion_client_id: Optional[str] = None
     notion_client_secret: Optional[str] = None
+    notion_client_secret_saved: bool = False
     notion_redirect_uri: Optional[str] = None
     obsidian_rest_api_url: Optional[str] = None
     obsidian_api_key: Optional[str] = None
+    obsidian_api_key_saved: bool = False
     obsidian_folder_path: Optional[str] = None
     auto_sync_target: str = "none"
     notion_ready: bool = False
@@ -84,6 +94,9 @@ class SettingsResponse(BaseModel):
         from_attributes = True
 
 class SettingsUpdateRequest(BaseModel):
+    google_oauth_client_id: Optional[str] = None
+    google_oauth_client_secret: Optional[str] = None
+    google_oauth_redirect_uri: Optional[str] = None
     notion_api_token: Optional[str] = None
     notion_database_id: Optional[str] = None
     notion_client_id: Optional[str] = None
@@ -131,3 +144,52 @@ class BulkFolderUpdateRequest(BaseModel):
 
 class BulkFolderUpdateResponse(BaseModel):
     updated_count: int
+
+
+class AuthUserResponse(BaseModel):
+    id: str
+    email: Optional[str] = None
+    phone_e164: Optional[str] = None
+    display_name: str
+    avatar_url: Optional[str] = None
+
+
+class AuthProvidersResponse(BaseModel):
+    google_enabled: bool = False
+    email_enabled: bool = False
+    phone_enabled: bool = False
+    email_delivery_mode: str = "disabled"
+    phone_delivery_mode: str = "disabled"
+
+
+class AuthSessionResponse(BaseModel):
+    authenticated: bool = False
+    user: Optional[AuthUserResponse] = None
+    providers: AuthProvidersResponse = Field(default_factory=AuthProvidersResponse)
+
+
+class EmailCodeRequest(BaseModel):
+    email: str
+
+
+class EmailCodeVerifyRequest(BaseModel):
+    email: str
+    code: str
+    display_name: Optional[str] = None
+
+
+class PhoneCodeRequest(BaseModel):
+    phone: str
+
+
+class PhoneCodeVerifyRequest(BaseModel):
+    phone: str
+    code: str
+    display_name: Optional[str] = None
+
+
+class CodeDeliveryResponse(BaseModel):
+    status: str
+    delivery_mode: str
+    target_masked: str
+    dev_code: Optional[str] = None

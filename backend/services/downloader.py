@@ -209,6 +209,7 @@ async def download_media_list(
     item_id: str,
     media_list: list[dict],
     referer: str = "",
+    user_id: str | None = None,
 ) -> list[dict]:
     """
     批量下载媒体文件。
@@ -218,7 +219,8 @@ async def download_media_list(
     返回: [{"type", "original_url", "local_path", "file_size", "display_order"}, ...]
     """
     results = []
-    item_dir = MEDIA_ROOT / item_id
+    path_parts = ["users", user_id, item_id] if user_id else [item_id]
+    item_dir = MEDIA_ROOT.joinpath(*path_parts)
 
     for media in media_list:
         url = media.get("url", "")
@@ -235,7 +237,7 @@ async def download_media_list(
         final_path, file_size = await download_file(url, save_path, mtype, referer=referer)
         if file_size > 0 and final_path:
             # 存储相对于 static/ 的路径，用于 URL 访问
-            relative_path = f"media/{item_id}/{final_path.name}"
+            relative_path = f"media/{'/'.join(path_parts)}/{final_path.name}"
             results.append({
                 "type": mtype,
                 "original_url": url,

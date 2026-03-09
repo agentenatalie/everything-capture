@@ -22,6 +22,7 @@ from schemas import (
     MediaResponse,
 )
 from paths import STATIC_DIR
+from tenant import get_current_user_id
 
 router = APIRouter(
     prefix="/api",
@@ -285,14 +286,37 @@ def apply_folder_filter(query, folder_scope: str = "all", folder_id: Optional[st
     return query
 
 
-def resolve_folder(db: Session, folder_id: Optional[str]) -> Optional[Folder]:
+def resolve_folder(db: Session, user_id: str, folder_id: Optional[str]) -> Optional[Folder]:
     if not folder_id:
         return None
 
-    folder = db.query(Folder).filter(Folder.id == folder_id).first()
+    folder = db.query(Folder).filter(Folder.id == folder_id, Folder.user_id == user_id).first()
     if not folder:
         raise HTTPException(status_code=404, detail="Folder not found")
     return folder
+
+
+def _cleanup_item_media_files(local_paths: list[str]) -> None:
+    checked_dirs: set[str] = set()
+    for relative_path in {path for path in local_paths if path}:
+        absolute_path = STATIC_DIR / relative_path
+        if absolute_path.exists():
+            try:
+                absolute_path.unlink()
+            except OSError:
+                continue
+
+        current_dir = absolute_path.parent
+        while current_dir != STATIC_DIR and current_dir.exists():
+            dir_key = str(current_dir)
+            if dir_key in checked_dirs:
+                break
+            checked_dirs.add(dir_key)
+            try:
+                current_dir.rmdir()
+            except OSError:
+                break
+            current_dir = current_dir.parent
 
 
 def normalize_search_text(value: str) -> str:
@@ -512,8 +536,9 @@ def get_items(
     folder_id: Optional[str] = None,
     db: Session = Depends(get_db),
 ):
+    user_id = get_current_user_id()
     safe_limit = max(1, min(limit, 200))
-    total_count = db.query(func.count(Item.id)).scalar() or 0
+    total_count = db.query(func.count(Item.id)).filter(Item.user_id == user_id).scalar() or 0
 
     raw_query = (q or "").strip()
     if raw_query:
@@ -522,12 +547,13 @@ def get_items(
                 apply_platform_filter(
                     db.query(
                         Item.id,
+                        Item.user_id,
                         Item.title,
                         Item.canonical_text,
                         Item.source_url,
                         Item.platform,
                         Item.created_at,
-                    ),
+                    ).filter(Item.user_id == user_id),
                     platform,
                 ),
                 folder_scope,
@@ -541,14 +567,14 @@ def get_items(
         if page_item_ids:
             items_by_id = {
                 item.id: item
-                for item in db.query(Item).filter(Item.id.in_(page_item_ids)).all()
+                for item in db.query(Item).filter(Item.user_id == user_id, Item.id.in_(page_item_ids)).all()
             }
             items = [items_by_id[item_id] for item_id in page_item_ids if item_id in items_by_id]
         else:
             items = []
     else:
         items_query = apply_folder_filter(
-            apply_platform_filter(db.query(Item), platform),
+            apply_platform_filter(db.query(Item).filter(Item.user_id == user_id), platform),
             folder_scope,
             folder_id,
         )
@@ -573,11 +599,12 @@ def update_item_folder(
     request: ItemFolderUpdateRequest,
     db: Session = Depends(get_db),
 ):
-    item = db.query(Item).filter(Item.id == item_id).first()
+    user_id = get_current_user_id()
+    item = db.query(Item).filter(Item.id == item_id, Item.user_id == user_id).first()
     if not item:
         raise HTTPException(status_code=404, detail="Item not found")
 
-    folder = resolve_folder(db, request.folder_id)
+    folder = resolve_folder(db, user_id, request.folder_id)
     item.folder_id = folder.id if folder else None
     if folder:
         folder.updated_at = datetime.utcnow()
@@ -592,12 +619,13 @@ def bulk_update_item_folder(
     request: BulkFolderUpdateRequest,
     db: Session = Depends(get_db),
 ):
+    user_id = get_current_user_id()
     item_ids = [item_id for item_id in request.item_ids if item_id]
     if not item_ids:
         raise HTTPException(status_code=400, detail="item_ids is required")
 
-    folder = resolve_folder(db, request.folder_id)
-    items = db.query(Item).filter(Item.id.in_(item_ids)).all()
+    folder = resolve_folder(db, user_id, request.folder_id)
+    items = db.query(Item).filter(Item.user_id == user_id, Item.id.in_(item_ids)).all()
     if not items:
         raise HTTPException(status_code=404, detail="Items not found")
 
@@ -612,17 +640,21 @@ def bulk_update_item_folder(
 
 @router.delete("/items/{item_id}", status_code=204)
 def delete_item(item_id: str, db: Session = Depends(get_db)):
-    item = db.query(Item).filter(Item.id == item_id).first()
+    user_id = get_current_user_id()
+    item = db.query(Item).filter(Item.id == item_id, Item.user_id == user_id).first()
     if not item:
         raise HTTPException(status_code=404, detail="Item not found")
-        
+
+    local_paths = [media.local_path for media in item.media if media.local_path]
     db.delete(item)
     db.commit()
+    _cleanup_item_media_files(local_paths)
     return None
 
 @router.get("/items/{item_id}/export/zip")
 def export_item_zip(item_id: str, db: Session = Depends(get_db)):
-    item = db.query(Item).filter(Item.id == item_id).first()
+    user_id = get_current_user_id()
+    item = db.query(Item).filter(Item.id == item_id, Item.user_id == user_id).first()
     if not item:
         raise HTTPException(status_code=404, detail="Item not found")
         

@@ -9,6 +9,8 @@ import httpx
 import logging
 from paths import STATIC_DIR
 from pydantic import BaseModel, Field
+from security import decrypt_secret, encrypt_secret
+from tenant import get_current_user_id
 
 logger = logging.getLogger(__name__)
 
@@ -50,11 +52,58 @@ _SYNC_STATUS_CACHE: dict[str, dict[str, object]] = {}
 class SyncStatusRefreshRequest(BaseModel):
     item_ids: list[str] = Field(default_factory=list)
 
+
+class ObsidianTestRequest(BaseModel):
+    obsidian_rest_api_url: str | None = None
+    obsidian_api_key: str | None = None
+    obsidian_folder_path: str | None = None
+
+
+def _get_user_settings(db: Session, user_id: str) -> Settings | None:
+    return db.query(Settings).filter(Settings.user_id == user_id).first()
+
+
+def _get_user_item(db: Session, user_id: str, item_id: str) -> Item | None:
+    return db.query(Item).filter(Item.user_id == user_id, Item.id == item_id).first()
+
 def _clean_optional_string(value: str | None) -> str | None:
     if value is None:
         return None
     value = value.strip()
     return value or None
+
+
+def _get_setting_secret(settings: Settings | None, field_name: str) -> str | None:
+    if not settings:
+        return None
+    try:
+        return _clean_optional_string(decrypt_secret(getattr(settings, field_name, None)))
+    except ValueError as exc:
+        logger.error("Stored secret %s could not be decrypted: %s", field_name, exc)
+        raise HTTPException(status_code=500, detail=f"Stored secret {field_name} is unreadable") from exc
+
+
+def _model_fields_set(model: BaseModel | None) -> set[str]:
+    if model is None:
+        return set()
+    fields_set = getattr(model, "model_fields_set", None)
+    if fields_set is not None:
+        return set(fields_set)
+    legacy_fields_set = getattr(model, "__fields_set__", None)
+    return set(legacy_fields_set or set())
+
+
+def _resolve_request_value(
+    request_model: BaseModel | None,
+    field_name: str,
+    saved_value: str | None,
+    *,
+    normalizer=_clean_optional_string,
+) -> str | None:
+    if request_model is not None and field_name in _model_fields_set(request_model):
+        return normalizer(getattr(request_model, field_name))
+    return normalizer(saved_value)
+
 
 def _normalize_notion_id(value: str | None) -> str | None:
     cleaned = _clean_optional_string(value)
@@ -889,7 +938,7 @@ def _build_obsidian_note(item: Item, media_references: dict[str, str]) -> str:
 
 def _extract_notion_missing_fields(settings: Settings | None) -> list[str]:
     missing_fields = []
-    if not settings or not _clean_optional_string(settings.notion_api_token):
+    if not _get_setting_secret(settings, "notion_api_token"):
         missing_fields.append("notion_api_token")
     if not _normalize_notion_id(settings.notion_database_id if settings else None):
         missing_fields.append("notion_database_id")
@@ -1271,7 +1320,8 @@ def _obsidian_client_kwargs(url_base: str) -> dict:
 
 @router.get("/notion/oauth/url")
 async def get_notion_oauth_url(db: Session = Depends(get_db)):
-    settings = db.query(Settings).first()
+    user_id = get_current_user_id()
+    settings = _get_user_settings(db, user_id)
     notion_client_id = _clean_optional_string(settings.notion_client_id if settings else None)
     notion_redirect_uri = _clean_optional_string(settings.notion_redirect_uri if settings else None)
     if not notion_client_id or not notion_redirect_uri:
@@ -1286,9 +1336,14 @@ async def notion_oauth_callback(code: str, error: str = None, db: Session = Depe
     if error:
         return RedirectResponse(url=f"/?notion_auth=failed&error={urllib.parse.quote(error)}")
         
-    settings = db.query(Settings).first()
+    user_id = get_current_user_id()
+    settings = _get_user_settings(db, user_id)
+    if not settings:
+        settings = Settings(user_id=user_id)
+        db.add(settings)
+        db.flush()
     notion_client_id = _clean_optional_string(settings.notion_client_id if settings else None)
-    notion_client_secret = _clean_optional_string(settings.notion_client_secret if settings else None)
+    notion_client_secret = _get_setting_secret(settings, "notion_client_secret")
     notion_redirect_uri = _clean_optional_string(settings.notion_redirect_uri if settings else None)
     if not notion_client_id or not notion_client_secret or not notion_redirect_uri:
         return RedirectResponse(url="/?notion_auth=failed&error=missing_config")
@@ -1314,7 +1369,7 @@ async def notion_oauth_callback(code: str, error: str = None, db: Session = Depe
             response = await client.post("https://api.notion.com/v1/oauth/token", headers=headers, json=payload, timeout=10.0)
             if response.status_code == 200:
                 data = response.json()
-                settings.notion_api_token = data.get("access_token")
+                settings.notion_api_token = encrypt_secret(data.get("access_token"))
                 db.commit()
                 notion_redirect_state = "success" if _normalize_notion_id(settings.notion_database_id) else "partial"
                 return RedirectResponse(url=f"/?notion_auth={notion_redirect_state}")
@@ -1327,8 +1382,9 @@ async def notion_oauth_callback(code: str, error: str = None, db: Session = Depe
 
 @router.get("/notion/databases")
 async def list_notion_databases(db: Session = Depends(get_db)):
-    settings = db.query(Settings).first()
-    notion_api_token = _clean_optional_string(settings.notion_api_token if settings else None)
+    user_id = get_current_user_id()
+    settings = _get_user_settings(db, user_id)
+    notion_api_token = _get_setting_secret(settings, "notion_api_token")
     if not notion_api_token:
         raise HTTPException(status_code=400, detail="Notion is not authenticated yet.")
 
@@ -1349,12 +1405,13 @@ async def list_notion_databases(db: Session = Depends(get_db)):
 
 @router.post("/notion/sync/{item_id}")
 async def sync_to_notion(item_id: str, db: Session = Depends(get_db)):
-    item = db.query(Item).filter(Item.id == item_id).first()
+    user_id = get_current_user_id()
+    item = _get_user_item(db, user_id, item_id)
     if not item:
         raise HTTPException(status_code=404, detail="Item not found")
         
-    settings = db.query(Settings).first()
-    notion_api_token = _clean_optional_string(settings.notion_api_token if settings else None)
+    settings = _get_user_settings(db, user_id)
+    notion_api_token = _get_setting_secret(settings, "notion_api_token")
     if not notion_api_token:
         raise HTTPException(status_code=400, detail="Notion settings are incomplete: missing notion_api_token")
     notion_headers = _notion_headers(notion_api_token)
@@ -1463,15 +1520,18 @@ async def sync_to_notion(item_id: str, db: Session = Depends(get_db)):
 
 @router.post("/obsidian/sync/{item_id}")
 async def sync_to_obsidian(item_id: str, db: Session = Depends(get_db)):
-    item = db.query(Item).filter(Item.id == item_id).first()
+    user_id = get_current_user_id()
+    item = _get_user_item(db, user_id, item_id)
     if not item:
         raise HTTPException(status_code=404, detail="Item not found")
         
-    settings = db.query(Settings).first()
-    if not settings or not settings.obsidian_rest_api_url or not settings.obsidian_api_key:
+    settings = _get_user_settings(db, user_id)
+    obsidian_rest_api_url = _clean_optional_string(settings.obsidian_rest_api_url if settings else None)
+    obsidian_api_key = _get_setting_secret(settings, "obsidian_api_key")
+    if not settings or not obsidian_rest_api_url or not obsidian_api_key:
         raise HTTPException(status_code=400, detail="Obsidian settings are incomplete")
 
-    url_bases = _obsidian_candidate_bases(settings.obsidian_rest_api_url)
+    url_bases = _obsidian_candidate_bases(obsidian_rest_api_url)
     folder_path = _normalize_obsidian_folder_path(settings.obsidian_folder_path)
     note_path = _build_obsidian_note_path(item, folder_path)
     last_error = None
@@ -1480,7 +1540,7 @@ async def sync_to_obsidian(item_id: str, db: Session = Depends(get_db)):
             try:
                 target_note_path = note_path
                 if item.obsidian_path:
-                    note_state, note_content = await _obsidian_note_exists(client, url_base, settings.obsidian_api_key, item.obsidian_path)
+                    note_state, note_content = await _obsidian_note_exists(client, url_base, obsidian_api_key, item.obsidian_path)
                     if note_state == "exists" and note_content and _obsidian_note_matches_item(note_content, item):
                         target_note_path = item.obsidian_path
                     if note_state == "unknown":
@@ -1506,7 +1566,7 @@ async def sync_to_obsidian(item_id: str, db: Session = Depends(get_db)):
                     with open(local_file_path, "rb") as file_handle:
                         upload_response = await client.put(
                             f"{url_base}/vault/{_encode_obsidian_vault_path(vault_path)}",
-                            headers=_obsidian_headers(settings.obsidian_api_key, "application/octet-stream"),
+                            headers=_obsidian_headers(obsidian_api_key, "application/octet-stream"),
                             content=file_handle.read(),
                             timeout=120.0,
                         )
@@ -1521,7 +1581,7 @@ async def sync_to_obsidian(item_id: str, db: Session = Depends(get_db)):
                 full_content = _build_obsidian_note(item, media_references)
                 note_response = await client.put(
                     f"{url_base}/vault/{_encode_obsidian_vault_path(target_note_path)}",
-                    headers=_obsidian_headers(settings.obsidian_api_key, "text/markdown; charset=utf-8"),
+                    headers=_obsidian_headers(obsidian_api_key, "text/markdown; charset=utf-8"),
                     content=full_content.encode("utf-8"),
                     timeout=120.0,
                 )
@@ -1544,18 +1604,19 @@ async def sync_to_obsidian(item_id: str, db: Session = Depends(get_db)):
 
 @router.post("/sync-status/refresh")
 async def refresh_sync_status(request: SyncStatusRefreshRequest, db: Session = Depends(get_db)):
+    user_id = get_current_user_id()
     item_ids = [item_id for item_id in request.item_ids if item_id]
     if not item_ids:
         return {"items": []}
 
-    items = db.query(Item).filter(Item.id.in_(item_ids)).all()
+    items = db.query(Item).filter(Item.user_id == user_id, Item.id.in_(item_ids)).all()
     if not items:
         return {"items": []}
 
-    settings = db.query(Settings).first()
-    notion_token = _clean_optional_string(settings.notion_api_token if settings else None)
+    settings = _get_user_settings(db, user_id)
+    notion_token = _get_setting_secret(settings, "notion_api_token")
     obsidian_url = _clean_optional_string(settings.obsidian_rest_api_url if settings else None)
-    obsidian_api_key = _clean_optional_string(settings.obsidian_api_key if settings else None)
+    obsidian_api_key = _get_setting_secret(settings, "obsidian_api_key")
 
     notion_headers = _notion_headers(notion_token) if notion_token else None
     status_payload = []
@@ -1636,12 +1697,35 @@ async def refresh_sync_status(request: SyncStatusRefreshRequest, db: Session = D
 
 
 @router.post("/obsidian/test")
-async def test_obsidian_connection(db: Session = Depends(get_db)):
-    settings = db.query(Settings).first()
-    if not settings or not settings.obsidian_rest_api_url or not settings.obsidian_api_key:
+async def test_obsidian_connection(
+    request: ObsidianTestRequest | None = None,
+    db: Session = Depends(get_db),
+):
+    user_id = get_current_user_id()
+    settings = _get_user_settings(db, user_id)
+    obsidian_rest_api_url = _resolve_request_value(
+        request,
+        "obsidian_rest_api_url",
+        settings.obsidian_rest_api_url if settings else None,
+    )
+    obsidian_api_key = _resolve_request_value(
+        request,
+        "obsidian_api_key",
+        _get_setting_secret(settings, "obsidian_api_key"),
+    )
+    folder_path = _normalize_obsidian_folder_path(
+        _resolve_request_value(
+            request,
+            "obsidian_folder_path",
+            settings.obsidian_folder_path if settings else None,
+            normalizer=lambda value: value.strip() if isinstance(value, str) else value,
+        )
+    )
+    used_saved_url_base = request is None or "obsidian_rest_api_url" not in _model_fields_set(request)
+
+    if not obsidian_rest_api_url or not obsidian_api_key:
         raise HTTPException(status_code=400, detail="Obsidian settings are incomplete")
 
-    folder_path = _normalize_obsidian_folder_path(settings.obsidian_folder_path)
     probe_name = f"__everything_grabber_probe_{os.urandom(4).hex()}.md"
     probe_path = f"{folder_path}/{probe_name}" if folder_path else probe_name
     probe_body = (
@@ -1653,12 +1737,12 @@ async def test_obsidian_connection(db: Session = Depends(get_db)):
     )
 
     last_error = None
-    for url_base in _obsidian_candidate_bases(settings.obsidian_rest_api_url):
+    for url_base in _obsidian_candidate_bases(obsidian_rest_api_url):
         async with httpx.AsyncClient(**_obsidian_client_kwargs(url_base)) as client:
             try:
                 put_response = await client.put(
                     f"{url_base}/vault/{_encode_obsidian_vault_path(probe_path)}",
-                    headers=_obsidian_headers(settings.obsidian_api_key, "text/markdown; charset=utf-8"),
+                    headers=_obsidian_headers(obsidian_api_key, "text/markdown; charset=utf-8"),
                     content=probe_body.encode("utf-8"),
                     timeout=60.0,
                 )
@@ -1667,7 +1751,7 @@ async def test_obsidian_connection(db: Session = Depends(get_db)):
 
                 get_response = await client.get(
                     f"{url_base}/vault/{_encode_obsidian_vault_path(probe_path)}",
-                    headers=_obsidian_headers(settings.obsidian_api_key, "text/markdown"),
+                    headers=_obsidian_headers(obsidian_api_key, "text/markdown"),
                     timeout=60.0,
                 )
                 if get_response.status_code != 200 or "probe: everything-grabber" not in get_response.text:
@@ -1675,13 +1759,14 @@ async def test_obsidian_connection(db: Session = Depends(get_db)):
 
                 delete_response = await client.delete(
                     f"{url_base}/vault/{_encode_obsidian_vault_path(probe_path)}",
-                    headers=_obsidian_headers(settings.obsidian_api_key, "text/markdown"),
+                    headers=_obsidian_headers(obsidian_api_key, "text/markdown"),
                     timeout=60.0,
                 )
                 if delete_response.status_code not in [200, 204]:
                     raise HTTPException(status_code=500, detail=f"Obsidian probe cleanup failed: {delete_response.text}")
 
-                _persist_obsidian_url_base(settings, db, url_base)
+                if used_saved_url_base:
+                    _persist_obsidian_url_base(settings, db, url_base)
                 return {
                     "status": "ok",
                     "url_base": url_base,

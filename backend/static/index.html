@@ -1077,32 +1077,6 @@
             gap: 12px;
         }
 
-        .select-indicator {
-            width: 22px;
-            height: 22px;
-            border-radius: 999px;
-            border: 1px solid rgba(148, 163, 184, 0.45);
-            background: rgba(255, 255, 255, 0.84);
-            display: inline-flex;
-            align-items: center;
-            justify-content: center;
-            color: transparent;
-            flex-shrink: 0;
-            box-shadow: 0 10px 16px -18px rgba(15, 23, 42, 0.4);
-        }
-
-        .select-indicator.is-selected {
-            background: var(--accent);
-            border-color: var(--accent);
-            color: #ffffff;
-        }
-
-        .select-indicator svg {
-            width: 12px;
-            height: 12px;
-            stroke: currentColor;
-        }
-
         .title {
             font-weight: 650;
             font-size: 1.08rem;
@@ -1294,10 +1268,6 @@
             display: flex;
             flex-direction: column;
             gap: 6px;
-        }
-
-        .list-main .select-indicator {
-            margin-right: 2px;
         }
 
         .list-title-row {
@@ -1906,9 +1876,10 @@
         }
 
         .folder-picker-modal {
-            max-width: 520px !important;
+            width: min(640px, calc(100vw - 24px)) !important;
+            max-width: 640px !important;
             height: auto;
-            max-height: min(82vh, 760px);
+            max-height: min(88vh, 920px);
         }
 
         .folder-picker-body {
@@ -1918,10 +1889,93 @@
             white-space: normal;
         }
 
+        .folder-picker-headline {
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+            min-width: 0;
+        }
+
+        .folder-picker-title {
+            font-size: 1.24rem;
+        }
+
+        .folder-picker-commandbar {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            padding: 12px 14px;
+            border-radius: 16px;
+            border: 1px solid rgba(226, 232, 240, 0.95);
+            background: rgba(248, 250, 252, 0.82);
+            box-shadow: none;
+        }
+
+        .folder-picker-commandbar svg {
+            width: 18px;
+            height: 18px;
+            color: #64748b;
+            flex-shrink: 0;
+        }
+
+        .folder-picker-input {
+            flex: 1;
+            border: none;
+            outline: none;
+            background: transparent;
+            color: #0f172a;
+            font-size: 0.92rem;
+            font-weight: 600;
+            line-height: 1.4;
+            padding: 14px 0;
+        }
+
+        .folder-picker-input::placeholder {
+            color: #94a3b8;
+        }
+
+        .folder-picker-section-title {
+            font-size: 0.78rem;
+            font-weight: 700;
+            letter-spacing: 0.04em;
+            text-transform: uppercase;
+            color: #94a3b8;
+        }
+
+        .folder-picker-create-btn {
+            border: none;
+            border-radius: 999px;
+            background: rgba(15, 23, 42, 0.96);
+            color: #ffffff;
+            font-size: 0.82rem;
+            font-weight: 700;
+            padding: 10px 14px;
+            cursor: pointer;
+            white-space: nowrap;
+            transition: transform 0.18s ease, box-shadow 0.18s ease, opacity 0.18s ease, background 0.18s ease;
+        }
+
+        .folder-picker-create-btn:hover {
+            transform: translateY(-1px);
+            background: #020617;
+            box-shadow: 0 18px 28px -22px rgba(15, 23, 42, 0.56);
+        }
+
+        .folder-picker-hint {
+            color: #64748b;
+            font-size: 0.8rem;
+            line-height: 1.5;
+            padding: 0;
+            margin: 0;
+        }
+
         .folder-picker-list {
             display: flex;
             flex-direction: column;
-            gap: 8px;
+            gap: 6px;
+            max-height: min(40vh, 420px);
+            overflow-y: auto;
+            padding: 2px 2px 0;
         }
 
         .folder-picker-option {
@@ -1930,11 +1984,11 @@
             align-items: center;
             justify-content: space-between;
             gap: 14px;
-            padding: 12px 14px;
+            padding: 14px 16px;
             border-radius: 16px;
-            border: 1px solid rgba(226, 232, 240, 0.9);
-            background: rgba(248, 250, 252, 0.9);
-            color: #334155;
+            border: none;
+            background: transparent;
+            color: #475569;
             cursor: pointer;
             transition: all 0.2s ease;
             text-align: left;
@@ -1942,35 +1996,133 @@
 
         .folder-picker-option:hover {
             background: #ffffff;
-            transform: translateY(-1px);
+            color: #0f172a;
+            box-shadow: 0 10px 22px -18px rgba(15, 23, 42, 0.18);
         }
 
         .folder-picker-option.active {
-            border-color: rgba(0, 113, 227, 0.28);
-            background: rgba(0, 113, 227, 0.08);
-            color: #0f3c77;
+            background: rgba(255, 255, 255, 0.96);
+            color: #0f172a;
+            box-shadow:
+                inset 0 0 0 1px rgba(15, 23, 42, 0.06),
+                0 14px 30px -24px rgba(15, 23, 42, 0.18);
+        }
+
+        .folder-picker-option-main {
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+            min-width: 0;
+        }
+
+        .folder-picker-option-label {
+            font-size: 0.88rem;
+            font-weight: 650;
+            color: inherit;
+            min-width: 0;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+
+        .folder-picker-option-subtitle {
+            font-size: 0.74rem;
+            color: #94a3b8;
+        }
+
+        .folder-picker-option-side {
+            display: inline-flex;
+            align-items: center;
+            gap: 10px;
+            flex-shrink: 0;
         }
 
         .folder-picker-option-meta {
-            font-size: 0.75rem;
+            font-size: 0.74rem;
             color: #8b94a6;
             flex-shrink: 0;
         }
 
-        .folder-picker-create {
-            display: flex;
+        .folder-picker-check {
+            width: 22px;
+            height: 22px;
+            border-radius: 999px;
+            border: 1px solid rgba(148, 163, 184, 0.42);
+            display: inline-flex;
             align-items: center;
-            gap: 10px;
+            justify-content: center;
+            color: transparent;
+            background: rgba(255, 255, 255, 0.86);
+            box-shadow: 0 10px 16px -18px rgba(15, 23, 42, 0.48);
+        }
+
+        .folder-picker-option.active .folder-picker-check {
+            color: #ffffff;
+            background: #0f172a;
+            border-color: #0f172a;
+        }
+
+        .folder-picker-check svg {
+            width: 12px;
+            height: 12px;
+            stroke: currentColor;
+        }
+
+        .folder-picker-empty {
+            padding: 18px 16px;
+            border-radius: 16px;
+            border: 1px dashed rgba(203, 213, 225, 0.92);
+            background: rgba(248, 250, 252, 0.72);
+            color: #64748b;
+            font-size: 0.82rem;
+            text-align: center;
+        }
+
+        .folder-picker-footer {
+            align-items: center;
+            justify-content: space-between;
+            gap: 12px;
+        }
+
+        .folder-picker-status {
+            color: #64748b;
+            font-size: 0.78rem;
+            line-height: 1.5;
+        }
+
+        .folder-picker-footer .modal-footer-actions {
+            gap: 8px;
+        }
+
+        .folder-picker-footer .modal-action-btn {
+            min-width: 0;
+            padding: 10px 16px;
+            border-radius: 999px;
+            font-size: 0.82rem;
+            font-weight: 700;
+            box-shadow: 0 10px 18px -18px rgba(15, 23, 42, 0.2);
+        }
+
+        .folder-picker-clear-btn {
+            background: rgba(15, 23, 42, 0.05);
+            color: #334155;
+            border-color: rgba(203, 213, 225, 0.9);
+        }
+
+        .folder-picker-apply-btn {
+            background: #0f172a;
+            color: #ffffff;
+            border-color: #0f172a;
         }
 
         .folder-context-menu {
             position: fixed;
-            min-width: 148px;
-            padding: 6px;
-            border-radius: 16px;
-            background: rgba(255, 255, 255, 0.92);
-            border: 1px solid rgba(255, 255, 255, 0.75);
-            box-shadow: 0 18px 30px -28px rgba(15, 23, 42, 0.24);
+            min-width: 156px;
+            padding: 4px;
+            border-radius: 14px;
+            background: rgba(255, 255, 255, 0.96);
+            border: 1px solid rgba(255, 255, 255, 0.78);
+            box-shadow: 0 16px 28px -24px rgba(15, 23, 42, 0.24);
             z-index: 160;
             display: none;
         }
@@ -1984,21 +2136,54 @@
             border: none;
             background: transparent;
             color: #334155;
-            font-size: 0.83rem;
+            font-size: 0.76rem;
             font-weight: 600;
             text-align: left;
-            padding: 10px 12px;
-            border-radius: 12px;
+            padding: 6px 8px;
+            border-radius: 8px;
             cursor: pointer;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            line-height: 1.2;
+            transition: background 0.18s ease, box-shadow 0.18s ease, color 0.18s ease;
         }
 
         .folder-context-menu button:hover {
-            background: rgba(248, 250, 252, 0.96);
+            background: #ffffff;
+            color: #0f172a;
+            box-shadow: 0 10px 24px -20px rgba(15, 23, 42, 0.22);
         }
 
         .folder-context-menu button.is-danger:hover {
             background: rgba(255, 240, 240, 0.96);
             color: #b42318;
+        }
+
+        .folder-context-menu-icon {
+            width: 14px;
+            height: 14px;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            color: currentColor;
+            flex-shrink: 0;
+        }
+
+        .folder-context-menu-icon svg {
+            width: 14px;
+            height: 14px;
+            stroke: currentColor;
+        }
+
+        .folder-context-menu-copy {
+            display: inline-flex;
+            align-items: center;
+            min-width: 0;
+            font-size: 0.76rem;
+            font-weight: 650;
+            color: currentColor;
+            white-space: nowrap;
         }
 
         .settings-body {
@@ -2301,7 +2486,8 @@
         .folder-sidebar-toggle {
             position: absolute;
             right: -12px;
-            top: 24px;
+            top: 34px;
+            transform: translateY(-50%);
             padding: 0;
             display: inline-flex;
             align-items: center;
@@ -2313,14 +2499,14 @@
             color: #71767a;
             background: #ffffff;
             box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
-            z-index: 5;
+            z-index: 8;
         }
 
         .folder-sidebar-toggle:hover {
             background: #ffffff;
             color: #2a2c2e;
             border-color: #d1d5db;
-            transform: none;
+            transform: translateY(-50%);
         }
 
         .folder-sidebar-toggle-icon {
@@ -2497,7 +2683,10 @@
         }
 
         .board-toolbar {
-            height: 68px;
+            display: grid;
+            grid-template-columns: auto minmax(320px, 540px) auto;
+            align-items: center;
+            min-height: 68px;
             margin: 0;
             padding: 0 24px;
             background: #ffffff;
@@ -2508,17 +2697,66 @@
         }
 
         .toolbar-left {
-            gap: 16px;
+            display: flex;
+            align-items: center;
+            gap: 12px;
             min-width: 0;
+            flex-shrink: 0;
+        }
+
+        .toolbar-center {
+            min-width: 0;
+            width: 100%;
+        }
+
+        .toolbar-right {
+            display: flex;
+            align-items: center;
+            justify-content: flex-end;
+            gap: 10px;
+            min-width: 0;
+            flex-shrink: 0;
         }
 
         .toolbar-filters {
-            flex: 1;
-            width: auto;
+            display: flex;
+            align-items: center;
             min-width: 0;
-            max-width: none;
             justify-content: flex-end;
             gap: 10px;
+        }
+
+        .toolbar-icon-btn {
+            width: 36px;
+            height: 36px;
+            padding: 0;
+            border: 1px solid #ebecef;
+            border-radius: 999px;
+            background: #ffffff;
+            color: #2a2c2e;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            transition: border-color 0.18s ease, box-shadow 0.18s ease, transform 0.18s ease, background 0.18s ease;
+        }
+
+        .toolbar-icon-btn:hover {
+            border-color: #d1d5db;
+            background: #ffffff;
+            box-shadow: 0 16px 24px -22px rgba(15, 23, 42, 0.3);
+            transform: translateY(-1px);
+        }
+
+        .toolbar-icon-btn svg {
+            width: 16px;
+            height: 16px;
+            stroke: currentColor;
+        }
+
+        .toolbar-collapse-btn {
+            background: #f8fafc;
+            flex-shrink: 0;
         }
 
         .view-switch {
@@ -2564,11 +2802,23 @@
 
         .stats strong {
             color: #2a2c2e;
+            font-size: inherit;
+            letter-spacing: 0;
         }
 
-        #selectionModeBtn,
-        #settingsBtn,
-        #bulkMoveBtn {
+        .stats .stats-primary {
+            display: inline-flex;
+            align-items: baseline;
+            gap: 0;
+        }
+
+        .stats .stats-secondary {
+            color: #64748b;
+            font-size: inherit;
+            font-weight: 400;
+        }
+
+        #settingsBtn {
             min-height: 36px;
             padding: 8px 14px;
             border: 1px solid #ebecef;
@@ -2578,20 +2828,21 @@
         }
 
         #settingsBtn {
-            width: 36px !important;
-            height: 36px !important;
-            padding: 0 !important;
+            flex-shrink: 0;
+            width: 36px;
+            height: 36px;
+            padding: 0;
         }
 
         .filter-input {
-            width: min(480px, 100%);
+            width: 100%;
             border: none;
-            border-radius: 8px;
+            border-radius: 999px;
             background: #f3f4f6;
             box-shadow: none;
             color: #2a2c2e;
             font-size: 14px;
-            padding: 8px 14px;
+            padding: 10px 16px;
         }
 
         .filter-input:focus {
@@ -2600,6 +2851,8 @@
         }
 
         #filterInput {
+            width: 100%;
+            min-width: 0;
             padding-left: 38px;
             background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%2371767A' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Ccircle cx='11' cy='11' r='7'/%3E%3Cpath d='m20 20-3.5-3.5'/%3E%3C/svg%3E");
             background-repeat: no-repeat;
@@ -2609,6 +2862,7 @@
 
         .platform-select {
             width: 116px;
+            flex-shrink: 0;
             border: 1px solid #ebecef;
             border-radius: 999px;
             background-color: #ffffff;
@@ -2747,19 +3001,6 @@
             width: 40px;
             height: 40px;
             stroke: currentColor;
-        }
-
-        .select-indicator.card-selection {
-            position: absolute;
-            left: 12px;
-            top: 12px;
-            z-index: 2;
-        }
-
-        .select-indicator.card-selection {
-            background: rgba(255, 255, 255, 0.92);
-            border-color: rgba(148, 163, 184, 0.28);
-            box-shadow: 0 2px 6px rgba(0, 0, 0, 0.08);
         }
 
         .card-icon {
@@ -2987,19 +3228,29 @@
                 display: flex;
             }
 
-            .toolbar-left {
-                justify-content: space-between;
-                flex-wrap: wrap;
-            }
-
             .board-toolbar {
-                flex-direction: column;
+                grid-template-columns: minmax(0, 1fr);
                 align-items: stretch;
-                height: auto;
                 padding: 16px;
             }
 
+            .toolbar-left {
+                justify-content: flex-start;
+                flex-wrap: wrap;
+            }
+
+            .toolbar-center {
+                width: 100%;
+            }
+
+            .toolbar-right {
+                width: 100%;
+                flex-wrap: wrap;
+                justify-content: space-between;
+            }
+
             .toolbar-filters {
+                flex: 1 1 100%;
                 width: 100%;
                 justify-content: stretch;
             }
@@ -3018,7 +3269,16 @@
                 flex-shrink: 0;
             }
 
-            .folder-picker-create {
+            .folder-picker-commandbar {
+                flex-wrap: wrap;
+                align-items: stretch;
+            }
+
+            .folder-picker-create-btn {
+                width: 100%;
+            }
+
+            .folder-picker-footer {
                 flex-direction: column;
                 align-items: stretch;
             }
@@ -3209,9 +3469,6 @@
     <main>
         <div class="board-shell" id="boardShell">
             <aside class="folder-sidebar">
-                <button id="toggleSidebarBtn" class="view-btn folder-sidebar-toggle" type="button" title="收起侧边栏" aria-label="收起侧边栏">
-                    <span class="folder-sidebar-toggle-icon" aria-hidden="true">‹</span>
-                </button>
                 <div class="folder-panel">
                     <div class="folder-panel-header">
                         <div class="folder-panel-title-row">
@@ -3261,6 +3518,9 @@
                         </div>
                     </div>
                 </div>
+                <button id="toggleSidebarBtn" class="folder-sidebar-toggle" type="button" title="收起侧边栏" aria-label="收起侧边栏">
+                    <span class="folder-sidebar-toggle-icon" aria-hidden="true">‹</span>
+                </button>
             </aside>
             <section class="board-content">
                 <div class="board-toolbar">
@@ -3270,10 +3530,21 @@
                             <button class="view-btn" id="listViewBtn" type="button">列表</button>
                         </div>
                         <div class="stats is-plain" id="stats">加载中...</div>
-                        <button id="selectionModeBtn" class="view-btn" type="button">选择</button>
-                        <button id="settingsBtn" class="view-btn"
-                            style="display: flex; align-items: center; justify-content: center; width: 34px; height: 34px; padding: 0;"
-                            title="集成设置">
+                    </div>
+                    <div class="toolbar-center">
+                        <input id="filterInput" class="filter-input" type="text" placeholder="搜索标题、正文、链接" />
+                    </div>
+                    <div class="toolbar-right">
+                        <div class="toolbar-filters">
+                            <select id="platformFilter" class="platform-select" aria-label="筛选平台">
+                                <option value="all">全部</option>
+                                <option value="wechat">公众号</option>
+                                <option value="douyin">抖音</option>
+                                <option value="xiaohongshu">小红书</option>
+                                <option value="web">网页</option>
+                            </select>
+                        </div>
+                        <button id="settingsBtn" class="toolbar-icon-btn" type="button" title="集成设置">
                             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
                                 stroke-linecap="round" stroke-linejoin="round">
                                 <path
@@ -3282,17 +3553,6 @@
                                 <circle cx="12" cy="12" r="3"></circle>
                             </svg>
                         </button>
-                    </div>
-                    <div class="toolbar-filters">
-                        <input id="filterInput" class="filter-input" type="text" placeholder="搜索标题、正文、链接" />
-                        <select id="platformFilter" class="platform-select" aria-label="筛选平台">
-                            <option value="all">全部</option>
-                            <option value="wechat">公众号</option>
-                            <option value="douyin">抖音</option>
-                            <option value="xiaohongshu">小红书</option>
-                            <option value="web">网页</option>
-                        </select>
-                        <button id="bulkMoveBtn" class="extract-btn" type="button" hidden>加入文件夹</button>
                     </div>
                 </div>
                 <div class="folder-mobile-strip" id="folderMobileStrip"></div>
@@ -3485,18 +3745,33 @@
     </div>
 
     <div class="modal-overlay" id="folderPickerOverlay">
-        <div class="modal folder-picker-modal">
+        <div class="modal folder-picker-modal" role="dialog" aria-modal="true" aria-label="文件夹面板">
             <div class="modal-header">
-                <h2 class="modal-title" id="folderPickerTitle">加入文件夹</h2>
+                <div class="folder-picker-headline">
+                    <h2 class="modal-title folder-picker-title" id="folderPickerTitle">加入文件夹</h2>
+                    <div class="folder-picker-hint" id="folderPickerHint">选择文件夹后完成保存</div>
+                </div>
                 <div class="modal-header-actions">
-                    <button class="close-btn" id="closeFolderPicker" type="button">×</button>
+                    <button class="close-btn" id="closeFolderPicker" type="button" aria-label="关闭文件夹面板">×</button>
                 </div>
             </div>
             <div class="modal-body folder-picker-body">
+                <div class="folder-picker-commandbar">
+                    <svg viewBox="0 0 24 24" fill="none" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                        <path d="M4 12h16"></path>
+                        <path d="M12 4v16"></path>
+                    </svg>
+                    <input type="text" id="folderCreateInput" class="folder-picker-input" placeholder="输入新文件夹名称，回车创建" />
+                    <button id="folderCreateConfirmBtn" class="folder-picker-create-btn" type="button">新建</button>
+                </div>
+                <div class="folder-picker-section-title">现有文件夹</div>
                 <div class="folder-picker-list" id="folderPickerList"></div>
-                <div class="folder-picker-create">
-                    <input type="text" id="folderCreateInput" class="filter-input" style="width: 100%;" placeholder="新文件夹名称" />
-                    <button id="folderCreateConfirmBtn" class="extract-btn" type="button">新建并加入</button>
+            </div>
+            <div class="modal-footer folder-picker-footer">
+                <div class="folder-picker-status" id="folderPickerStatus">未选择文件夹</div>
+                <div class="modal-footer-actions">
+                    <button id="folderPickerClearBtn" class="modal-action-btn folder-picker-clear-btn" type="button">清空选择</button>
+                    <button id="folderPickerApplyBtn" class="modal-action-btn folder-picker-apply-btn" type="button">完成</button>
                 </div>
             </div>
         </div>
@@ -3535,11 +3810,13 @@
         const folderSearchInput = document.getElementById('folderSearchInput');
         const boardShell = document.getElementById('boardShell');
         const toggleSidebarBtn = document.getElementById('toggleSidebarBtn');
-        const selectionModeBtn = document.getElementById('selectionModeBtn');
-        const bulkMoveBtn = document.getElementById('bulkMoveBtn');
         const folderPickerOverlay = document.getElementById('folderPickerOverlay');
         const folderPickerTitle = document.getElementById('folderPickerTitle');
         const folderPickerList = document.getElementById('folderPickerList');
+        const folderPickerHint = document.getElementById('folderPickerHint');
+        const folderPickerStatus = document.getElementById('folderPickerStatus');
+        const folderPickerClearBtn = document.getElementById('folderPickerClearBtn');
+        const folderPickerApplyBtn = document.getElementById('folderPickerApplyBtn');
         const closeFolderPicker = document.getElementById('closeFolderPicker');
         const folderCreateInput = document.getElementById('folderCreateInput');
         const folderCreateConfirmBtn = document.getElementById('folderCreateConfirmBtn');
@@ -3606,9 +3883,8 @@
         let currentFolderId = null;
         let folderSearchQuery = '';
         let sidebarExpanded = true;
-        let selectionMode = false;
-        let selectedItemIds = new Set();
         let folderPickerTargetIds = [];
+        let folderPickerSelectedIds = new Set();
         let librarySearchTimer = null;
         let commandSearchTimer = null;
         let libraryRequestId = 0;
@@ -3797,7 +4073,6 @@
             latestTotalCount = 0;
             currentFolderScope = 'all';
             currentFolderId = null;
-            clearSelection();
             closeTransientPanels();
             setStatsMessage('请先登录');
             grid.className = currentView === 'gallery' ? 'grid' : 'list-view';
@@ -4565,26 +4840,21 @@
         }
 
         function setStatsSummary(total, visible, returned, hasFilter) {
-            const folderLabel = getCurrentFolderLabel();
-            const selectionCount = selectedItemIds.size;
+            const statsCountLabel = `已收录&nbsp;&nbsp;<strong>${total}</strong>&nbsp;&nbsp;篇内容`;
             stats.classList.remove('is-plain');
-            if (selectionMode) {
-                stats.innerHTML = `已选择 <strong>${selectionCount}</strong> 条 <span class="stats-secondary">${folderLabel}</span>`;
-                return;
-            }
             if (hasFilter) {
                 if (visible > returned) {
-                    stats.innerHTML = `已收录 <strong>${total}</strong> 篇 <span class="stats-secondary">${folderLabel} · 匹配 <strong>${visible}</strong> 篇，当前显示最新 <strong>${returned}</strong> 篇</span>`;
+                    stats.innerHTML = `<span class="stats-primary">${statsCountLabel}</span><span class="stats-secondary">匹配 ${visible} 篇，显示最新 ${returned} 篇</span>`;
                     return;
                 }
-                stats.innerHTML = `已收录 <strong>${total}</strong> 篇 <span class="stats-secondary">${folderLabel} · 显示 <strong>${visible}</strong> 篇</span>`;
+                stats.innerHTML = `<span class="stats-primary">${statsCountLabel}</span><span class="stats-secondary">当前显示 ${visible} 篇</span>`;
                 return;
             }
             if (total > returned) {
-                stats.innerHTML = `已收录 <strong>${total}</strong> 篇 <span class="stats-secondary">${folderLabel} · 当前显示最新 <strong>${returned}</strong> 篇</span>`;
+                stats.innerHTML = `<span class="stats-primary">${statsCountLabel}</span><span class="stats-secondary">当前显示最新 ${returned} 篇</span>`;
                 return;
             }
-            stats.innerHTML = `已收录 <strong>${total}</strong> 篇内容 <span class="stats-secondary">${folderLabel}</span>`;
+            stats.innerHTML = `<span class="stats-primary">${statsCountLabel}</span>`;
         }
 
         function folderIconSvg() {
@@ -4604,74 +4874,34 @@
             return '全部内容';
         }
 
-        function getCurrentFolderName(item) {
-            return item?.folder_name ? item.folder_name : '';
-        }
-
-        function updateSelectionUI() {
-            selectionModeBtn.textContent = selectionMode ? '取消选择' : '选择';
-            bulkMoveBtn.hidden = !selectionMode;
-            bulkMoveBtn.disabled = selectedItemIds.size === 0;
-            bulkMoveBtn.textContent = selectedItemIds.size > 0 ? `加入文件夹 (${selectedItemIds.size})` : '加入文件夹';
-        }
-
-        function clearSelection() {
-            selectedItemIds = new Set();
-            updateSelectionUI();
-        }
-
-        function setSelectionMode(nextValue) {
-            selectionMode = typeof nextValue === 'boolean' ? nextValue : !selectionMode;
-            if (!selectionMode) {
-                clearSelection();
-            } else {
-                updateSelectionUI();
-            }
-            setStatsSummary(
-                latestTotalCount || itemsData.length,
-                latestVisibleCount || itemsData.length,
-                latestReturnedCount || itemsData.length,
-                !!filterInput.value.trim() || platformFilter.value !== 'all' || currentFolderScope !== 'all'
-            );
-            renderItems(filteredEntries);
-        }
-
-        function toggleItemSelection(itemId) {
-            if (!selectionMode) return;
-            if (selectedItemIds.has(itemId)) selectedItemIds.delete(itemId);
-            else selectedItemIds.add(itemId);
-            updateSelectionUI();
-            setStatsSummary(
-                latestTotalCount || itemsData.length,
-                latestVisibleCount || itemsData.length,
-                latestReturnedCount || itemsData.length,
-                !!filterInput.value.trim() || platformFilter.value !== 'all' || currentFolderScope !== 'all'
-            );
-            renderItems(filteredEntries);
-        }
-
         function handleItemPrimaryAction(itemId) {
-            if (selectionMode) {
-                toggleItemSelection(itemId);
-                return;
-            }
             openModalById(itemId);
         }
 
-        function renderSelectionIndicator(itemId) {
-            if (!selectionMode) return '';
-            const isSelected = selectedItemIds.has(itemId);
-            return `<span class="select-indicator${isSelected ? ' is-selected' : ''}">${checkSvg()}</span>`;
+        function getItemFolderNames(item) {
+            if (Array.isArray(item?.folder_names) && item.folder_names.length) {
+                return uniquePreserveOrder(item.folder_names.filter(Boolean));
+            }
+            return item?.folder_name ? [item.folder_name] : [];
         }
 
-        function renderFolderTag(item) {
-            if (!item.folder_name) return '';
-            return `<span class="folder-tag">${folderIconSvg()}<span>${escapeHtml(item.folder_name)}</span></span>`;
+        function renderFolderTags(item) {
+            const folderNames = getItemFolderNames(item);
+            if (!folderNames.length) return '';
+            return folderNames.slice(0, 3).map((folderName) => (
+                `<span class="folder-tag">${folderIconSvg()}<span>${escapeHtml(folderName)}</span></span>`
+            )).join('');
+        }
+
+        function openFolderPickerForItem(itemId, title = '管理文件夹') {
+            const item = itemsData.find((entry) => entry.id === itemId) || commandSearchResults.find((entry) => entry.id === itemId);
+            const preferredFolderIds = Array.isArray(item?.folder_ids) ? item.folder_ids : [];
+            openFolderPicker([itemId], preferredFolderIds, title);
         }
 
         function renderFolderActionButton(item) {
             return `
-                <button onclick="openFolderPicker(['${item.id}'], ${item.folder_id ? `'${item.folder_id}'` : 'null'}, '加入文件夹'); event.stopPropagation();" class="folder-action-btn" title="加入文件夹">
+                <button onclick="openFolderPickerForItem('${item.id}', '管理文件夹'); event.stopPropagation();" class="folder-action-btn" title="管理文件夹">
                     <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
                         <path d="M3.75 6.75A2.25 2.25 0 0 1 6 4.5h3.2a2.25 2.25 0 0 1 1.59.66l1.05 1.05c.28.28.66.44 1.06.44H18A2.25 2.25 0 0 1 20.25 8.9v7.6A2.25 2.25 0 0 1 18 18.75H6A2.25 2.25 0 0 1 3.75 16.5v-9.75Z"></path>
                     </svg>
@@ -4682,7 +4912,6 @@
         function setActiveFolder(scope, folderId = null) {
             currentFolderScope = scope;
             currentFolderId = scope === 'folder' ? folderId : null;
-            clearSelection();
             renderFolderNavigation();
             fetchItems();
         }
@@ -4712,7 +4941,6 @@
 
         function getFolderGlyph(label, scope) {
             if (scope === 'all') return '全';
-            if (scope === 'unfiled') return '未';
             const normalized = String(label || '').trim();
             if (!normalized) return '文';
             return normalized[0].toUpperCase();
@@ -4722,7 +4950,6 @@
             const normalizedQuery = folderSearchQuery.trim().toLowerCase();
             const baseItems = [
                 { label: '全部内容', scope: 'all', count: totalFolderCount },
-                { label: '未分类', scope: 'unfiled', count: unfiledFolderCount },
             ];
             const userItems = foldersData.map((folder) => ({
                 label: folder.name,
@@ -4741,7 +4968,6 @@
 
             const mobileItems = [
                 { label: '全部', scope: 'all', count: totalFolderCount },
-                { label: '未分类', scope: 'unfiled', count: unfiledFolderCount },
                 ...foldersData.map((folder) => ({ label: folder.name, scope: 'folder', count: folder.item_count || 0, id: folder.id })),
             ];
             folderMobileStrip.innerHTML = mobileItems.map((item) => {
@@ -4764,6 +4990,10 @@
                 foldersData = Array.isArray(data.folders) ? data.folders : [];
                 totalFolderCount = Number(data.total_count || 0);
                 unfiledFolderCount = Number(data.unfiled_count || 0);
+                if (currentFolderScope === 'unfiled') {
+                    currentFolderScope = 'all';
+                    currentFolderId = null;
+                }
                 if (currentFolderScope === 'folder' && currentFolderId && !foldersData.some((folder) => folder.id === currentFolderId)) {
                     currentFolderScope = 'all';
                     currentFolderId = null;
@@ -4795,55 +5025,124 @@
         function openCreateFolderPrompt() {
             folderCreateInput.value = '';
             folderPickerTargetIds = [];
+            folderPickerSelectedIds = new Set(currentFolderScope === 'folder' && currentFolderId ? [currentFolderId] : []);
             folderPickerTitle.textContent = '新建文件夹';
-            renderFolderPickerOptions(null);
-            folderCreateConfirmBtn.textContent = '新建';
+            folderCreateConfirmBtn.textContent = '立即新建';
+            renderFolderPickerOptions();
             folderPickerOverlay.classList.add('active');
             requestAnimationFrame(() => folderCreateInput.focus());
         }
 
-        function openFolderPicker(itemIds = [], preferredFolderId = null, title = '加入文件夹') {
+        function getSharedFolderIds(itemIds = []) {
+            const targets = itemIds
+                .map((itemId) => itemsData.find((item) => item.id === itemId))
+                .filter(Boolean);
+            if (!targets.length) return [];
+            const [firstTarget, ...restTargets] = targets;
+            const baseFolderIds = Array.isArray(firstTarget.folder_ids) ? firstTarget.folder_ids.filter(Boolean) : [];
+            return baseFolderIds.filter((folderId) => (
+                restTargets.every((item) => Array.isArray(item.folder_ids) && item.folder_ids.includes(folderId))
+            ));
+        }
+
+        function getFolderPickerMode() {
+            return folderPickerTargetIds.length > 0 ? 'assign' : 'create';
+        }
+
+        function openFolderPicker(itemIds = [], preferredFolderIds = [], title = '加入文件夹') {
             folderPickerTargetIds = Array.isArray(itemIds) ? itemIds.filter(Boolean) : [];
+            const nextSelectedIds = Array.isArray(preferredFolderIds) && preferredFolderIds.length
+                ? preferredFolderIds.filter(Boolean)
+                : getSharedFolderIds(folderPickerTargetIds);
+            folderPickerSelectedIds = new Set(nextSelectedIds);
             folderPickerTitle.textContent = title;
             folderCreateInput.value = '';
-            folderCreateConfirmBtn.textContent = folderPickerTargetIds.length > 0 ? '新建并加入' : '新建';
-            renderFolderPickerOptions(preferredFolderId);
+            folderCreateConfirmBtn.textContent = folderPickerTargetIds.length > 0 ? '新建并选中' : '立即新建';
+            renderFolderPickerOptions();
             folderPickerOverlay.classList.add('active');
+            requestAnimationFrame(() => folderCreateInput.focus());
         }
 
         function closeFolderPickerDialog() {
             folderPickerOverlay.classList.remove('active');
             folderPickerTargetIds = [];
+            folderPickerSelectedIds = new Set();
             folderCreateInput.value = '';
         }
 
-        function renderFolderPickerOptions(preferredFolderId = null) {
-            const selectedFolderId = preferredFolderId || (folderPickerTargetIds.length === 1
-                ? itemsData.find((item) => item.id === folderPickerTargetIds[0])?.folder_id || null
-                : null);
-            const options = [
-                { id: null, label: '未分类', count: unfiledFolderCount },
-                ...foldersData.map((folder) => ({ id: folder.id, label: folder.name, count: folder.item_count || 0 })),
-            ];
-            folderPickerList.innerHTML = options.map((option) => {
-                const active = option.id === selectedFolderId;
-                const idValue = option.id ? `'${option.id}'` : 'null';
-                return `
-                    <button class="folder-picker-option${active ? ' active' : ''}" type="button" onclick="applyFolderSelection(${idValue})">
-                        <span>${escapeHtml(option.label)}</span>
-                        <span class="folder-picker-option-meta">${option.count} 条</span>
-                    </button>
-                `;
-            }).join('');
+        function updateFolderPickerStatus() {
+            const mode = getFolderPickerMode();
+            const selectedFolders = foldersData.filter((folder) => folderPickerSelectedIds.has(folder.id));
+            const selectedNames = selectedFolders.map((folder) => folder.name);
+            if (mode === 'assign') {
+                folderPickerHint.textContent = folderPickerTargetIds.length > 1
+                    ? `当前将同时更新 ${folderPickerTargetIds.length} 条内容，可多选文件夹。`
+                    : '当前内容可加入多个文件夹，支持多选。';
+                folderPickerStatus.textContent = selectedNames.length
+                    ? `已选 ${selectedNames.length} 个文件夹：${selectedNames.join('、')}`
+                    : '未选择文件夹，保存后将从所有文件夹中移除。';
+                folderPickerClearBtn.hidden = false;
+                folderPickerApplyBtn.hidden = false;
+                folderPickerApplyBtn.textContent = '完成保存';
+                folderPickerClearBtn.disabled = selectedNames.length === 0;
+                return;
+            }
+
+            folderPickerHint.textContent = '输入名称可直接创建；点现有文件夹可快速切换。';
+            folderPickerStatus.textContent = selectedNames.length
+                ? `当前高亮：${selectedNames.join('、')}`
+                : '新建后会自动切换到对应文件夹。';
+            folderPickerClearBtn.hidden = true;
+            folderPickerApplyBtn.hidden = true;
         }
 
-        async function applyFolderSelection(folderId) {
+        function renderFolderPickerOptions() {
+            const mode = getFolderPickerMode();
+            const options = foldersData.map((folder) => ({ id: folder.id, label: folder.name, count: folder.item_count || 0 }));
+            folderPickerList.innerHTML = options.length ? options.map((option) => {
+                const active = folderPickerSelectedIds.has(option.id);
+                return `
+                    <button class="folder-picker-option${active ? ' active' : ''}" type="button" onclick="toggleFolderPickerSelection('${option.id}')">
+                        <span class="folder-picker-option-main">
+                            <span class="folder-picker-option-label">${escapeHtml(option.label)}</span>
+                            <span class="folder-picker-option-subtitle">${mode === 'assign' ? '点击切换当前选择' : '点击切换到这个文件夹'}</span>
+                        </span>
+                        <span class="folder-picker-option-side">
+                            <span class="folder-picker-option-meta">${option.count} 条</span>
+                            <span class="folder-picker-check">${checkSvg()}</span>
+                        </span>
+                    </button>
+                `;
+            }).join('') : '<div class="folder-picker-empty">还没有文件夹。先在上面输入名称创建一个。</div>';
+            updateFolderPickerStatus();
+        }
+
+        function toggleFolderPickerSelection(folderId) {
+            const mode = getFolderPickerMode();
+            if (mode === 'create') {
+                folderPickerSelectedIds = new Set(folderId ? [folderId] : []);
+                renderFolderPickerOptions();
+                closeFolderPickerDialog();
+                setActiveFolder('folder', folderId);
+                return;
+            }
+
+            if (folderPickerSelectedIds.has(folderId)) {
+                folderPickerSelectedIds.delete(folderId);
+            } else {
+                folderPickerSelectedIds.add(folderId);
+            }
+            renderFolderPickerOptions();
+        }
+
+        async function applyFolderSelection() {
             try {
+                const folderIds = Array.from(folderPickerSelectedIds);
                 if (folderPickerTargetIds.length > 1) {
                     const response = await fetch('/api/items/bulk-folder', {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ item_ids: folderPickerTargetIds, folder_id: folderId }),
+                        body: JSON.stringify({ item_ids: folderPickerTargetIds, folder_ids: folderIds }),
                     });
                     const data = await response.json();
                     if (!response.ok) throw new Error(data.detail || '批量归类失败');
@@ -4852,17 +5151,19 @@
                     const response = await fetch(`/api/items/${folderPickerTargetIds[0]}/folder`, {
                         method: 'PATCH',
                         headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ folder_id: folderId }),
+                        body: JSON.stringify({ folder_ids: folderIds }),
                     });
                     const data = await response.json();
                     if (!response.ok) throw new Error(data.detail || '归类失败');
-                    showToast(data.folder_name ? `已加入 ${data.folder_name}` : '已移到未分类', 'success');
+                    const toastLabel = Array.isArray(data.folder_names) && data.folder_names.length
+                        ? data.folder_names.join('、')
+                        : '无文件夹';
+                    showToast(`已更新到：${toastLabel}`, 'success');
                 } else {
                     closeFolderPickerDialog();
                     return;
                 }
                 closeFolderPickerDialog();
-                clearSelection();
                 await Promise.all([fetchFolders(), fetchItems()]);
             } catch (error) {
                 showToast(error.message, 'error');
@@ -4873,13 +5174,16 @@
             try {
                 const folder = await createFolder(folderCreateInput.value);
                 if (!folder) return;
+                folderCreateInput.value = '';
                 if (folderPickerTargetIds.length > 0) {
-                    await applyFolderSelection(folder.id);
-                } else {
-                    showToast(`已创建文件夹：${folder.name}`, 'success');
-                    closeFolderPickerDialog();
-                    setActiveFolder('folder', folder.id);
+                    folderPickerSelectedIds.add(folder.id);
+                    renderFolderPickerOptions();
+                    showToast(`已创建并选中：${folder.name}`, 'success');
+                    return;
                 }
+                showToast(`已创建文件夹：${folder.name}`, 'success');
+                closeFolderPickerDialog();
+                setActiveFolder('folder', folder.id);
             } catch (error) {
                 showToast(error.message, 'error');
             }
@@ -4890,16 +5194,46 @@
             const folder = foldersData.find((entry) => entry.id === folderId);
             if (!folder) return;
             folderContextMenu.innerHTML = `
-                <button type="button" onclick="renameFolderPrompt('${folderId}')">重命名</button>
-                <button type="button" class="is-danger" onclick="deleteFolderPrompt('${folderId}')">删除文件夹</button>
+                <button type="button" onclick="renameFolderPrompt('${folderId}')">
+                    <span class="folder-context-menu-icon" aria-hidden="true">
+                        <svg viewBox="0 0 24 24" fill="none" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">
+                            <path d="M12 20h9"></path>
+                            <path d="m16.5 3.5 4 4L7 21H3v-4L16.5 3.5Z"></path>
+                        </svg>
+                    </span>
+                    <span class="folder-context-menu-copy">重命名</span>
+                </button>
+                <button type="button" class="is-danger" onclick="deleteFolderPrompt('${folderId}')">
+                    <span class="folder-context-menu-icon" aria-hidden="true">
+                        <svg viewBox="0 0 24 24" fill="none" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">
+                            <path d="M3 6h18"></path>
+                            <path d="M8 6V4h8v2"></path>
+                            <path d="m19 6-1 14H6L5 6"></path>
+                            <path d="M10 11v6M14 11v6"></path>
+                        </svg>
+                    </span>
+                    <span class="folder-context-menu-copy">删除文件夹</span>
+                </button>
             `;
-            folderContextMenu.style.top = `${event.clientY + 8}px`;
-            folderContextMenu.style.left = `${Math.min(event.clientX - 120, window.innerWidth - 170)}px`;
+            const trigger = event.currentTarget || event.target;
+            const triggerRect = trigger.getBoundingClientRect();
             folderContextMenu.classList.add('show');
+            folderContextMenu.style.visibility = 'hidden';
+
+            const menuRect = folderContextMenu.getBoundingClientRect();
+            const desiredTop = triggerRect.bottom + 8;
+            const desiredLeft = triggerRect.right - menuRect.width;
+            const maxLeft = window.innerWidth - menuRect.width - 12;
+            const maxTop = window.innerHeight - menuRect.height - 12;
+
+            folderContextMenu.style.top = `${Math.max(12, Math.min(desiredTop, maxTop))}px`;
+            folderContextMenu.style.left = `${Math.max(12, Math.min(desiredLeft, maxLeft))}px`;
+            folderContextMenu.style.visibility = '';
         }
 
         function closeFolderContextMenu() {
             folderContextMenu.classList.remove('show');
+            folderContextMenu.style.visibility = '';
         }
 
         async function renameFolderPrompt(folderId) {
@@ -4935,7 +5269,7 @@
             closeFolderContextMenu();
             const folder = foldersData.find((entry) => entry.id === folderId);
             if (!folder) return;
-            if (!window.confirm(`删除文件夹“${folder.name}”？其中内容会回到未分类。`)) return;
+            if (!window.confirm(`删除文件夹“${folder.name}”？已关联的内容会保留，但不再属于这个文件夹。`)) return;
             try {
                 const response = await fetch(`/api/folders/${folderId}`, { method: 'DELETE' });
                 if (!response.ok) {
@@ -5556,7 +5890,7 @@
             const values = [];
             const platform = platformDisplayLabel(item);
             if (platform) values.push(platform);
-            if (item.folder_name) values.push(item.folder_name);
+            values.push(...getItemFolderNames(item));
             if (!values.length && length > 0) values.push(`${length}字`);
 
             return uniquePreserveOrder(values)
@@ -5586,7 +5920,6 @@
             return `
                 <div class="card-preview">
                     ${previewBody}
-                    ${renderSelectionIndicator(item.id).replace('select-indicator', 'select-indicator card-selection')}
                     <div class="card-icon">${renderPlatformMark(item)}</div>
                     ${badge}
                 </div>
@@ -5740,14 +6073,12 @@
                     const length = item.canonical_text ? item.canonical_text.length : 0;
                     const thumb = getItemThumbnail(item);
                     const activeClass = currentOpenItemId === item.id ? ' is-active' : '';
-                    const selectableClass = selectionMode ? ' is-selectable' : '';
                     const thumbHtml = thumb
                         ? `<div class="list-thumb"><img src="${thumb.url}" loading="lazy" alt=""></div>`
                         : `<div class="list-thumb"></div>`;
                     return `
-                        <div class="list-row${activeClass}${selectableClass}" onclick="handleItemPrimaryAction('${item.id}')">
+                        <div class="list-row${activeClass}" onclick="handleItemPrimaryAction('${item.id}')">
                             <div class="list-main">
-                                ${renderSelectionIndicator(item.id)}
                                 ${thumbHtml}
                                 <div class="list-content">
                                     <div class="list-title-row">
@@ -5761,7 +6092,7 @@
                                     <span class="list-stat">${platformDisplayLabel(item)}</span>
                                     <span class="list-stat">${formatDate(item.created_at)}</span>
                                     <span class="list-stat">${length} 字</span>
-                                    ${renderFolderTag(item)}
+                                    ${renderFolderTags(item)}
                                 </div>
                                 <div class="list-actions">
                                     ${renderSyncBadges(item)}
@@ -5782,14 +6113,13 @@
             grid.innerHTML = entries.map((item) => {
                 const length = item.canonical_text ? item.canonical_text.length : 0;
                 const activeClass = currentOpenItemId === item.id ? ' is-active' : '';
-                const selectableClass = selectionMode ? ' is-selectable' : '';
                 const title = escapeHtml(item.title || '无标题');
                 const sourceLabel = escapeHtml(`来自 ${platformDisplayLabel(item)}`);
                 const relativeTime = escapeHtml(formatRelativeTime(item.created_at));
-                const tagsHtml = renderCardTags(item, length) || '<span class="tag">未分类</span>';
+                const tagsHtml = renderCardTags(item, length);
 
                 return `
-                    <div class="card${activeClass}${selectableClass}" onclick="handleItemPrimaryAction('${item.id}')">
+                    <div class="card${activeClass}" onclick="handleItemPrimaryAction('${item.id}')">
                         ${renderCardPreview(item)}
                         <div class="card-content">
                             <div class="card-meta-row">
@@ -5835,8 +6165,6 @@
         });
         galleryViewBtn.addEventListener('click', () => setView('gallery'));
         listViewBtn.addEventListener('click', () => setView('list'));
-        selectionModeBtn.addEventListener('click', () => setSelectionMode());
-        bulkMoveBtn.addEventListener('click', () => openFolderPicker(Array.from(selectedItemIds), null, '批量加入文件夹'));
         createFolderBtn.addEventListener('click', () => openCreateFolderPrompt());
         folderSearchInput.addEventListener('input', (e) => {
             folderSearchQuery = e.target.value || '';
@@ -5847,6 +6175,11 @@
             updateSidebarState();
         });
         closeFolderPicker.addEventListener('click', () => closeFolderPickerDialog());
+        folderPickerClearBtn.addEventListener('click', () => {
+            folderPickerSelectedIds = new Set();
+            renderFolderPickerOptions();
+        });
+        folderPickerApplyBtn.addEventListener('click', () => applyFolderSelection());
         folderCreateConfirmBtn.addEventListener('click', () => createFolderAndApply());
         folderCreateInput.addEventListener('keydown', (e) => {
             if (e.key === 'Enter') {
@@ -5875,7 +6208,6 @@
                 const response = await fetch(`/api/items/${id}`, { method: 'DELETE' });
                 if (response.ok) {
                     showToast('已删除', 'deleted');
-                    clearSelection();
                     await Promise.all([fetchFolders(), fetchItems()]);
                 } else {
                     const data = await response.json();
@@ -5926,7 +6258,7 @@
 
             modalFooter.innerHTML = `
                 <div class="modal-footer-actions">
-                    <button onclick="openFolderPicker(['${item.id}'], ${item.folder_id ? `'${item.folder_id}'` : 'null'}, '移动到文件夹')" class="extract-btn modal-action-btn">移动到文件夹</button>
+                    <button onclick="openFolderPickerForItem('${item.id}', '管理文件夹')" class="extract-btn modal-action-btn">管理文件夹</button>
                     <button onclick="syncItem('${item.id}', 'notion')" class="extract-btn modal-action-btn">${item.notion_page_id ? '再次检查 Notion 同步' : '同步至 Notion'}</button>
                     <button onclick="syncItem('${item.id}', 'obsidian')" class="extract-btn modal-action-btn">${item.obsidian_path ? '再次检查 Obsidian 同步' : '同步至 Obsidian'}</button>
                     <button onclick="downloadZip('${item.id}')" class="extract-btn modal-action-btn">下载 ZIP</button>

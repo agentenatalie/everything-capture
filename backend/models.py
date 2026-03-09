@@ -74,6 +74,7 @@ class Item(Base):
     workspace = relationship("Workspace", back_populates="items", lazy="joined")
     media = relationship("Media", back_populates="item", cascade="all, delete-orphan", lazy="joined")
     folder = relationship("Folder", back_populates="items", lazy="joined")
+    folder_links = relationship("ItemFolderLink", back_populates="item", cascade="all, delete-orphan", lazy="selectin")
 
 
 class Media(Base):
@@ -108,6 +109,18 @@ class Folder(Base):
     user = relationship("User", back_populates="folders", lazy="joined")
     workspace = relationship("Workspace", back_populates="folders", lazy="joined")
     items = relationship("Item", back_populates="folder")
+    item_links = relationship("ItemFolderLink", back_populates="folder", cascade="all, delete-orphan")
+
+
+class ItemFolderLink(Base):
+    __tablename__ = "item_folder_links"
+
+    item_id = Column(String, ForeignKey("items.id"), primary_key=True)
+    folder_id = Column(String, ForeignKey("folders.id"), primary_key=True)
+    created_at = Column(DateTime, default=datetime.datetime.utcnow)
+
+    item = relationship("Item", back_populates="folder_links")
+    folder = relationship("Folder", back_populates="item_links", lazy="joined")
 
 
 class Settings(Base):

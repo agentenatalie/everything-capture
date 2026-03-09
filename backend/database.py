@@ -168,6 +168,27 @@ def ensure_runtime_schema():
         connection.exec_driver_sql("CREATE INDEX IF NOT EXISTS idx_items_workspace_id ON items(workspace_id)")
         connection.exec_driver_sql("CREATE INDEX IF NOT EXISTS idx_items_folder_id ON items(folder_id)")
 
+        connection.exec_driver_sql(
+            """
+            CREATE TABLE IF NOT EXISTS item_folder_links (
+                item_id VARCHAR NOT NULL REFERENCES items(id),
+                folder_id VARCHAR NOT NULL REFERENCES folders(id),
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                PRIMARY KEY (item_id, folder_id)
+            )
+            """
+        )
+        connection.exec_driver_sql(
+            """
+            INSERT OR IGNORE INTO item_folder_links (item_id, folder_id, created_at)
+            SELECT id, folder_id, CURRENT_TIMESTAMP
+            FROM items
+            WHERE folder_id IS NOT NULL AND trim(folder_id) != ''
+            """
+        )
+        connection.exec_driver_sql("CREATE INDEX IF NOT EXISTS idx_item_folder_links_item_id ON item_folder_links(item_id)")
+        connection.exec_driver_sql("CREATE INDEX IF NOT EXISTS idx_item_folder_links_folder_id ON item_folder_links(folder_id)")
+
         media_columns = _table_columns(connection, "media")
         if "user_id" not in media_columns:
             connection.exec_driver_sql(

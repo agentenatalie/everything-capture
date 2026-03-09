@@ -13,7 +13,7 @@ from fastapi.responses import StreamingResponse
 from sqlalchemy import func, or_
 from sqlalchemy.orm import Session
 from database import get_db
-from models import Folder, Item
+from models import Folder, Item, ItemFolderLink
 from schemas import (
     BulkFolderUpdateRequest,
     BulkFolderUpdateResponse,
@@ -224,6 +224,31 @@ def serialize_items(items: list[Item]) -> list[ItemResponse]:
                     display_order=m.display_order,
                     inline_position=m.inline_position if m.inline_position is not None else -1.0,
                 ))
+        ordered_folder_links = sorted(
+            [
+                link
+                for link in (item.folder_links or [])
+                if getattr(link, "folder", None) is not None
+            ],
+            key=lambda link: (
+                getattr(link, "created_at", None) or datetime.min,
+                (link.folder.name or "").lower(),
+                link.folder_id,
+            ),
+        )
+        if not ordered_folder_links and item.folder:
+            ordered_folder_links = [
+                ItemFolderLink(
+                    item_id=item.id,
+                    folder_id=item.folder.id,
+                    folder=item.folder,
+                    created_at=getattr(item, "created_at", None),
+                )
+            ]
+        folder_ids = [link.folder_id for link in ordered_folder_links]
+        folder_names = [link.folder.name for link in ordered_folder_links if link.folder and link.folder.name]
+        primary_folder_id = folder_ids[0] if folder_ids else None
+        primary_folder_name = folder_names[0] if folder_names else None
         results.append(ItemResponse(
             id=item.id,
             created_at=item.created_at,
@@ -236,8 +261,11 @@ def serialize_items(items: list[Item]) -> list[ItemResponse]:
             platform=item.platform,
             notion_page_id=item.notion_page_id,
             obsidian_path=item.obsidian_path,
-            folder_id=item.folder_id,
-            folder_name=item.folder.name if item.folder else None,
+            folder_id=primary_folder_id,
+            folder_name=primary_folder_name,
+            folder_ids=folder_ids,
+            folder_names=folder_names,
+            folder_count=len(folder_ids),
             media=media_list,
         ))
     return results
@@ -278,22 +306,60 @@ def apply_platform_filter(query, platform: str):
 
 def apply_folder_filter(query, folder_scope: str = "all", folder_id: Optional[str] = None):
     if folder_id:
-        return query.filter(Item.folder_id == folder_id)
+        linked_item_ids = query.session.query(ItemFolderLink.item_id).filter(ItemFolderLink.folder_id == folder_id)
+        return query.filter(Item.id.in_(linked_item_ids))
 
     normalized_scope = (folder_scope or "all").strip().lower()
     if normalized_scope == "unfiled":
-        return query.filter(Item.folder_id.is_(None))
+        linked_item_ids = query.session.query(ItemFolderLink.item_id)
+        return query.filter(~Item.id.in_(linked_item_ids))
     return query
 
 
-def resolve_folder(db: Session, user_id: str, folder_id: Optional[str]) -> Optional[Folder]:
-    if not folder_id:
-        return None
+def normalize_requested_folder_ids(folder_id: Optional[str], folder_ids: Optional[list[str]]) -> list[str]:
+    normalized: list[str] = []
+    seen: set[str] = set()
+    for raw_value in [*(folder_ids or []), folder_id]:
+        value = (raw_value or "").strip()
+        if not value or value in seen:
+            continue
+        normalized.append(value)
+        seen.add(value)
+    return normalized
 
-    folder = db.query(Folder).filter(Folder.id == folder_id, Folder.user_id == user_id).first()
-    if not folder:
+
+def resolve_folders(db: Session, user_id: str, folder_ids: list[str]) -> list[Folder]:
+    if not folder_ids:
+        return []
+
+    folders = db.query(Folder).filter(Folder.user_id == user_id, Folder.id.in_(folder_ids)).all()
+    folders_by_id = {folder.id: folder for folder in folders}
+    missing_ids = [folder_id for folder_id in folder_ids if folder_id not in folders_by_id]
+    if missing_ids:
         raise HTTPException(status_code=404, detail="Folder not found")
-    return folder
+    return [folders_by_id[folder_id] for folder_id in folder_ids]
+
+
+def sync_item_folder_assignments(item: Item, folders: list[Folder]) -> None:
+    selected_folder_ids = [folder.id for folder in folders]
+    existing_links = {link.folder_id: link for link in (item.folder_links or [])}
+
+    for folder_id, link in list(existing_links.items()):
+        if folder_id not in selected_folder_ids:
+            item.folder_links.remove(link)
+
+    for folder in folders:
+        if folder.id in existing_links:
+            continue
+        item.folder_links.append(
+            ItemFolderLink(
+                item_id=item.id,
+                folder_id=folder.id,
+                folder=folder,
+            )
+        )
+
+    item.folder_id = selected_folder_ids[0] if selected_folder_ids else None
 
 
 def _cleanup_item_media_files(local_paths: list[str]) -> None:
@@ -604,10 +670,12 @@ def update_item_folder(
     if not item:
         raise HTTPException(status_code=404, detail="Item not found")
 
-    folder = resolve_folder(db, user_id, request.folder_id)
-    item.folder_id = folder.id if folder else None
-    if folder:
-        folder.updated_at = datetime.utcnow()
+    requested_folder_ids = normalize_requested_folder_ids(request.folder_id, request.folder_ids)
+    folders = resolve_folders(db, user_id, requested_folder_ids)
+    sync_item_folder_assignments(item, folders)
+    now = datetime.utcnow()
+    for folder in folders:
+        folder.updated_at = now
 
     db.commit()
     db.refresh(item)
@@ -624,16 +692,17 @@ def bulk_update_item_folder(
     if not item_ids:
         raise HTTPException(status_code=400, detail="item_ids is required")
 
-    folder = resolve_folder(db, user_id, request.folder_id)
+    requested_folder_ids = normalize_requested_folder_ids(request.folder_id, request.folder_ids)
+    folders = resolve_folders(db, user_id, requested_folder_ids)
     items = db.query(Item).filter(Item.user_id == user_id, Item.id.in_(item_ids)).all()
     if not items:
         raise HTTPException(status_code=404, detail="Items not found")
 
+    now = datetime.utcnow()
     for item in items:
-        item.folder_id = folder.id if folder else None
-
-    if folder:
-        folder.updated_at = datetime.utcnow()
+        sync_item_folder_assignments(item, folders)
+    for folder in folders:
+        folder.updated_at = now
 
     db.commit()
     return BulkFolderUpdateResponse(updated_count=len(items))

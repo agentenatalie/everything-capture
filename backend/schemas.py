@@ -42,6 +42,9 @@ class ItemResponse(BaseModel):
     obsidian_path: Optional[str] = None
     folder_id: Optional[str] = None
     folder_name: Optional[str] = None
+    folder_ids: list[str] = Field(default_factory=list)
+    folder_names: list[str] = Field(default_factory=list)
+    folder_count: int = 0
     media: list[MediaResponse] = []
     
     class Config:
@@ -135,11 +138,13 @@ class FolderUpdateRequest(BaseModel):
 
 class ItemFolderUpdateRequest(BaseModel):
     folder_id: Optional[str] = None
+    folder_ids: list[str] = Field(default_factory=list)
 
 
 class BulkFolderUpdateRequest(BaseModel):
     item_ids: list[str] = Field(default_factory=list)
     folder_id: Optional[str] = None
+    folder_ids: list[str] = Field(default_factory=list)
 
 
 class BulkFolderUpdateResponse(BaseModel):

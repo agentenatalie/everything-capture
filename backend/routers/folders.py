@@ -5,7 +5,7 @@ from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from database import get_db
-from models import Folder, Item
+from models import Folder, Item, ItemFolderLink
 from schemas import FolderCreateRequest, FolderListResponse, FolderResponse, FolderUpdateRequest
 from tenant import get_current_user_id
 
@@ -53,7 +53,8 @@ def get_folders(db: Session = Depends(get_db)):
     user_id = get_current_user_id()
     folder_rows = (
         db.query(Folder, func.count(Item.id))
-        .outerjoin(Item, (Item.folder_id == Folder.id) & (Item.user_id == user_id))
+        .outerjoin(ItemFolderLink, ItemFolderLink.folder_id == Folder.id)
+        .outerjoin(Item, (Item.id == ItemFolderLink.item_id) & (Item.user_id == user_id))
         .filter(Folder.user_id == user_id)
         .group_by(Folder.id)
         .order_by(Folder.updated_at.desc(), Folder.created_at.desc(), Folder.name.asc())
@@ -62,7 +63,8 @@ def get_folders(db: Session = Depends(get_db)):
     total_count = db.query(func.count(Item.id)).filter(Item.user_id == user_id).scalar() or 0
     unfiled_count = (
         db.query(func.count(Item.id))
-        .filter(Item.user_id == user_id, Item.folder_id.is_(None))
+        .outerjoin(ItemFolderLink, ItemFolderLink.item_id == Item.id)
+        .filter(Item.user_id == user_id, ItemFolderLink.item_id.is_(None))
         .scalar()
         or 0
     )
@@ -114,7 +116,8 @@ def update_folder(folder_id: str, request: FolderUpdateRequest, db: Session = De
     db.commit()
     item_count = (
         db.query(func.count(Item.id))
-        .filter(Item.user_id == user_id, Item.folder_id == folder.id)
+        .join(ItemFolderLink, ItemFolderLink.item_id == Item.id)
+        .filter(Item.user_id == user_id, ItemFolderLink.folder_id == folder.id)
         .scalar()
         or 0
     )
@@ -135,7 +138,23 @@ def delete_folder(folder_id: str, db: Session = Depends(get_db)):
     if not folder:
         raise HTTPException(status_code=404, detail="Folder not found")
 
-    db.query(Item).filter(Item.user_id == user_id, Item.folder_id == folder.id).update({"folder_id": None})
+    affected_items = (
+        db.query(Item)
+        .join(ItemFolderLink, ItemFolderLink.item_id == Item.id)
+        .filter(Item.user_id == user_id, ItemFolderLink.folder_id == folder.id)
+        .all()
+    )
+    db.query(ItemFolderLink).filter(ItemFolderLink.folder_id == folder.id).delete(synchronize_session=False)
+    db.flush()
+    for item in affected_items:
+        replacement_link = (
+            db.query(ItemFolderLink)
+            .join(Folder, Folder.id == ItemFolderLink.folder_id)
+            .filter(ItemFolderLink.item_id == item.id, Folder.user_id == user_id)
+            .order_by(ItemFolderLink.created_at.asc(), Folder.created_at.asc(), Folder.name.asc())
+            .first()
+        )
+        item.folder_id = replacement_link.folder_id if replacement_link else None
     db.delete(folder)
     db.commit()
     return Response(status_code=status.HTTP_204_NO_CONTENT)

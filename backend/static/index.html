@@ -1247,6 +1247,16 @@
             background: #000;
         }
 
+        .modal-media iframe,
+        .article-html iframe {
+            width: 100%;
+            min-height: 320px;
+            aspect-ratio: 16 / 9;
+            border: 0;
+            border-radius: 12px;
+            background: #000;
+        }
+
         .modal-media .gallery-hint {
             text-align: center;
             font-size: 0.8rem;
@@ -2386,6 +2396,52 @@
             };
         }
 
+        function getEmbedVideoUrl(url) {
+            const value = String(url || '').trim();
+            if (!value) return '';
+            try {
+                const parsed = new URL(value);
+                const host = parsed.hostname.toLowerCase();
+                const path = parsed.pathname || '';
+                if (host.includes('youtu.be')) {
+                    const id = path.replace(/^\/+/, '').split('/')[0];
+                    return id ? `https://www.youtube.com/embed/${id}` : value;
+                }
+                if (host.includes('youtube.com') || host.includes('youtube-nocookie.com')) {
+                    if (path.startsWith('/embed/')) return `https://www.youtube.com${path.split('?')[0]}`;
+                    if (path === '/watch') {
+                        const id = parsed.searchParams.get('v');
+                        return id ? `https://www.youtube.com/embed/${id}` : value;
+                    }
+                    if (path.startsWith('/shorts/')) {
+                        const id = path.split('/shorts/')[1]?.split('/')[0];
+                        return id ? `https://www.youtube.com/embed/${id}` : value;
+                    }
+                }
+                if (host === 'player.vimeo.com') return value;
+                if (host.includes('vimeo.com')) {
+                    const match = path.match(/\/(?:video\/)?(\d+)/);
+                    return match ? `https://player.vimeo.com/video/${match[1]}` : value;
+                }
+                return value;
+            } catch (error) {
+                return value;
+            }
+        }
+
+        function isIframeVideoUrl(url) {
+            const value = String(url || '').trim();
+            return /youtube(?:-nocookie)?\.com|youtu\.be|vimeo\.com/i.test(value);
+        }
+
+        function renderVideoMedia(url) {
+            const safeUrl = escapeAttribute(url);
+            if (isIframeVideoUrl(url)) {
+                return `<div class="modal-media"><iframe src="${escapeAttribute(getEmbedVideoUrl(url))}" title="Embedded video" loading="lazy" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share" allowfullscreen referrerpolicy="strict-origin-when-cross-origin"></iframe></div>`;
+            }
+            return `<div class="modal-media"><video controls preload="metadata"><source src="${safeUrl}" type="video/mp4"></video></div>`;
+        }
+
         function renderStructuredBlocks(blocks) {
             return blocks.map((block) => {
                 const content = String(block.markdown || block.content || '').trim();
@@ -2418,6 +2474,9 @@
                 }
                 if (block.type === 'image' && block.url) {
                     return `<div class="inline-img-wrap"><img src="${escapeAttribute(block.url)}" alt="" class="inline-img"></div>`;
+                }
+                if (block.type === 'video' && block.url) {
+                    return renderVideoMedia(block.url);
                 }
                 return '';
             }).join('');
@@ -2499,8 +2558,8 @@
             }
 
             let html = '';
-            if (videos.length > 0) {
-                html += `<div class="modal-media"><video controls preload="metadata"><source src="${escapeAttribute(videos[0].url)}" type="video/mp4"></video></div>`;
+            if (videos.length > 0 && !/<(video|iframe)\b/i.test(bodyHtml)) {
+                html += renderVideoMedia(videos[0].url);
             }
             html += bodyHtml;
             return html;

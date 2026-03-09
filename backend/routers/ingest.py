@@ -73,19 +73,23 @@ async def extract_page(request: ExtractRequest, background_tasks: BackgroundTask
     """服务端提取：传入 URL，后端抓取内容并存储"""
     try:
         result = await extract_content(request.url)
+        has_media = bool(result.media_urls)
+        stored_text = (result.text or "").strip()
+        if not stored_text and has_media:
+            stored_text = (result.title or request.url).strip()
 
-        if not result.text or len(result.text.strip()) < 20:
+        if not stored_text or (len(stored_text) < 20 and not has_media):
             raise HTTPException(
                 status_code=422,
-                detail=f"内容提取失败或内容过短 (平台: {result.platform}，长度: {len(result.text)})"
+                detail=f"内容提取失败或内容过短 (平台: {result.platform}，长度: {len(stored_text)})"
             )
 
         new_item = Item(
             source_url=request.url,
             final_url=result.final_url,
             title=result.title,
-            canonical_text=result.text,
-            canonical_text_length=len(result.text),
+            canonical_text=stored_text,
+            canonical_text_length=len(stored_text),
             platform=result.platform,
             status="ready",
         )
@@ -115,17 +119,17 @@ async def extract_page(request: ExtractRequest, background_tasks: BackgroundTask
                     inline_position=dl.get("inline_position", -1.0),
                 )
                 db.add(media_record)
-                url_map[dl["original_url"]] = f"/static/{dl['local_path']}"
+                url_map[dl["original_url"]] = f"/static/{dl['local_path']}" if dl["local_path"] else dl["original_url"]
 
             # Save content_blocks_json with local URLs substituted in
             if result.content_blocks:
                 import json as _json
                 final_blocks = []
                 for block in result.content_blocks:
-                    if block["type"] == "image":
+                    if block["type"] in {"image", "video"}:
                         local_url = url_map.get(block["url"])
-                        if local_url:  # Only include images that were successfully downloaded
-                            final_blocks.append({"type": "image", "url": local_url})
+                        if local_url:
+                            final_blocks.append({"type": block["type"], "url": local_url})
                     else:
                         final_blocks.append(block)
                 if final_blocks:
@@ -144,6 +148,26 @@ async def extract_page(request: ExtractRequest, background_tasks: BackgroundTask
                         img["src"] = local_url
                     else:
                         img.decompose()  # Remove if it wasn't downloaded
+
+                for video in soup.find_all("video"):
+                    src = video.get("src", "")
+                    if src:
+                        local_url = url_map.get(src)
+                        if local_url:
+                            video["src"] = local_url
+                    for source in video.find_all("source"):
+                        source_src = source.get("src", "")
+                        if not source_src:
+                            continue
+                        local_url = url_map.get(source_src)
+                        if local_url:
+                            source["src"] = local_url
+
+                for iframe in soup.find_all("iframe"):
+                    src = iframe.get("src", "")
+                    local_url = url_map.get(src)
+                    if local_url:
+                        iframe["src"] = local_url
                 
                 new_item.canonical_html = str(soup)
                 db.add(new_item)
@@ -159,7 +183,7 @@ async def extract_page(request: ExtractRequest, background_tasks: BackgroundTask
             title=result.title,
             status="ready",
             platform=result.platform,
-            text_length=len(result.text),
+            text_length=len(stored_text),
             media_count=media_count,
         )
     except HTTPException:

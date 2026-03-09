@@ -3,11 +3,12 @@
 支持：小红书、抖音、X/Twitter、通用网站
 """
 
+import os
 import re
 import json
 import logging
 from dataclasses import dataclass
-from urllib.parse import urlparse, unquote
+from urllib.parse import parse_qs, urljoin, urlparse, unquote
 
 import httpx
 from bs4 import BeautifulSoup
@@ -49,6 +50,21 @@ _DESKTOP_UA = (
     "AppleWebKit/537.36 (KHTML, like Gecko) "
     "Chrome/120.0.0.0 Safari/537.36"
 )
+
+_X_DEFAULT_BEARER_TOKEN = (
+    "Bearer AAAAAAAAAAAAAAAAAAAAANRILgAAAAAAnNwIzUejRCOuH5E6I8xnZz4puTs%3D"
+    "1Zv7ttfk8LF81IUq16cHjhLTvJu4FA33AGWWjCpTnA"
+)
+_X_ARTICLE_QUERY_FALLBACK_ID = "id8pHQbQi7eZ6P9mA1th1Q"
+_X_ARTICLE_FEATURE_SWITCHES = [
+    "profile_label_improvements_pcf_label_in_post_enabled",
+    "responsive_web_profile_redirect_enabled",
+    "rweb_tipjar_consumption_enabled",
+    "verified_phone_label_enabled",
+    "responsive_web_graphql_skip_user_profile_image_extensions_enabled",
+    "responsive_web_graphql_timeline_navigation_enabled",
+]
+_X_ARTICLE_FIELD_TOGGLES = ["withPayments", "withAuxiliaryUserLabels"]
 
 
 def _build_client(ua: str = _DESKTOP_UA, timeout: float = 20) -> httpx.AsyncClient:
@@ -108,6 +124,454 @@ def _clean_text(text: str) -> str:
     """去除多余空白"""
     text = re.sub(r"\n{3,}", "\n\n", text)
     return text.strip()
+
+
+def _normalize_media_url(src: str, base_url: str = "") -> str:
+    if not src:
+        return ""
+    src = src.strip()
+    if not src or src.startswith(("data:", "blob:")):
+        return ""
+    if src.startswith("//"):
+        return "https:" + src
+    if src.startswith(("http://", "https://")):
+        return src
+    if base_url:
+        return urljoin(base_url, src)
+    return ""
+
+
+def _canonicalize_video_embed_url(src: str, base_url: str = "") -> str:
+    """Normalize embeddable video URLs so downstream rendering can treat them consistently."""
+    normalized = _normalize_media_url(src, base_url=base_url)
+    if not normalized:
+        return ""
+
+    parsed = urlparse(normalized)
+    host = (parsed.hostname or "").lower()
+    path = parsed.path or ""
+    query = parse_qs(parsed.query)
+
+    youtube_hosts = {"youtu.be", "www.youtu.be", "youtube.com", "www.youtube.com", "m.youtube.com", "youtube-nocookie.com", "www.youtube-nocookie.com"}
+    if host in youtube_hosts:
+        video_id = ""
+        if host.endswith("youtu.be"):
+            video_id = path.strip("/").split("/")[0]
+        elif "/embed/" in path:
+            video_id = path.split("/embed/", 1)[1].split("/", 1)[0]
+        elif path.startswith("/shorts/"):
+            video_id = path.split("/shorts/", 1)[1].split("/", 1)[0]
+        elif path == "/watch":
+            video_id = (query.get("v") or [""])[0]
+        if video_id:
+            return f"https://www.youtube.com/embed/{video_id}"
+
+    if host in {"vimeo.com", "www.vimeo.com", "player.vimeo.com"}:
+        match = re.search(r"/(?:video/)?(\d+)", path)
+        if match:
+            return f"https://player.vimeo.com/video/{match.group(1)}"
+
+    return normalized
+
+
+def _extract_tweet_id(url: str) -> str | None:
+    try:
+        parsed = urlparse(url)
+    except Exception:
+        return None
+    match = re.search(r"/status/(\d+)", parsed.path or "")
+    return match.group(1) if match else None
+
+
+def _extract_twitter_article_id(url: str) -> str | None:
+    try:
+        parsed = urlparse(url)
+    except Exception:
+        return None
+    match = re.search(r"/(?:i/)?article/(\d+)", parsed.path or "")
+    return match.group(1) if match else None
+
+
+def _is_embed_video_url(url: str) -> bool:
+    host = (urlparse(url).hostname or "").lower()
+    return host in {
+        "youtube.com",
+        "www.youtube.com",
+        "m.youtube.com",
+        "youtube-nocookie.com",
+        "www.youtube-nocookie.com",
+        "youtu.be",
+        "www.youtu.be",
+        "vimeo.com",
+        "www.vimeo.com",
+        "player.vimeo.com",
+    }
+
+
+def _extract_twitter_media(payload: dict) -> list[dict]:
+    media_urls: list[dict] = []
+    seen: set[str] = set()
+
+    def add_media(url: str, media_type: str, order: int) -> None:
+        normalized = _normalize_media_url(url)
+        if not normalized or normalized in seen:
+            return
+        seen.add(normalized)
+        media_urls.append({"type": media_type, "url": normalized, "order": order, "inline_position": -1.0})
+
+    candidates = []
+    for key in ("media", "media_extended", "photos", "videos"):
+        value = payload.get(key)
+        if isinstance(value, list):
+            candidates.extend(item for item in value if isinstance(item, dict))
+
+    for index, media in enumerate(candidates):
+        media_type = str(media.get("type", "")).lower()
+        if media_type in {"photo", "image", "animated_gif"}:
+            add_media(
+                media.get("url", "")
+                or media.get("media_url_https", "")
+                or media.get("media_url", "")
+                or media.get("image_url", ""),
+                "image",
+                index,
+            )
+            continue
+
+        video_sources = []
+        if isinstance(media.get("video"), dict):
+            variants = media["video"].get("variants") or []
+            if isinstance(variants, list):
+                video_sources.extend(v for v in variants if isinstance(v, dict))
+        if isinstance(media.get("video_info"), dict):
+            variants = media["video_info"].get("variants") or []
+            if isinstance(variants, list):
+                video_sources.extend(v for v in variants if isinstance(v, dict))
+
+        best_variant = ""
+        best_bitrate = -1
+        for variant in video_sources:
+            variant_url = variant.get("url", "")
+            content_type = str(variant.get("content_type", "")).lower()
+            bitrate = int(variant.get("bitrate", -1) or -1)
+            if variant_url and ("mp4" in content_type or variant_url.lower().split("?")[0].endswith(".mp4")):
+                if bitrate >= best_bitrate:
+                    best_variant = variant_url
+                    best_bitrate = bitrate
+
+        if best_variant:
+            add_media(best_variant, "video", index)
+        else:
+            add_media(
+                media.get("url", "")
+                or media.get("media_url_https", "")
+                or media.get("media_url", "")
+                or media.get("thumbnail_url", ""),
+                "image" if media_type not in {"video"} else "video",
+                index,
+            )
+
+    return media_urls
+
+
+def _parse_twitter_oembed_html(author_name: str, html: str) -> ExtractResult | None:
+    soup = BeautifulSoup(html, "lxml")
+    quote = soup.find("blockquote")
+    if not quote:
+        return None
+
+    text_tag = quote.find("p")
+    text = text_tag.get_text(" ", strip=True) if text_tag else ""
+    date_tag = quote.find("a", href=re.compile(r"/status/\d+"))
+    created_at = date_tag.get_text(" ", strip=True) if date_tag else ""
+
+    full_text = ""
+    if author_name:
+        full_text += author_name.strip()
+    if text:
+        full_text = f"{full_text}\n\n{text}" if full_text else text
+    if created_at:
+        full_text = f"{full_text}\n\n{created_at}" if full_text else created_at
+
+    if not full_text.strip():
+        return None
+
+    title_source = text or author_name or "Tweet"
+    title = f"{author_name}: {title_source[:60]}..." if author_name and text else title_source[:80]
+    return ExtractResult(
+        title=title,
+        text=_clean_text(full_text),
+        platform="twitter",
+        final_url="",
+    )
+
+
+def _parse_cookie_header(cookie_header: str) -> dict[str, str]:
+    cookie_map: dict[str, str] = {}
+    for chunk in cookie_header.split(";"):
+        if "=" not in chunk:
+            continue
+        name, value = chunk.split("=", 1)
+        name = name.strip()
+        value = value.strip()
+        if name and value:
+            cookie_map[name] = value
+    return cookie_map
+
+
+def _load_x_cookie_map() -> dict[str, str]:
+    cookie_map: dict[str, str] = {}
+
+    header = os.getenv("X_COOKIE_HEADER", "").strip()
+    if header:
+        cookie_map.update(_parse_cookie_header(header))
+
+    env_pairs = {
+        "auth_token": os.getenv("X_AUTH_TOKEN", "").strip(),
+        "ct0": os.getenv("X_CT0", "").strip(),
+        "gt": os.getenv("X_GUEST_TOKEN", "").strip(),
+        "twid": os.getenv("X_TWID", "").strip(),
+    }
+    for name, value in env_pairs.items():
+        if value:
+            cookie_map[name] = value
+
+    return cookie_map
+
+
+def _build_x_request_headers(cookie_map: dict[str, str]) -> dict[str, str]:
+    headers = {
+        "authorization": os.getenv("X_BEARER_TOKEN", "").strip() or _X_DEFAULT_BEARER_TOKEN,
+        "user-agent": os.getenv("X_USER_AGENT", "").strip() or _DESKTOP_UA,
+        "accept": "application/json",
+        "x-twitter-active-user": "yes",
+        "x-twitter-client-language": "en",
+        "accept-language": "en",
+    }
+
+    guest_token = cookie_map.get("gt")
+    if guest_token:
+        headers["x-guest-token"] = guest_token
+
+    if cookie_map:
+        headers["cookie"] = "; ".join(f"{key}={value}" for key, value in cookie_map.items() if value)
+
+    if cookie_map.get("auth_token"):
+        headers["x-twitter-auth-type"] = "OAuth2Session"
+    if cookie_map.get("ct0"):
+        headers["x-csrf-token"] = cookie_map["ct0"]
+
+    return headers
+
+
+def _resolve_feature_value(html: str, key: str) -> bool | None:
+    key_pattern = re.escape(key)
+    match = re.search(rf'"{key_pattern}"\s*:\s*\{{"value"\s*:\s*(true|false)', html)
+    if match:
+        return match.group(1) == "true"
+    escaped = re.search(rf'\\"{key_pattern}\\"\s*:\s*\\\{{\\"value\\"\s*:\s*(true|false)', html)
+    if escaped:
+        return escaped.group(1) == "true"
+    return None
+
+
+def _build_x_feature_map(html: str, keys: list[str]) -> dict[str, bool]:
+    feature_map: dict[str, bool] = {}
+    for key in keys:
+        value = _resolve_feature_value(html, key)
+        feature_map[key] = True if value is None else value
+    feature_map.setdefault("responsive_web_graphql_exclude_directive_enabled", True)
+    return feature_map
+
+
+async def _resolve_x_home_html(client: httpx.AsyncClient) -> str:
+    resp = await client.get("https://x.com")
+    resp.raise_for_status()
+    return resp.text
+
+
+async def _resolve_x_article_query_info(client: httpx.AsyncClient) -> tuple[str, list[str], list[str], str]:
+    html = await _resolve_x_home_html(client)
+    bundle_match = re.search(r'"bundle\.TwitterArticles":"([a-z0-9]+)"', html)
+    if not bundle_match:
+        return _X_ARTICLE_QUERY_FALLBACK_ID, _X_ARTICLE_FEATURE_SWITCHES, _X_ARTICLE_FIELD_TOGGLES, html
+
+    chunk_url = f"https://abs.twimg.com/responsive-web/client-web/bundle.TwitterArticles.{bundle_match.group(1)}a.js"
+    try:
+        chunk_resp = await client.get(chunk_url)
+        chunk_resp.raise_for_status()
+        chunk = chunk_resp.text
+    except Exception as e:
+        logger.debug("加载 X article chunk 失败: %s", e)
+        return _X_ARTICLE_QUERY_FALLBACK_ID, _X_ARTICLE_FEATURE_SWITCHES, _X_ARTICLE_FIELD_TOGGLES, html
+
+    query_id = _X_ARTICLE_QUERY_FALLBACK_ID
+    feature_switches = _X_ARTICLE_FEATURE_SWITCHES
+    field_toggles = _X_ARTICLE_FIELD_TOGGLES
+
+    query_match = re.search(r'queryId:"([^"]+)",operationName:"ArticleEntityResultByRestId"', chunk)
+    if query_match:
+        query_id = query_match.group(1)
+
+    feature_match = re.search(
+        r'operationName:"ArticleEntityResultByRestId"[\s\S]*?featureSwitches:\[(.*?)\]',
+        chunk,
+    )
+    if feature_match:
+        parsed = [item.strip().strip('"') for item in feature_match.group(1).split(",") if item.strip()]
+        if parsed:
+            feature_switches = parsed
+
+    field_match = re.search(
+        r'operationName:"ArticleEntityResultByRestId"[\s\S]*?fieldToggles:\[(.*?)\]',
+        chunk,
+    )
+    if field_match:
+        parsed = [item.strip().strip('"') for item in field_match.group(1).split(",") if item.strip()]
+        if parsed:
+            field_toggles = parsed
+
+    return query_id, feature_switches, field_toggles, html
+
+
+def _pick_best_x_video_variant(media_info: dict) -> str:
+    best_url = ""
+    best_bitrate = -1
+    for variant in media_info.get("variants") or []:
+        if not isinstance(variant, dict):
+            continue
+        variant_url = variant.get("url", "")
+        content_type = str(variant.get("content_type", "")).lower()
+        bit_rate = int(variant.get("bit_rate", -1) or -1)
+        if variant_url and ("mp4" in content_type or variant_url.lower().split("?")[0].endswith(".mp4")):
+            if bit_rate >= best_bitrate:
+                best_url = variant_url
+                best_bitrate = bit_rate
+    return best_url
+
+
+def _extract_x_media_url(media_info: dict) -> tuple[str, str]:
+    if not isinstance(media_info, dict):
+        return "", "image"
+    video_url = _pick_best_x_video_variant(media_info)
+    if video_url:
+        return video_url, "video"
+    image_url = (
+        media_info.get("original_img_url")
+        or ((media_info.get("preview_image") or {}).get("original_img_url"))
+        or ""
+    )
+    return image_url, "image"
+
+
+def _extract_x_article_text(article: dict) -> str:
+    plain_text = str(article.get("plain_text") or "").strip()
+    if plain_text:
+        return plain_text
+
+    preview_text = str(article.get("preview_text") or "").strip()
+    if preview_text:
+        return preview_text
+
+    blocks = ((article.get("content_state") or {}).get("blocks") or [])
+    parts: list[str] = []
+    for block in blocks:
+        if not isinstance(block, dict):
+            continue
+        text = str(block.get("text") or "").strip()
+        if text:
+            parts.append(text)
+    return _clean_text("\n\n".join(parts))
+
+
+def _parse_x_article_result(article: dict, final_url: str) -> ExtractResult | None:
+    if not isinstance(article, dict):
+        return None
+
+    title = str(article.get("title") or "X Article").strip() or "X Article"
+    text = _extract_x_article_text(article)
+    media_urls: list[dict] = []
+    seen: set[str] = set()
+
+    def add_media(url: str, media_type: str, order: int) -> None:
+        normalized = _normalize_media_url(url)
+        if not normalized or normalized in seen:
+            return
+        seen.add(normalized)
+        media_urls.append({
+            "type": media_type,
+            "url": normalized,
+            "order": order,
+            "inline_position": -1.0,
+        })
+
+    cover_media = article.get("cover_media") or {}
+    cover_info = cover_media.get("media_info") if isinstance(cover_media, dict) else {}
+    cover_url, cover_type = _extract_x_media_url(cover_info or {})
+    if cover_url:
+        add_media(cover_url, "cover" if cover_type == "image" else cover_type, 0)
+
+    for index, entity in enumerate(article.get("media_entities") or [], start=1):
+        if not isinstance(entity, dict):
+            continue
+        media_url, media_type = _extract_x_media_url(entity.get("media_info") or {})
+        if media_url:
+            add_media(media_url, media_type, index)
+
+    if not text and not media_urls:
+        return None
+
+    canonical_text = text or title
+    return ExtractResult(
+        title=title,
+        text=_clean_text(canonical_text),
+        platform="twitter",
+        final_url=final_url,
+        media_urls=media_urls or None,
+    )
+
+
+async def _extract_twitter_article(url: str, article_id: str) -> ExtractResult | None:
+    cookie_map = _load_x_cookie_map()
+    if not cookie_map.get("gt"):
+        try:
+            async with _build_client() as guest_client:
+                home_html = await _resolve_x_home_html(guest_client)
+            guest_match = re.search(r'document.cookie="gt=([^;]+);', home_html)
+            if guest_match:
+                cookie_map["gt"] = guest_match.group(1)
+        except Exception as e:
+            logger.debug("获取 X guest token 失败: %s", e)
+
+    headers = _build_x_request_headers(cookie_map)
+    async with httpx.AsyncClient(headers=headers, follow_redirects=True, timeout=30) as client:
+        try:
+            query_id, feature_switches, field_toggles, home_html = await _resolve_x_article_query_info(client)
+            params = {
+                "variables": json.dumps({"articleEntityId": article_id}, ensure_ascii=False),
+                "features": json.dumps(_build_x_feature_map(home_html, feature_switches), ensure_ascii=False),
+                "fieldToggles": json.dumps({key: True for key in field_toggles}, ensure_ascii=False),
+            }
+            resp = await client.get(
+                f"https://x.com/i/api/graphql/{query_id}/ArticleEntityResultByRestId",
+                params=params,
+            )
+            if resp.status_code == 404 and cookie_map.get("auth_token"):
+                logger.info("X article GraphQL 404，当前账户可能无访问权限: %s", url)
+                return None
+            resp.raise_for_status()
+            payload = resp.json()
+        except Exception as e:
+            logger.debug("X article GraphQL 失败: %s", e)
+            return None
+
+    root = payload.get("data", payload)
+    article = (
+        ((root.get("article_result_by_rest_id") or {}).get("result"))
+        or root.get("article_result_by_rest_id")
+        or ((root.get("article_entity_result") or {}).get("result"))
+    )
+    return _parse_x_article_result(article, url)
 
 
 # ---------------------------------------------------------------------------
@@ -500,12 +964,11 @@ def _parse_douyin_render_data(data: dict) -> dict | None:
 # ---------------------------------------------------------------------------
 
 async def extract_twitter(url: str) -> ExtractResult | None:
-    """X/Twitter：通过 fxtwitter / vxtwitter 公共 API 获取推文内容（无需 API key）"""
-    # 将 x.com / twitter.com URL 转为 api.fxtwitter.com
+    """X/Twitter：优先公共 API，失败时回退到官方 oEmbed 与页面 meta。"""
     parsed = urlparse(url)
-    path = parsed.path  # 形如 /username/status/1234567890
+    path = parsed.path
+    article_id = _extract_twitter_article_id(url)
 
-    # 处理 t.co 短链接：先跟踪重定向拿到真实 URL
     if parsed.hostname == "t.co":
         async with _build_client() as client:
             try:
@@ -513,11 +976,16 @@ async def extract_twitter(url: str) -> ExtractResult | None:
                 url = str(resp.url)
                 parsed = urlparse(url)
                 path = parsed.path
+                article_id = _extract_twitter_article_id(url)
             except Exception as e:
                 logger.warning("t.co 重定向跟踪失败: %s", e)
                 return None
 
-    # 先尝试 fxtwitter JSON API
+    if article_id:
+        article_result = await _extract_twitter_article(url, article_id)
+        if article_result and (len(article_result.text) > 20 or article_result.media_urls):
+            return article_result
+
     api_url = f"https://api.fxtwitter.com{path}"
     async with _build_client() as client:
         try:
@@ -529,6 +997,7 @@ async def extract_twitter(url: str) -> ExtractResult | None:
                 author_handle = tweet.get("author", {}).get("screen_name", "")
                 text = tweet.get("text", "")
                 created = tweet.get("created_at", "")
+                media_urls = _extract_twitter_media(tweet)
 
                 if text:
                     header = f"@{author_handle}" if author_handle else ""
@@ -548,11 +1017,11 @@ async def extract_twitter(url: str) -> ExtractResult | None:
                         text=_clean_text(full_text),
                         platform="twitter",
                         final_url=url,
+                        media_urls=media_urls or None,
                     )
         except Exception as e:
             logger.debug("fxtwitter API 失败: %s", e)
 
-    # Fallback：尝试 vxtwitter
     vx_url = f"https://api.vxtwitter.com{path}"
     async with _build_client() as client:
         try:
@@ -562,6 +1031,18 @@ async def extract_twitter(url: str) -> ExtractResult | None:
                 text = data.get("text", "")
                 user = data.get("user_name", "")
                 handle = data.get("user_screen_name", "")
+                media_urls = _extract_twitter_media(data)
+                if not media_urls:
+                    media_urls = [
+                        {
+                            "type": "image",
+                            "url": normalized,
+                            "order": index,
+                            "inline_position": -1.0,
+                        }
+                        for index, media_url in enumerate(data.get("mediaURLs", []) or [])
+                        if (normalized := _normalize_media_url(media_url))
+                    ]
 
                 if text:
                     header = f"{user} (@{handle})" if user else ""
@@ -572,11 +1053,31 @@ async def extract_twitter(url: str) -> ExtractResult | None:
                         text=_clean_text(full_text),
                         platform="twitter",
                         final_url=url,
+                        media_urls=media_urls or None,
                     )
         except Exception as e:
             logger.debug("vxtwitter API 失败: %s", e)
 
-    # 最终 fallback：直接抓取页面 + OG meta
+    tweet_id = _extract_tweet_id(url)
+    if tweet_id:
+        async with _build_client() as client:
+            try:
+                oembed_resp = await client.get(
+                    "https://publish.x.com/oembed",
+                    params={"url": url},
+                )
+                if oembed_resp.status_code == 200:
+                    data = oembed_resp.json()
+                    parsed_oembed = _parse_twitter_oembed_html(
+                        data.get("author_name", ""),
+                        data.get("html", ""),
+                    )
+                    if parsed_oembed:
+                        parsed_oembed.final_url = url
+                        return parsed_oembed
+            except Exception as e:
+                logger.debug("X oEmbed 失败: %s", e)
+
     return await _extract_twitter_fallback(url)
 
 
@@ -653,22 +1154,6 @@ def _extract_page_media(soup: BeautifulSoup, base_url: str = "") -> list[dict]:
     img_order = 0
     vid_order = 0
 
-    def _normalize_url(src: str) -> str:
-        if not src:
-            return ""
-        src = src.strip()
-        if src.startswith("data:") or src.startswith("blob:"):
-            return ""
-        if src.startswith("//"):
-            return "https:" + src
-        if src.startswith("/") and base_url:
-            from urllib.parse import urlparse
-            parsed = urlparse(base_url)
-            return f"{parsed.scheme}://{parsed.netloc}{src}"
-        if not src.startswith("http"):
-            return ""
-        return src
-
     # 找到 article body 节点，用于计算图片在正文中的相对位置
     # 优先级: article > main > .rich_media_content > #js_content > body
     _body_node = (
@@ -702,7 +1187,7 @@ def _extract_page_media(soup: BeautifulSoup, base_url: str = "") -> list[dict]:
     for prop in ("og:image", "og:image:url", "twitter:image"):
         val = _html_meta(soup, prop)
         if val:
-            url = _normalize_url(val)
+            url = _normalize_media_url(val, base_url=base_url)
             if url and url not in seen_urls:
                 seen_urls.add(url)
                 media.append({"type": "image", "url": url, "order": img_order, "inline_position": -1.0})
@@ -711,7 +1196,7 @@ def _extract_page_media(soup: BeautifulSoup, base_url: str = "") -> list[dict]:
     for prop in ("og:video", "og:video:url", "twitter:player:stream"):
         val = _html_meta(soup, prop)
         if val:
-            url = _normalize_url(val)
+            url = _normalize_media_url(val, base_url=base_url)
             if url and url not in seen_urls:
                 seen_urls.add(url)
                 media.append({"type": "video", "url": url, "order": vid_order, "inline_position": -1.0})
@@ -720,7 +1205,7 @@ def _extract_page_media(soup: BeautifulSoup, base_url: str = "") -> list[dict]:
     # 2. <img> 标签 —— 计算真实的 inline_position
     for img in soup.find_all("img"):
         src = img.get("src", "") or img.get("data-src", "") or img.get("data-original", "")
-        url = _normalize_url(src)
+        url = _normalize_media_url(src, base_url=base_url)
         if url and url not in seen_urls and _is_meaningful_image(url, img):
             seen_urls.add(url)
             media.append({"type": "image", "url": url, "order": img_order, "inline_position": _inline_position(url)})
@@ -730,7 +1215,7 @@ def _extract_page_media(soup: BeautifulSoup, base_url: str = "") -> list[dict]:
         if srcset:
             parts = [s.strip().split()[0] for s in srcset.split(",") if s.strip()]
             if parts:
-                best = _normalize_url(parts[-1])  # 取最后一个（通常最大）
+                best = _normalize_media_url(parts[-1], base_url=base_url)  # 取最后一个（通常最大）
                 if best and best not in seen_urls and _is_meaningful_image(best):
                     seen_urls.add(best)
                     media.append({"type": "image", "url": best, "order": img_order, "inline_position": _inline_position(best)})
@@ -739,14 +1224,14 @@ def _extract_page_media(soup: BeautifulSoup, base_url: str = "") -> list[dict]:
     # 3. <video> 和 <source> 标签
     for video in soup.find_all("video"):
         src = video.get("src", "")
-        url = _normalize_url(src)
+        url = _normalize_media_url(src, base_url=base_url)
         if url and url not in seen_urls:
             seen_urls.add(url)
             media.append({"type": "video", "url": url, "order": vid_order, "inline_position": -1.0})
             vid_order += 1
         # poster 作为封面
         poster = video.get("poster", "")
-        poster_url = _normalize_url(poster)
+        poster_url = _normalize_media_url(poster, base_url=base_url)
         if poster_url and poster_url not in seen_urls:
             seen_urls.add(poster_url)
             media.append({"type": "cover", "url": poster_url, "order": 0, "inline_position": -1.0})
@@ -754,10 +1239,18 @@ def _extract_page_media(soup: BeautifulSoup, base_url: str = "") -> list[dict]:
     for source in soup.find_all("source"):
         src = source.get("src", "")
         stype = source.get("type", "")
-        url = _normalize_url(src)
+        url = _normalize_media_url(src, base_url=base_url)
         if url and url not in seen_urls and ("video" in stype or url.lower().split("?")[0].endswith((".mp4", ".webm", ".mov"))):
             seen_urls.add(url)
             media.append({"type": "video", "url": url, "order": vid_order, "inline_position": -1.0})
+            vid_order += 1
+
+    for iframe in soup.find_all("iframe"):
+        src = iframe.get("src", "") or iframe.get("data-src", "")
+        url = _canonicalize_video_embed_url(src, base_url=base_url)
+        if url and url not in seen_urls and _is_embed_video_url(url):
+            seen_urls.add(url)
+            media.append({"type": "video", "url": url, "order": vid_order, "inline_position": _inline_position(src or url)})
             vid_order += 1
 
     return media
@@ -769,7 +1262,7 @@ def _extract_page_media(soup: BeautifulSoup, base_url: str = "") -> list[dict]:
 
 _BLOCK_LEVEL_TAGS = {"p", "h1", "h2", "h3", "h4", "h5", "h6", "blockquote", "pre", "li",
                      "td", "th", "dt", "dd", "figcaption", "caption"}
-_SKIP_TAGS = {"script", "style", "nav", "footer", "header", "noscript", "iframe",
+_SKIP_TAGS = {"script", "style", "nav", "footer", "header", "noscript",
               "button", "form", "aside", "figure"}
 _RECURSIVE_CONTAINER_TAGS = {"div", "section", "article", "main", "picture", "a", "span"}
 
@@ -784,34 +1277,33 @@ def _extract_article_blocks(soup: BeautifulSoup, base_url: str = "") -> list[dic
     ]
     图片出现的位置与原网页完全一致。
     """
-    from urllib.parse import urlparse as _urlparse
-
-    def _norm(src: str) -> str:
-        if not src:
-            return ""
-        src = src.strip()
-        if src.startswith(("data:", "blob:")):
-            return ""
-        if src.startswith("//"):
-            return "https:" + src
-        if src.startswith("/") and base_url:
-            p = _urlparse(base_url)
-            return f"{p.scheme}://{p.netloc}{src}"
-        if not src.startswith("http"):
-            return ""
-        return src
-
     def _img_url(tag) -> str:
         src = tag.get("src", "") or tag.get("data-src", "") or tag.get("data-original", "") or tag.get("data-lazy-src", "")
-        url = _norm(src)
+        url = _normalize_media_url(src, base_url=base_url)
         if not url:
             # Try srcset — take the largest
             srcset = tag.get("srcset", "")
             if srcset:
                 parts = [s.strip().split()[0] for s in srcset.split(",") if s.strip()]
                 if parts:
-                    url = _norm(parts[-1])
+                    url = _normalize_media_url(parts[-1], base_url=base_url)
         return url
+
+    def _video_url(tag) -> str:
+        if tag.name == "iframe":
+            src = tag.get("src", "") or tag.get("data-src", "")
+            return _canonicalize_video_embed_url(src, base_url=base_url)
+
+        src = tag.get("src", "")
+        url = _normalize_media_url(src, base_url=base_url)
+        if url:
+            return url
+
+        for source in tag.find_all("source"):
+            source_url = _normalize_media_url(source.get("src", ""), base_url=base_url)
+            if source_url:
+                return source_url
+        return ""
 
     article_root = _find_article_root(soup) or soup.find("body")
     if not article_root:
@@ -849,11 +1341,17 @@ def _extract_article_blocks(soup: BeautifulSoup, base_url: str = "") -> list[dic
                 blocks.append({"type": "image", "url": url})
             return
 
+        if tag_name in {"video", "iframe"}:
+            url = _video_url(node)
+            if url and (tag_name == "video" or _is_embed_video_url(url)):
+                flush()
+                blocks.append({"type": "video", "url": url})
+            return
+
         if tag_name in _BLOCK_LEVEL_TAGS:
             # Collect the text of the entire block — but check for nested images first
-            has_img = bool(node.find("img"))
-            if has_img:
-                # Recurse to preserve image ordering within complex blocks
+            has_media = bool(node.find(["img", "video", "iframe"]))
+            if has_media:
                 for child in node.children:
                     walk(child)
                 flush()
@@ -869,7 +1367,7 @@ def _extract_article_blocks(soup: BeautifulSoup, base_url: str = "") -> list[dic
                 walk(child)
             return
 
-        if node.find(["img", "picture", "figure"], recursive=True):
+        if node.find(["img", "picture", "figure", "video", "iframe"], recursive=True):
             for child in node.children:
                 walk(child)
             return
@@ -881,16 +1379,17 @@ def _extract_article_blocks(soup: BeautifulSoup, base_url: str = "") -> list[dic
     walk(article_root)
     flush()
 
-    # Deduplicate consecutive identical image URLs
+    # Deduplicate consecutive identical media URLs
     deduped = []
-    last_img_url = None
+    last_media_key = None
     for b in blocks:
-        if b["type"] == "image":
-            if b["url"] == last_img_url:
+        if b["type"] in {"image", "video"}:
+            media_key = f"{b['type']}::{b['url']}"
+            if media_key == last_media_key:
                 continue
-            last_img_url = b["url"]
+            last_media_key = media_key
         else:
-            last_img_url = None
+            last_media_key = None
         deduped.append(b)
 
     return deduped
@@ -903,7 +1402,7 @@ def _extract_article_blocks(soup: BeautifulSoup, base_url: str = "") -> list[dic
 _SAFE_TAGS = {
     "p", "h1", "h2", "h3", "h4", "h5", "h6",
     "img", "figure", "figcaption", "picture", "source",
-    "video", "audio",
+    "video", "audio", "iframe",
     "ul", "ol", "li",
     "blockquote", "pre", "code",
     "table", "thead", "tbody", "tr", "th", "td",
@@ -916,6 +1415,7 @@ _SAFE_ATTRS = {
     "a": {"href"},
     "video": {"src", "poster", "controls"},
     "source": {"src", "type"},
+    "iframe": {"src", "title", "width", "height", "allow", "allowfullscreen", "frameborder", "loading", "referrerpolicy"},
     "td": {"colspan", "rowspan"},
     "th": {"colspan", "rowspan"},
 }
@@ -983,7 +1483,7 @@ def _extract_article_html(soup: BeautifulSoup, base_url: str = "") -> str | None
 
     # 移除不需要的标签
     for tag in container.find_all(["script", "style", "nav", "footer", "header",
-                                    "noscript", "iframe", "form", "button",
+                                    "noscript", "form", "button",
                                     "aside", "svg", "input", "textarea"]):
         tag.decompose()
 
@@ -1002,17 +1502,11 @@ def _extract_article_html(soup: BeautifulSoup, base_url: str = "") -> str | None
         for attr in attrs_to_remove:
             del tag[attr]
 
-    from urllib.parse import urlparse as _urlparse
     # 处理 img 标签: 规范化 URL
     for img in container.find_all("img"):
         src = img.get("src", "") or img.get("data-src", "") or img.get("data-original", "")
         if src:
-            if src.startswith("//"):
-                src = "https:" + src
-            elif src.startswith("/") and base_url:
-                parsed = _urlparse(base_url)
-                src = f"{parsed.scheme}://{parsed.netloc}{src}"
-            img["src"] = src
+            img["src"] = _normalize_media_url(src, base_url=base_url)
             # 移除 data-* 属性
             for attr in list(img.attrs):
                 if attr.startswith("data-"):
@@ -1020,12 +1514,43 @@ def _extract_article_html(soup: BeautifulSoup, base_url: str = "") -> str | None
         else:
             img.decompose()
 
+    for video in container.find_all("video"):
+        src = video.get("src", "")
+        normalized = _normalize_media_url(src, base_url=base_url)
+        if normalized:
+            video["src"] = normalized
+            video["controls"] = "controls"
+        else:
+            source = video.find("source")
+            if not source:
+                video.decompose()
+                continue
+            source_src = _normalize_media_url(source.get("src", ""), base_url=base_url)
+            if not source_src:
+                video.decompose()
+                continue
+            source["src"] = source_src
+            video["controls"] = "controls"
+
+    for iframe in container.find_all("iframe"):
+        normalized = _canonicalize_video_embed_url(
+            iframe.get("src", "") or iframe.get("data-src", ""),
+            base_url=base_url,
+        )
+        if not normalized or not _is_embed_video_url(normalized):
+            iframe.decompose()
+            continue
+        iframe["src"] = normalized
+        iframe["loading"] = "lazy"
+        iframe["referrerpolicy"] = "strict-origin-when-cross-origin"
+        iframe["allowfullscreen"] = "allowfullscreen"
+
     # 移除空的 div/span/section（避免页面顶部大量空白）
     changed = True
     while changed:
         changed = False
         for tag in container.find_all(["div", "span", "section"]):
-            if not tag.get_text(strip=True) and not tag.find(["img", "video"]):
+            if not tag.get_text(strip=True) and not tag.find(["img", "video", "iframe"]):
                 tag.decompose()
                 changed = True
 
@@ -1062,18 +1587,23 @@ async def extract_generic(url: str) -> ExtractResult | None:
         b["content"] for b in content_blocks if b["type"] == "text" and b.get("content", "").strip()
     )
 
-    # 从 blocks 中提取图片列表（用于下载）
-    block_images = [
-        {"type": "image", "url": b["url"], "order": i, "inline_position": -1.0}
-        for i, b in enumerate(b for b in content_blocks if b["type"] == "image")
+    # 从 blocks 中提取媒体列表（用于下载/渲染）
+    block_media = [
+        {
+            "type": b["type"],
+            "url": b["url"],
+            "order": i,
+            "inline_position": -1.0,
+        }
+        for i, b in enumerate(b for b in content_blocks if b["type"] in {"image", "video"})
     ]
 
     # 提取非内容图片（OG meta、视频等）
     page_media = _extract_page_media(soup, base_url=final_url)
-    # 合并：优先用 block_images（有真实位置），再加 OG 图和视频
-    block_urls = {m["url"] for m in block_images}
+    # 合并：优先用 block_media（有正文顺序），再加 OG 图和其它媒体
+    block_urls = {m["url"] for m in block_media}
     extra_media = [m for m in page_media if m["url"] not in block_urls]
-    media_urls = block_images + extra_media if (block_images or extra_media) else None
+    media_urls = block_media + extra_media if (block_media or extra_media) else None
 
     # ── 如果 DOM 解析到了足够文字，直接返回 ────────────────────────────
     if len(blocks_text.strip()) > 50:
@@ -1124,6 +1654,18 @@ async def extract_generic(url: str) -> ExtractResult | None:
                 content_blocks=content_blocks if content_blocks else None,
                 content_html=_extract_article_html(soup, base_url=final_url),
             )
+
+    if media_urls:
+        fallback_text = _clean_text(blocks_text or _html_meta(soup, "og:description") or title.strip())
+        return ExtractResult(
+            title=title.strip(),
+            text=fallback_text,
+            platform="generic",
+            final_url=final_url,
+            media_urls=media_urls,
+            content_blocks=content_blocks if content_blocks else None,
+            content_html=_extract_article_html(soup, base_url=final_url),
+        )
 
     # 策略 3: 收集所有段落
     paragraphs = soup.find_all(["p", "h1", "h2", "h3", "h4", "h5", "h6", "li", "blockquote"])
@@ -1202,13 +1744,13 @@ async def extract_content(url: str) -> ExtractResult:
     extractor = _EXTRACTORS.get(platform)
     if extractor and platform != "generic":
         result = await extractor(url)
-        if result and len(result.text) > 20:
+        if result and (len(result.text) > 20 or result.media_urls):
             return result
         logger.info("平台 %s 提取失败，回退到通用提取器", platform)
 
     # 通用提取器
     result = await extract_generic(url)
-    if result and len(result.text) > 20:
+    if result and (len(result.text) > 20 or result.media_urls):
         if platform != "generic":
             result.platform = platform  # 保留原始平台标识
         return result

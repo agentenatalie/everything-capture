@@ -212,7 +212,7 @@ def serialize_items(items: list[Item]) -> list[ItemResponse]:
             for m in sorted(item.media, key=lambda x: x.display_order):
                 media_list.append(MediaResponse(
                     type=m.type,
-                    url=f"/static/{m.local_path}" if m.local_path else "",
+                    url=f"/static/{m.local_path}" if m.local_path else (m.original_url or ""),
                     original_url=m.original_url or "",
                     display_order=m.display_order,
                     inline_position=m.inline_position if m.inline_position is not None else -1.0,

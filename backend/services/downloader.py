@@ -3,12 +3,18 @@
 下载图片（小红书）和视频（抖音）到本地存储
 """
 
-import os
+import asyncio
 import logging
 from pathlib import Path
+from urllib.parse import urlparse
 
 import httpx
 from paths import MEDIA_DIR
+
+try:
+    import yt_dlp
+except ImportError:  # pragma: no cover - optional dependency at runtime
+    yt_dlp = None
 
 logger = logging.getLogger(__name__)
 
@@ -21,9 +27,107 @@ _MOBILE_UA = (
 )
 
 
-async def download_file(url: str, save_path: Path, referer: str = "") -> int:
-    """下载单个文件，返回文件大小（bytes）。失败返回 0。"""
+def _looks_like_downloadable_media(content_type: str, media_type: str) -> bool:
+    normalized = (content_type or "").split(";")[0].strip().lower()
+    if not normalized:
+        return True
+    if normalized in {"text/html", "text/plain", "application/json", "application/javascript"}:
+        return False
+    if media_type in {"image", "cover"}:
+        return normalized.startswith("image/") or normalized == "application/octet-stream"
+    if media_type == "video":
+        return normalized.startswith("video/") or normalized in {"application/octet-stream", "binary/octet-stream"}
+    return True
+
+
+def _is_ytdlp_candidate(url: str, media_type: str) -> bool:
+    if media_type != "video":
+        return False
+    host = (urlparse(url).hostname or "").lower()
+    return host in {
+        "youtube.com",
+        "www.youtube.com",
+        "m.youtube.com",
+        "youtube-nocookie.com",
+        "www.youtube-nocookie.com",
+        "youtu.be",
+        "www.youtu.be",
+        "vimeo.com",
+        "www.vimeo.com",
+        "player.vimeo.com",
+    }
+
+
+def _download_with_ytdlp_sync(url: str, save_path: Path, referer: str = "") -> tuple[Path | None, int]:
+    if yt_dlp is None:
+        return None, 0
+
+    save_path.parent.mkdir(parents=True, exist_ok=True)
+    outtmpl = str(save_path.with_suffix(".%(ext)s"))
+    headers = {"User-Agent": _MOBILE_UA}
+    if referer:
+        headers["Referer"] = referer
+
+    options = {
+        "quiet": True,
+        "no_warnings": True,
+        "noplaylist": True,
+        "restrictfilenames": True,
+        "noprogress": True,
+        "outtmpl": {"default": outtmpl},
+        "format": "best[ext=mp4]/best",
+        "http_headers": headers,
+    }
+
+    with yt_dlp.YoutubeDL(options) as ydl:
+        info = ydl.extract_info(url, download=True)
+        final_path = None
+
+        requested = info.get("requested_downloads") if isinstance(info, dict) else None
+        if isinstance(requested, list):
+            for item in requested:
+                filepath = item.get("filepath") if isinstance(item, dict) else None
+                if filepath:
+                    final_path = Path(filepath)
+                    break
+
+        if final_path is None and isinstance(info, dict):
+            filename = info.get("_filename")
+            if filename:
+                final_path = Path(filename)
+
+        if final_path is None:
+            matches = sorted(save_path.parent.glob(f"{save_path.stem}.*"))
+            final_path = matches[0] if matches else None
+
+        if not final_path or not final_path.exists():
+            return None, 0
+
+        return final_path, final_path.stat().st_size
+
+
+async def _download_with_ytdlp(url: str, save_path: Path, referer: str = "") -> tuple[Path | None, int]:
     try:
+        return await asyncio.to_thread(_download_with_ytdlp_sync, url, save_path, referer)
+    except Exception as e:
+        logger.warning("yt-dlp 下载失败 %s: %s", url[:80], e)
+        for candidate in save_path.parent.glob(f"{save_path.stem}.*"):
+            try:
+                candidate.unlink()
+            except OSError:
+                pass
+        return None, 0
+
+
+async def download_file(url: str, save_path: Path, media_type: str, referer: str = "") -> tuple[Path | None, int]:
+    """下载单个文件，返回 (实际文件路径, 文件大小)。失败返回 (None, 0)。"""
+    try:
+        if _is_ytdlp_candidate(url, media_type):
+            ytdlp_path, ytdlp_size = await _download_with_ytdlp(url, save_path, referer=referer)
+            if ytdlp_size > 0 and ytdlp_path:
+                logger.info("yt-dlp 下载完成: %s (%d bytes)", ytdlp_path.name, ytdlp_size)
+                return ytdlp_path, ytdlp_size
+
         headers = {"User-Agent": _MOBILE_UA}
         if referer:
             headers["Referer"] = referer
@@ -32,6 +136,10 @@ async def download_file(url: str, save_path: Path, referer: str = "") -> int:
         ) as client:
             async with client.stream("GET", url) as resp:
                 resp.raise_for_status()
+                content_type = resp.headers.get("content-type", "")
+                if not _looks_like_downloadable_media(content_type, media_type):
+                    logger.info("跳过非媒体响应: %s (%s)", url, content_type)
+                    return None, 0
                 save_path.parent.mkdir(parents=True, exist_ok=True)
                 total = 0
                 with open(save_path, "wb") as f:
@@ -39,13 +147,13 @@ async def download_file(url: str, save_path: Path, referer: str = "") -> int:
                         f.write(chunk)
                         total += len(chunk)
                 logger.info("下载完成: %s (%d bytes)", save_path.name, total)
-                return total
+                return save_path, total
     except Exception as e:
         logger.warning("下载失败 %s: %s", url[:80], e)
         # 清理不完整的文件
         if save_path.exists():
             save_path.unlink()
-        return 0
+        return None, 0
 
 
 def get_extension(url: str, media_type: str) -> str:
@@ -79,6 +187,24 @@ def get_extension(url: str, media_type: str) -> str:
     return ".webp"
 
 
+def should_keep_external_media(url: str, media_type: str) -> bool:
+    if media_type not in {"video", "cover"}:
+        return False
+    host = (urlparse(url).hostname or "").lower()
+    return host in {
+        "youtube.com",
+        "www.youtube.com",
+        "m.youtube.com",
+        "youtube-nocookie.com",
+        "www.youtube-nocookie.com",
+        "youtu.be",
+        "www.youtu.be",
+        "vimeo.com",
+        "www.vimeo.com",
+        "player.vimeo.com",
+    }
+
+
 async def download_media_list(
     item_id: str,
     media_list: list[dict],
@@ -106,15 +232,25 @@ async def download_media_list(
         filename = f"{mtype}_{order:03d}{ext}"
         save_path = item_dir / filename
 
-        file_size = await download_file(url, save_path, referer=referer)
-        if file_size > 0:
+        final_path, file_size = await download_file(url, save_path, mtype, referer=referer)
+        if file_size > 0 and final_path:
             # 存储相对于 static/ 的路径，用于 URL 访问
-            relative_path = f"media/{item_id}/{filename}"
+            relative_path = f"media/{item_id}/{final_path.name}"
             results.append({
                 "type": mtype,
                 "original_url": url,
                 "local_path": relative_path,
                 "file_size": file_size,
+                "display_order": order,
+                "inline_position": media.get("inline_position", -1.0),
+            })
+        elif should_keep_external_media(url, mtype):
+            logger.info("保留外部媒体引用（无法直接下载）: %s", url)
+            results.append({
+                "type": mtype,
+                "original_url": url,
+                "local_path": "",
+                "file_size": 0,
                 "display_order": order,
                 "inline_position": media.get("inline_position", -1.0),
             })

@@ -99,12 +99,18 @@
 
         function formatAuthPrimary(user) {
             if (!user) return '未登录';
+            if (isLocalDefaultUser(user)) return '本地收录库';
             return user.display_name || user.email || user.phone_e164 || '已登录';
         }
 
         function formatAuthSecondary(user) {
             if (!user) return '请先登录';
+            if (isLocalDefaultUser(user)) return '本地模式 · 自动进入';
             return user.email || user.phone_e164 || '已登录';
+        }
+
+        function isLocalDefaultUser(user) {
+            return Boolean(user?.id === 'local-default-user');
         }
 
         function applyAuthState(sessionData) {
@@ -116,7 +122,7 @@
             sidebarUserSubtitle.textContent = formatAuthSecondary(user);
             sidebarAvatarImage.src = user?.avatar_url || defaultSidebarAvatar;
             sidebarUserStatusDot.classList.toggle('is-offline', !authState.authenticated);
-            sidebarLogoutBtn.classList.toggle('is-hidden', !authState.authenticated);
+            sidebarLogoutBtn.classList.toggle('is-hidden', !authState.authenticated || isLocalDefaultUser(user));
         }
 
         function focusAuthInput() {
@@ -194,6 +200,26 @@
             }
         }
 
+        async function provisionLocalSession(options = {}) {
+            const { silent = false } = options;
+            try {
+                const response = await nativeFetch('/api/auth/auto-session', { method: 'POST' });
+                const data = response.ok ? await response.json() : createEmptyAuthState();
+                applyAuthState(data);
+                if (authState.authenticated) {
+                    hideAuthOverlay();
+                }
+                return authState;
+            } catch (error) {
+                console.error('Failed to provision local session', error);
+                applyAuthState(createEmptyAuthState());
+                if (!silent) {
+                    showToast('无法初始化本地会话', 'error');
+                }
+                return authState;
+            }
+        }
+
         async function bootstrapAuthenticatedData(options = {}) {
             const { force = false } = options;
             if (!authState.authenticated) {
@@ -225,14 +251,18 @@
             authUnauthorizedNoticeShown = true;
             const providerSnapshot = authState.providers;
             applyAuthState(createEmptyAuthState({ providers: providerSnapshot }));
-            resetAuthenticatedAppState('登录已失效，请重新登录后继续使用。');
-            showAuthOverlay(authMode);
-            nativeFetch('/api/auth/session')
-                .then((response) => (response.ok ? response.json() : createEmptyAuthState({ providers: providerSnapshot })))
-                .then((data) => applyAuthState(data))
+            resetAuthenticatedAppState('会话已断开，正在重新连接本地资料库...');
+            provisionLocalSession({ silent: true })
+                .then((session) => {
+                    if (session.authenticated) {
+                        return bootstrapAuthenticatedData({ force: true });
+                    }
+                    showToast('无法恢复本地会话', 'error');
+                    return null;
+                })
                 .catch(() => {});
             if (authBootstrapComplete) {
-                showToast('登录已失效，请重新登录。', 'info');
+                showToast('会话已刷新，已尝试自动恢复。', 'info');
             }
             window.setTimeout(() => {
                 authUnauthorizedNoticeShown = false;
@@ -436,11 +466,17 @@
             resetAuthenticatedAppState();
             updateSidebarState();
             updateCommandPaletteState();
-            const session = await refreshAuthSession({ silent: true });
+            let session = await refreshAuthSession({ silent: true });
+            if (!session.authenticated) {
+                session = await provisionLocalSession({ silent: true });
+            }
             if (session.authenticated) {
                 await bootstrapAuthenticatedData({ force: true });
+                if (typeof startMobileCaptureAutomation === 'function') {
+                    startMobileCaptureAutomation();
+                }
             } else {
-                showAuthOverlay('email');
+                resetAuthenticatedAppState('无法初始化本地资料库连接。');
             }
             await handleUrlCallbacks(session);
             authBootstrapComplete = true;

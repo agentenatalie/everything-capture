@@ -419,6 +419,7 @@
         window.addEventListener('beforeunload', () => {
             if (remoteSyncRefreshTimer) window.clearInterval(remoteSyncRefreshTimer);
             if (remoteSyncRefreshQueuedTimer) window.clearTimeout(remoteSyncRefreshQueuedTimer);
+            if (mobileClipboardPollTimer) window.clearInterval(mobileClipboardPollTimer);
         });
 
         document.addEventListener('click', (e) => {

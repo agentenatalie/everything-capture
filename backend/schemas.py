@@ -58,7 +58,10 @@ class ObsidianConnectRequest(BaseModel):
     api_key: str
 
 class ExtractRequest(BaseModel):
-    url: str
+    url: Optional[str] = None
+    text: Optional[str] = None
+    source_url: Optional[str] = None
+    title: Optional[str] = None
 
 class ExtractResponse(BaseModel):
     item_id: str

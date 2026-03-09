@@ -1,3 +1,10 @@
-- [x] Move sidebar toggle back to the header/sidebar junction
-- [x] Remove batch folder assignment UI and logic
-- [x] Restore spaced stats copy for collected-count text
+- [x] Inspect current baseline, auth gate, and run configuration
+- [x] Auto-enter the content page without showing the Google login overlay
+- [x] Add a mobile-only web capture entry with paste/import flow
+- [x] Update the run command for LAN access and verify the new flow
+- [x] Diagnose iPhone Shortcut compatibility with `/api/extract`
+- [x] Accept Shortcut auth token and `text` payload on the backend
+- [x] Verify Shortcut-style requests against the running server
+- [x] Reduce the mobile UI to a centered pill input only
+- [x] Autofill the mobile pill from clipboard when the page becomes active
+- [x] Auto-submit mobile clipboard content only when a URL is detected

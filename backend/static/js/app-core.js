@@ -27,6 +27,12 @@
         const createFolderBtn = document.getElementById('createFolderBtn');
         const folderSearchInput = document.getElementById('folderSearchInput');
         const boardShell = document.getElementById('boardShell');
+        const mobileCaptureShell = document.getElementById('mobileCaptureShell');
+        const mobileCaptureInput = document.getElementById('mobileCaptureInput');
+        const mobilePasteBtn = document.getElementById('mobilePasteBtn');
+        const mobileSubmitBtn = document.getElementById('mobileSubmitBtn');
+        const mobileCaptureHint = document.getElementById('mobileCaptureHint');
+        const mobileCaptureResult = document.getElementById('mobileCaptureResult');
         const toggleSidebarBtn = document.getElementById('toggleSidebarBtn');
         const folderPickerOverlay = document.getElementById('folderPickerOverlay');
         const folderPickerTitle = document.getElementById('folderPickerTitle');
@@ -130,6 +136,9 @@
         let hasLoadedAuthenticatedData = false;
         let authBootstrapComplete = false;
         let authUnauthorizedNoticeShown = false;
+        let mobileCaptureAutomationStarted = false;
+        let mobileClipboardPollTimer = null;
+        let lastAutoCapturedClipboardText = '';
+        let mobileCaptureSubmitInFlight = false;
         const nativeFetch = window.fetch.bind(window);
         const defaultSidebarAvatar = sidebarAvatarImage ? sidebarAvatarImage.getAttribute('src') : '';
-

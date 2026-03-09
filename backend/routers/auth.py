@@ -19,6 +19,7 @@ from auth import (
     clear_session_cookie,
     generate_code_salt,
     generate_verification_code,
+    get_or_create_default_local_user,
     hash_verification_code,
     issue_auth_session,
     mask_email,
@@ -325,6 +326,22 @@ def get_auth_providers(request: Request, db: Session = Depends(get_db)):
 @router.get("/session", response_model=AuthSessionResponse)
 def get_auth_session(request: Request, db: Session = Depends(get_db)):
     user = getattr(request.state, "auth_user", None)
+    return _build_auth_session_response(user, request, db)
+
+
+@router.post("/auto-session", response_model=AuthSessionResponse)
+def auto_login_local_session(request: Request, db: Session = Depends(get_db)):
+    user = getattr(request.state, "auth_user", None)
+    if user is None:
+        user = get_or_create_default_local_user(db)
+        auth_session, raw_token = issue_auth_session(db, user, "local_auto", request)
+        db.commit()
+        db.refresh(user)
+
+        response = JSONResponse(content=_build_auth_session_response(user, request, db).model_dump())
+        attach_session_cookie(response, raw_token, auth_session.expires_at)
+        return response
+
     return _build_auth_session_response(user, request, db)
 
 

@@ -11,12 +11,13 @@ from sqlalchemy.orm import sessionmaker
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
-from auth import attach_session_cookie, issue_auth_session, resolve_auth_session  # noqa: E402
+from auth import attach_session_cookie, get_or_create_default_local_user, is_shortcut_bearer_token, issue_auth_session, resolve_auth_session  # noqa: E402
 from database import Base  # noqa: E402
 from models import AppConfig, AuthSession, User  # noqa: E402
 from routers.auth import (  # noqa: E402
     _consume_verification_code,
     _create_or_claim_user,
+    auto_login_local_session,
     _providers_payload,
     _store_verification_code,
     logout,
@@ -166,6 +167,37 @@ class AuthFlowTests(unittest.TestCase):
             self.assertTrue(providers.google_enabled)
             self.assertTrue(providers.email_enabled)
             self.assertTrue(providers.phone_enabled)
+
+    def test_shortcut_bearer_token_matches_default_value(self) -> None:
+        self.assertTrue(is_shortcut_bearer_token("ec_token"))
+        self.assertFalse(is_shortcut_bearer_token("wrong-token"))
+
+    def test_get_or_create_default_local_user_creates_missing_default_user(self) -> None:
+        with self.Session() as db:
+            user = get_or_create_default_local_user(db)
+            db.commit()
+
+            self.assertEqual(user.id, DEFAULT_USER_ID)
+            self.assertEqual(user.email, DEFAULT_USER_EMAIL)
+            self.assertEqual(user.display_name, DEFAULT_USER_NAME)
+
+    def test_auto_login_local_session_creates_default_user_session(self) -> None:
+        request = SimpleNamespace(state=SimpleNamespace(auth_user=None))
+        request.headers = {}
+        request.client = SimpleNamespace(host="127.0.0.1")
+
+        with self.Session() as db:
+            response = auto_login_local_session(request, db)
+            self.assertEqual(response.status_code, 200)
+            self.assertIn("everything_grabber_session=", response.headers.get("set-cookie", ""))
+
+            user = db.query(User).filter(User.id == DEFAULT_USER_ID).first()
+            self.assertIsNotNone(user)
+            self.assertEqual(user.email, DEFAULT_USER_EMAIL)
+
+            session_record = db.query(AuthSession).filter(AuthSession.user_id == DEFAULT_USER_ID).first()
+            self.assertIsNotNone(session_record)
+            self.assertEqual(session_record.provider, "local_auto")
 
     def test_logout_revokes_session_even_when_request_session_is_detached(self) -> None:
         with self.Session() as writer_db:

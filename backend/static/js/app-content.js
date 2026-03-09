@@ -55,6 +55,24 @@
             clipboardBtn.hidden = !visible;
         }
 
+        function setMobileCaptureFeedback(message = '', tone = '') {
+            if (!mobileCaptureResult) return;
+            const nextMessage = String(message || '').trim();
+            mobileCaptureResult.hidden = !nextMessage;
+            mobileCaptureResult.textContent = nextMessage;
+            mobileCaptureResult.className = 'mobile-capture-result';
+            if (tone) {
+                mobileCaptureResult.classList.add(`is-${tone}`);
+            }
+        }
+
+        function setButtonLoadingState(button, isLoading, idleLabel, loadingLabel) {
+            if (!button) return;
+            button.disabled = Boolean(isLoading);
+            button.classList.toggle('is-loading', Boolean(isLoading));
+            button.textContent = isLoading ? loadingLabel : idleLabel;
+        }
+
         function getActiveSearchParams(limit = 200, qOverride = null) {
             const params = new URLSearchParams();
             const keyword = (qOverride ?? filterInput.value).trim();
@@ -418,6 +436,27 @@
             applyCommandSearch();
         }
 
+        async function submitExtractRequest(payloadOrUrl) {
+            const payload = typeof payloadOrUrl === 'string'
+                ? { url: payloadOrUrl }
+                : { ...(payloadOrUrl || {}) };
+            const response = await fetch('/api/extract', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload)
+            });
+            const data = await response.json().catch(() => ({}));
+            if (!response.ok) {
+                throw new Error(data.detail || '未知错误');
+            }
+            return data;
+        }
+
+        function formatExtractSuccessMessage(data) {
+            const mediaInfo = data.media_count > 0 ? `，${data.media_count} 个媒体` : '';
+            return `收录成功：${data.title} (${data.text_length} 字${mediaInfo}，平台：${data.platform})`;
+        }
+
         function openCommandResult(itemId) {
             const item = commandSearchResults.find((entry) => entry.id === itemId);
             if (!item) return;
@@ -438,30 +477,123 @@
             extractBtn.classList.add('is-loading');
             extractBtnLabel.textContent = '处理中...';
             try {
-                const resp = await fetch('/api/extract', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ url })
-                });
-                const data = await resp.json();
-                if (resp.ok) {
-                    const mediaInfo = data.media_count > 0 ? `，${data.media_count} 个媒体` : '';
-                    showToast(`收录成功：${data.title} (${data.text_length} 字${mediaInfo}，平台：${data.platform})`, 'success');
-                    urlInput.value = '';
-                    clearCommandResults();
-                    updateCommandPaletteState();
-                    closeCommandPalette();
-                    fetchItems();
-                } else {
-                    showToast(`失败：${data.detail || '未知错误'}`, 'error');
-                }
+                const data = await submitExtractRequest(url);
+                showToast(formatExtractSuccessMessage(data), 'success');
+                urlInput.value = '';
+                clearCommandResults();
+                updateCommandPaletteState();
+                closeCommandPalette();
+                fetchItems();
             } catch (e) {
-                showToast('网络错误：' + e.message, 'error');
+                showToast(`失败：${e.message}`, 'error');
             } finally {
                 extractBtn.disabled = false;
                 extractBtn.classList.remove('is-loading');
                 updateCommandPaletteState();
             }
+        }
+
+        function isMobileCaptureViewport() {
+            return window.matchMedia('(max-width: 860px)').matches;
+        }
+
+        async function syncMobileClipboardIntoInput(options = {}) {
+            const { silent = false } = options;
+            if (!isMobileCaptureViewport() || !navigator.clipboard?.readText) return null;
+
+            try {
+                const text = (await navigator.clipboard.readText()).trim();
+                if (!text) return null;
+                if (mobileCaptureInput) {
+                    mobileCaptureInput.value = text;
+                }
+                return text;
+            } catch (error) {
+                if (!silent && error?.name !== 'NotAllowedError') {
+                    showToast(`读取剪贴板失败：${error.message}`, 'error');
+                }
+                return null;
+            }
+        }
+
+        async function submitMobileCapture(options = {}) {
+            const { auto = false } = options;
+            const rawValue = mobileCaptureInput?.value?.trim() || '';
+            if (!rawValue) {
+                if (!auto) showToast('请先粘贴链接或文字', 'error');
+                return;
+            }
+
+            if (mobileCaptureSubmitInFlight) {
+                return;
+            }
+
+            if (auto && rawValue === lastAutoCapturedClipboardText) {
+                return;
+            }
+
+            mobileCaptureSubmitInFlight = true;
+            if (mobileSubmitBtn) {
+                mobileSubmitBtn.disabled = true;
+                mobileSubmitBtn.classList.add('is-loading');
+            }
+            try {
+                const data = await submitExtractRequest({ text: rawValue });
+                mobileCaptureInput.value = '';
+                lastAutoCapturedClipboardText = rawValue;
+                showToast(formatExtractSuccessMessage(data), 'success');
+                if (authState.authenticated) {
+                    fetchItems();
+                }
+            } catch (error) {
+                if (!auto || error?.message) {
+                    showToast(`导入失败：${error.message}`, 'error');
+                }
+            } finally {
+                mobileCaptureSubmitInFlight = false;
+                if (mobileSubmitBtn) {
+                    mobileSubmitBtn.disabled = false;
+                    mobileSubmitBtn.classList.remove('is-loading');
+                }
+            }
+        }
+
+        async function attemptMobileClipboardAutofillAndCapture(options = {}) {
+            const { silent = true } = options;
+            if (!isMobileCaptureViewport() || document.visibilityState === 'hidden') return;
+            if (mobileCaptureSubmitInFlight) return;
+
+            const text = await syncMobileClipboardIntoInput({ silent });
+            if (!text || text === lastAutoCapturedClipboardText) return;
+            if (!resolveCommandUrl(text)) return;
+            await submitMobileCapture({ auto: true });
+        }
+
+        function startMobileCaptureAutomation() {
+            if (mobileCaptureAutomationStarted || !mobileCaptureInput) return;
+            mobileCaptureAutomationStarted = true;
+
+            window.setTimeout(() => {
+                attemptMobileClipboardAutofillAndCapture({ silent: true });
+            }, 260);
+
+            mobileClipboardPollTimer = window.setInterval(() => {
+                attemptMobileClipboardAutofillAndCapture({ silent: true });
+            }, 2200);
+
+            document.addEventListener('visibilitychange', () => {
+                if (document.visibilityState === 'visible') {
+                    attemptMobileClipboardAutofillAndCapture({ silent: true });
+                }
+            });
+
+            window.addEventListener('focus', () => {
+                attemptMobileClipboardAutofillAndCapture({ silent: true });
+            });
+
+            mobileCaptureInput.addEventListener('focus', () => {
+                syncMobileClipboardIntoInput({ silent: true });
+            });
         }
 
         urlInput.addEventListener('input', updateCommandPaletteState);
@@ -483,6 +615,20 @@
         });
         commandOverlay.addEventListener('click', e => {
             if (e.target === commandOverlay) closeCommandPalette();
+        });
+        mobileSubmitBtn?.addEventListener('click', () => {
+            submitMobileCapture({ auto: false });
+        });
+        mobileCaptureInput?.addEventListener('paste', () => {
+            window.setTimeout(() => {
+                submitMobileCapture({ auto: false });
+            }, 40);
+        });
+        mobileCaptureInput?.addEventListener('keydown', (event) => {
+            if (event.key === 'Enter') {
+                event.preventDefault();
+                submitMobileCapture({ auto: false });
+            }
         });
         document.addEventListener('keydown', e => {
             const key = e.key.toLowerCase();
@@ -636,4 +782,3 @@
                 </div>
             `;
         }
-

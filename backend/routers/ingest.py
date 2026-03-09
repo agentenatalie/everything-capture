@@ -1,3 +1,7 @@
+import html
+import logging
+import re
+
 from fastapi import APIRouter, Depends, HTTPException, status, BackgroundTasks
 from sqlalchemy.orm import Session
 from database import get_db, SessionLocal
@@ -6,7 +10,6 @@ from schemas import IngestRequest, IngestResponse, ExtractRequest, ExtractRespon
 from services.extractor import extract_content
 from services.downloader import download_media_list
 from tenant import get_current_user_id
-import logging
 
 logger = logging.getLogger(__name__)
 
@@ -17,6 +20,8 @@ router = APIRouter(
 
 import asyncio
 from routers.connect import sync_to_notion, sync_to_obsidian
+
+HTTP_URL_PATTERN = re.compile(r"https?://[^\s<>'\"`]+", re.IGNORECASE)
 
 def background_auto_sync(item_id: str, user_id: str):
     db = SessionLocal()
@@ -44,6 +49,87 @@ def background_auto_sync(item_id: str, user_id: str):
         asyncio.run(run_sync())
     finally:
         db.close()
+
+
+def _normalize_http_url(candidate: str | None) -> str | None:
+    value = (candidate or "").strip()
+    if not value:
+        return None
+    trimmed = re.sub(r"[)\]}>.,!?;:'\"。，！？；：]+$", "", value)
+    if not re.match(r"^https?://", trimmed, re.IGNORECASE):
+        return None
+    return trimmed
+
+
+def _extract_first_http_url(value: str | None) -> str | None:
+    if not value:
+        return None
+    match = HTTP_URL_PATTERN.search(value)
+    if not match:
+        return None
+    return _normalize_http_url(match.group(0))
+
+
+def _resolve_extract_url(request: ExtractRequest) -> str | None:
+    return (
+        _normalize_http_url(request.url)
+        or _normalize_http_url(request.source_url)
+        or _extract_first_http_url(request.text)
+    )
+
+
+def _fallback_text_title(request: ExtractRequest, text: str) -> str:
+    explicit_title = (request.title or "").strip()
+    if explicit_title:
+        return explicit_title[:200]
+
+    for line in text.splitlines():
+        line = line.strip()
+        if line:
+            return line[:200]
+    return "Shared Text"
+
+
+def _store_shared_text_capture(
+    request: ExtractRequest,
+    db: Session,
+    user_id: str,
+    background_tasks: BackgroundTasks,
+) -> ExtractResponse:
+    shared_text = (request.text or "").strip()
+    if len(shared_text) < 3:
+        raise HTTPException(status_code=422, detail="未检测到可保存的链接或文本内容")
+
+    source_url = _normalize_http_url(request.source_url) or ""
+    title = _fallback_text_title(request, shared_text)
+    paragraphs = [segment.strip() for segment in re.split(r"\n{2,}", shared_text) if segment.strip()]
+    canonical_html = "".join(f"<p>{html.escape(paragraph)}</p>" for paragraph in paragraphs)
+
+    new_item = Item(
+        user_id=user_id,
+        source_url=source_url,
+        final_url=source_url or None,
+        title=title,
+        canonical_text=shared_text,
+        canonical_text_length=len(shared_text),
+        canonical_html=canonical_html or None,
+        platform="web",
+        status="ready",
+    )
+    db.add(new_item)
+    db.commit()
+    db.refresh(new_item)
+
+    background_tasks.add_task(background_auto_sync, new_item.id, user_id)
+
+    return ExtractResponse(
+        item_id=new_item.id,
+        title=title,
+        status="ready",
+        platform="web",
+        text_length=len(shared_text),
+        media_count=0,
+    )
 
 @router.post("/ingest", response_model=IngestResponse, status_code=status.HTTP_201_CREATED)
 def ingest_page(request: IngestRequest, background_tasks: BackgroundTasks, db: Session = Depends(get_db)):
@@ -73,14 +159,18 @@ def ingest_page(request: IngestRequest, background_tasks: BackgroundTasks, db: S
 
 @router.post("/extract", response_model=ExtractResponse, status_code=status.HTTP_201_CREATED)
 async def extract_page(request: ExtractRequest, background_tasks: BackgroundTasks, db: Session = Depends(get_db)):
-    """服务端提取：传入 URL，后端抓取内容并存储"""
+    """服务端提取：优先提取 URL，兼容快捷指令 text 载荷并支持文本兜底入库"""
     user_id = get_current_user_id()
+    resolved_url = _resolve_extract_url(request)
+    if not resolved_url:
+        return _store_shared_text_capture(request, db, user_id, background_tasks)
+
     try:
-        result = await extract_content(request.url)
+        result = await extract_content(resolved_url)
         has_media = bool(result.media_urls)
         stored_text = (result.text or "").strip()
         if not stored_text and has_media:
-            stored_text = (result.title or request.url).strip()
+            stored_text = (result.title or resolved_url).strip()
 
         if not stored_text or (len(stored_text) < 20 and not has_media):
             raise HTTPException(
@@ -90,7 +180,7 @@ async def extract_page(request: ExtractRequest, background_tasks: BackgroundTask
 
         new_item = Item(
             user_id=user_id,
-            source_url=request.url,
+            source_url=resolved_url,
             final_url=result.final_url,
             title=result.title,
             canonical_text=stored_text,
@@ -105,7 +195,7 @@ async def extract_page(request: ExtractRequest, background_tasks: BackgroundTask
         # 下载媒体文件（图片/视频）
         media_count = 0
         if result.media_urls:
-            referer = result.final_url or request.url
+            referer = result.final_url or resolved_url
             downloaded = await download_media_list(
                 item_id=new_item.id,
                 media_list=result.media_urls,

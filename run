@@ -2,8 +2,9 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "$0")" && pwd)"
-APP_HOST="127.0.0.1"
+APP_HOST="0.0.0.0"
 APP_PORT="8000"
+PYTHONPATH_VALUE="$ROOT_DIR:$ROOT_DIR/backend"
 
 cleanup_existing_server() {
   local port_pids
@@ -26,14 +27,12 @@ cleanup_existing_server() {
 
 cleanup_existing_server
 
-cd "$ROOT_DIR/backend"
-
 if [[ "${RUN_RELOAD:-1}" == "1" ]]; then
-  exec ./venv/bin/python -m uvicorn main:app \
+  exec env PYTHONPATH="$PYTHONPATH_VALUE" "$ROOT_DIR/backend/venv/bin/uvicorn" backend.main:app \
     --host "$APP_HOST" \
     --port "$APP_PORT" \
     --reload \
     --reload-dir "$ROOT_DIR/backend"
 fi
 
-exec ./venv/bin/python -m uvicorn main:app --host "$APP_HOST" --port "$APP_PORT"
+exec env PYTHONPATH="$PYTHONPATH_VALUE" "$ROOT_DIR/backend/venv/bin/uvicorn" backend.main:app --host "$APP_HOST" --port "$APP_PORT"

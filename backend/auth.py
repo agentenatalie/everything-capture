@@ -4,6 +4,7 @@ import hashlib
 import os
 import re
 import secrets
+from hmac import compare_digest
 from contextvars import ContextVar, Token
 from datetime import datetime, timedelta, timezone
 
@@ -11,11 +12,13 @@ from fastapi import HTTPException, Request, Response
 from sqlalchemy.orm import Session
 
 from models import AuthSession, User
+from tenant import DEFAULT_USER_EMAIL, DEFAULT_USER_ID, DEFAULT_USER_NAME
 
 AUTH_SESSION_COOKIE = "everything_grabber_session"
 AUTH_GOOGLE_STATE_COOKIE = "everything_grabber_google_state"
 AUTH_SESSION_DAYS = 30
 AUTH_CODE_TTL_MINUTES = 10
+SHORTCUT_BEARER_TOKEN_ENV = "SHORTCUT_BEARER_TOKEN"
 
 _CURRENT_USER_ID: ContextVar[str | None] = ContextVar("current_user_id", default=None)
 
@@ -84,6 +87,39 @@ def hash_session_token(token: str) -> str:
 
 def generate_session_token() -> str:
     return secrets.token_urlsafe(48)
+
+
+def get_shortcut_bearer_token() -> str:
+    return (os.getenv(SHORTCUT_BEARER_TOKEN_ENV) or "ec_token").strip()
+
+
+def is_shortcut_bearer_token(raw_token: str | None) -> bool:
+    configured_token = get_shortcut_bearer_token()
+    if not raw_token or not configured_token:
+        return False
+    return compare_digest(raw_token, configured_token)
+
+
+def get_or_create_default_local_user(db: Session) -> User:
+    now = datetime.utcnow()
+    user = db.query(User).filter(User.id == DEFAULT_USER_ID).first()
+    if not user:
+        user = User(
+            id=DEFAULT_USER_ID,
+            email=DEFAULT_USER_EMAIL,
+            display_name=DEFAULT_USER_NAME,
+            is_default=True,
+        )
+        db.add(user)
+        db.flush()
+
+    if not user.email:
+        user.email = DEFAULT_USER_EMAIL
+    if not user.display_name:
+        user.display_name = DEFAULT_USER_NAME
+    user.last_login_at = now
+    user.updated_at = now
+    return user
 
 
 def extract_session_token(request: Request) -> str | None:

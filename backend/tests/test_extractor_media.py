@@ -14,17 +14,21 @@ from bs4 import BeautifulSoup
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
 from services.extractor import (  # noqa: E402
+    _build_douyin_page_media_reference,
+    _ensure_douyin_video_candidate,
     _extract_article_blocks,
     _extract_article_html,
     _extract_page_media,
     _parse_douyin_router_data,
     _parse_x_article_result,
     _parse_twitter_oembed_html,
+    extract_douyin,
     extract_twitter,
     extract_generic,
 )
 from services.downloader import download_media_list  # noqa: E402
 from services.downloader import download_file  # noqa: E402
+from services.downloader import _should_retry_video_via_referer_page  # noqa: E402
 
 
 class _StaticHtmlHandler(BaseHTTPRequestHandler):
@@ -78,6 +82,24 @@ class _InterruptingBinaryHandler(BaseHTTPRequestHandler):
 
 
 class ExtractorMediaTests(unittest.IsolatedAsyncioTestCase):
+    def test_build_douyin_page_media_reference_returns_video_entry(self) -> None:
+        self.assertEqual(
+            _build_douyin_page_media_reference("https://v.douyin.com/test123/"),
+            [{"type": "video", "url": "https://v.douyin.com/test123/", "order": 0}],
+        )
+
+    def test_ensure_douyin_video_candidate_prepends_page_video_when_only_cover_exists(self) -> None:
+        self.assertEqual(
+            _ensure_douyin_video_candidate(
+                [{"type": "cover", "url": "https://cdn.example.com/cover.webp", "order": 0}],
+                "https://www.iesdouyin.com/share/video/1234567890/",
+            ),
+            [
+                {"type": "video", "url": "https://www.iesdouyin.com/share/video/1234567890/", "order": 0},
+                {"type": "cover", "url": "https://cdn.example.com/cover.webp", "order": 0},
+            ],
+        )
+
     def test_parse_douyin_router_data_extracts_media_from_script_assignment(self) -> None:
         html = """
         <html><body><script>
@@ -139,6 +161,106 @@ class ExtractorMediaTests(unittest.IsolatedAsyncioTestCase):
                 {"type": "cover", "url": "https://cdn.example.com/cover.webp", "order": 0},
             ],
         )
+
+    async def test_extract_douyin_keeps_page_video_reference_when_only_desc_exists(self) -> None:
+        class _FakeResponse:
+            def __init__(self) -> None:
+                self.text = """
+                <html>
+                  <head>
+                    <title>长视频案例 - 抖音</title>
+                    <meta name="description" content="这是一个只有描述没有直链的视频页面">
+                  </head>
+                  <body></body>
+                </html>
+                """
+                self.url = "https://www.iesdouyin.com/share/video/1234567890/"
+
+            def raise_for_status(self) -> None:
+                return None
+
+        class _FakeClient:
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, exc_type, exc, tb):
+                return None
+
+            async def get(self, url):
+                return _FakeResponse()
+
+        with patch("services.extractor._build_client", return_value=_FakeClient()):
+            with patch("services.extractor._extract_douyin_with_ytdlp", return_value=None):
+                result = await extract_douyin("https://v.douyin.com/test123/")
+
+        self.assertIsNotNone(result)
+        self.assertEqual(result.platform, "douyin")
+        self.assertEqual(
+            result.media_urls,
+            [{"type": "video", "url": "https://www.iesdouyin.com/share/video/1234567890/", "order": 0}],
+        )
+
+    async def test_extract_douyin_uses_ytdlp_metadata_when_router_data_has_only_cover(self) -> None:
+        class _FakeResponse:
+            def __init__(self) -> None:
+                self.text = """
+                <html>
+                  <head><title>长视频案例 - 抖音</title></head>
+                  <body>
+                    <script>
+                      window._ROUTER_DATA = {
+                        "loaderData": {
+                          "video_(id)": {
+                            "videoInfoRes": {
+                              "item_list": [{
+                                "desc": "这是长视频描述",
+                                "video": {
+                                  "cover": {
+                                    "url_list": ["https://cdn.example.com/cover.webp"]
+                                  }
+                                }
+                              }]
+                            }
+                          }
+                        }
+                      };
+                    </script>
+                  </body>
+                </html>
+                """
+                self.url = "https://www.iesdouyin.com/share/video/1234567890/"
+
+            def raise_for_status(self) -> None:
+                return None
+
+        class _FakeClient:
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, exc_type, exc, tb):
+                return None
+
+            async def get(self, url):
+                return _FakeResponse()
+
+        with patch("services.extractor._build_client", return_value=_FakeClient()):
+            with patch(
+                "services.extractor._extract_douyin_with_ytdlp",
+                return_value={
+                    "title": "长视频案例",
+                    "text": "长视频案例\n\n这是长视频描述",
+                    "media_urls": [
+                        {"type": "video", "url": "https://www.iesdouyin.com/share/video/1234567890/", "order": 0},
+                        {"type": "cover", "url": "https://cdn.example.com/ytdlp-cover.webp", "order": 0},
+                    ],
+                },
+            ):
+                result = await extract_douyin("https://v.douyin.com/test123/")
+
+        self.assertIsNotNone(result)
+        self.assertEqual(result.platform, "douyin")
+        self.assertEqual(result.media_urls[0]["type"], "video")
+        self.assertEqual(result.media_urls[0]["url"], "https://www.iesdouyin.com/share/video/1234567890/")
 
     def test_page_media_detects_youtube_iframe(self) -> None:
         soup = BeautifulSoup(
@@ -352,6 +474,52 @@ class ExtractorMediaTests(unittest.IsolatedAsyncioTestCase):
         mocked_ytdlp.assert_called_once()
         self.assertEqual(len(results), 1)
         self.assertEqual(results[0]["local_path"], "media/test-youtube/video_000.mp4")
+
+    async def test_download_media_list_uses_ytdlp_for_douyin_page_urls(self) -> None:
+        item_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "static", "media", "test-douyin"))
+        os.makedirs(item_dir, exist_ok=True)
+        final_path = os.path.join(item_dir, "video_000.mp4")
+        with open(final_path, "wb") as fp:
+            fp.write(b"video")
+
+        try:
+            with patch(
+                "services.downloader._download_with_ytdlp",
+                return_value=(Path(final_path), 5),
+            ) as mocked_ytdlp:
+                results = await download_media_list(
+                    "test-douyin",
+                    [{"type": "video", "url": "https://v.douyin.com/test123/", "order": 0}],
+                    referer="https://example.com/article",
+                )
+        finally:
+            if os.path.exists(final_path):
+                os.remove(final_path)
+            if os.path.isdir(item_dir):
+                try:
+                    os.rmdir(item_dir)
+                except OSError:
+                    pass
+
+        mocked_ytdlp.assert_called_once()
+        self.assertEqual(len(results), 1)
+        self.assertEqual(results[0]["local_path"], "media/test-douyin/video_000.mp4")
+
+    def test_should_retry_video_via_referer_page_for_protected_douyin_cdn(self) -> None:
+        self.assertTrue(
+            _should_retry_video_via_referer_page(
+                "https://aweme.snssdk.com/aweme/v1/play/?video_id=1",
+                "video",
+                "https://www.iesdouyin.com/share/video/123/",
+            )
+        )
+        self.assertFalse(
+            _should_retry_video_via_referer_page(
+                "https://cdn.example.com/video.mp4",
+                "video",
+                "https://www.iesdouyin.com/share/video/123/",
+            )
+        )
 
     async def test_download_file_resumes_after_midstream_disconnect(self) -> None:
         with socket.socket() as sock:

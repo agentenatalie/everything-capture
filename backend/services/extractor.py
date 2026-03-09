@@ -3,6 +3,7 @@
 支持：小红书、抖音、X/Twitter、通用网站
 """
 
+import asyncio
 import os
 import re
 import json
@@ -17,6 +18,11 @@ try:
     import trafilatura
 except ImportError:
     trafilatura = None
+
+try:
+    import yt_dlp
+except ImportError:  # pragma: no cover - optional dependency at runtime
+    yt_dlp = None
 
 logger = logging.getLogger(__name__)
 
@@ -151,6 +157,95 @@ def _normalize_douyin_video_url(src: str) -> str:
     if host.endswith("snssdk.com") and parsed.path == "/aweme/v1/playwm/":
         return normalized.replace("/aweme/v1/playwm/", "/aweme/v1/play/", 1)
     return normalized
+
+
+def _build_douyin_page_media_reference(page_url: str) -> list[dict] | None:
+    normalized = _normalize_media_url(page_url)
+    if not normalized:
+        return None
+    return [{"type": "video", "url": normalized, "order": 0}]
+
+
+def _ensure_douyin_video_candidate(media_urls: list[dict] | None, page_url: str) -> list[dict] | None:
+    existing_media = [dict(entry) for entry in (media_urls or []) if isinstance(entry, dict)]
+    if any((entry.get("type") or "").lower() == "video" and entry.get("url") for entry in existing_media):
+        return existing_media or None
+
+    page_media = _build_douyin_page_media_reference(page_url) or []
+    if not page_media:
+        return existing_media or None
+    return page_media + existing_media
+
+
+def _has_video_media(media_urls: list[dict] | None) -> bool:
+    return any((entry.get("type") or "").lower() == "video" and entry.get("url") for entry in (media_urls or []) if isinstance(entry, dict))
+
+
+def _extract_douyin_with_ytdlp_sync(url: str) -> dict | None:
+    if yt_dlp is None:
+        return None
+
+    options = {
+        "quiet": True,
+        "no_warnings": True,
+        "noplaylist": True,
+        "skip_download": True,
+        "http_headers": {"User-Agent": _MOBILE_UA},
+    }
+
+    with yt_dlp.YoutubeDL(options) as ydl:
+        info = ydl.extract_info(url, download=False)
+
+    if not isinstance(info, dict):
+        return None
+
+    page_url = (
+        _normalize_media_url(str(info.get("webpage_url") or ""))
+        or _normalize_media_url(str(info.get("original_url") or ""))
+        or _normalize_media_url(url)
+    )
+    if not page_url:
+        return None
+
+    title = str(info.get("title") or "").strip()
+    description = str(info.get("description") or "").strip()
+    thumbnail = _normalize_media_url(str(info.get("thumbnail") or ""))
+    if not thumbnail:
+        thumbnails = info.get("thumbnails") or []
+        if isinstance(thumbnails, list):
+            for candidate in reversed(thumbnails):
+                if not isinstance(candidate, dict):
+                    continue
+                thumbnail = _normalize_media_url(str(candidate.get("url") or ""))
+                if thumbnail:
+                    break
+
+    media_urls = [{"type": "video", "url": page_url, "order": 0}]
+    if thumbnail:
+        media_urls.append({"type": "cover", "url": thumbnail, "order": 0})
+
+    text_parts = []
+    if title:
+        text_parts.append(title)
+    if description and description != title:
+        text_parts.append(description)
+
+    return {
+        "title": title,
+        "text": _clean_text("\n\n".join(text_parts)) if text_parts else "",
+        "media_urls": media_urls,
+        "final_url": page_url,
+    }
+
+
+async def _extract_douyin_with_ytdlp(url: str) -> dict | None:
+    if yt_dlp is None:
+        return None
+    try:
+        return await asyncio.to_thread(_extract_douyin_with_ytdlp_sync, url)
+    except Exception as exc:
+        logger.debug("抖音 yt-dlp metadata 解析失败: %s", exc)
+        return None
 
 
 def _canonicalize_video_embed_url(src: str, base_url: str = "") -> str:
@@ -785,15 +880,30 @@ async def extract_douyin(url: str) -> ExtractResult | None:
         # 去除平台后缀 "- 抖音"
         title = re.sub(r"\s*-\s*抖音$", "", title)
 
+    ytdlp_result: dict | None = None
+
+    async def get_ytdlp_result() -> dict | None:
+        nonlocal ytdlp_result
+        if ytdlp_result is None:
+            ytdlp_result = await _extract_douyin_with_ytdlp(final_url or url)
+        return ytdlp_result
+
     # 策略 1: window._ROUTER_DATA（iesdouyin.com 分享页最完整的数据源）
     router_result = _parse_douyin_router_data(html, title)
     if router_result:
+        media_urls = router_result.get("media_urls")
+        if not _has_video_media(media_urls):
+            ytdlp_media = await get_ytdlp_result()
+            if ytdlp_media and ytdlp_media.get("media_urls"):
+                media_urls = ytdlp_media["media_urls"] + [entry for entry in (media_urls or []) if (entry.get("type") or "").lower() != "cover"]
+            else:
+                media_urls = _ensure_douyin_video_candidate(media_urls, final_url)
         return ExtractResult(
             title=router_result["title"],
             text=router_result["text"],
             platform="douyin",
             final_url=final_url,
-            media_urls=router_result.get("media_urls"),
+            media_urls=media_urls,
         )
 
     # 策略 2: <meta name="description"> (抖音经常在这里放完整描述)
@@ -803,11 +913,13 @@ async def extract_douyin(url: str) -> ExtractResult | None:
 
     if desc and len(desc) > 10:
         full = f"{title}\n\n{desc}" if title else desc
+        ytdlp_media = await get_ytdlp_result()
         return ExtractResult(
-            title=title or "Unknown",
-            text=_clean_text(full),
+            title=(ytdlp_media or {}).get("title") or title or "Unknown",
+            text=_clean_text((ytdlp_media or {}).get("text") or full),
             platform="douyin",
             final_url=final_url,
+            media_urls=(ytdlp_media or {}).get("media_urls") or _ensure_douyin_video_candidate(None, final_url),
         )
 
     # 策略 3: 提取 RENDER_DATA（抖音页面的 SSR 数据）
@@ -818,11 +930,13 @@ async def extract_douyin(url: str) -> ExtractResult | None:
             data = json.loads(decoded)
             result = _parse_douyin_render_data(data)
             if result:
+                ytdlp_media = await get_ytdlp_result()
                 return ExtractResult(
-                    title=result["title"] or title or "Unknown",
-                    text=result["text"],
+                    title=(ytdlp_media or {}).get("title") or result["title"] or title or "Unknown",
+                    text=(ytdlp_media or {}).get("text") or result["text"],
                     platform="douyin",
                     final_url=final_url,
+                    media_urls=(ytdlp_media or {}).get("media_urls") or _ensure_douyin_video_candidate(None, final_url),
                 )
         except (json.JSONDecodeError, Exception) as e:
             logger.debug("抖音 RENDER_DATA 解析失败: %s", e)
@@ -836,22 +950,26 @@ async def extract_douyin(url: str) -> ExtractResult | None:
                 ld_desc = ld.get("description", "")
                 if len(ld_desc) > 10:
                     full = f"{ld_title}\n\n{ld_desc}" if ld_title else ld_desc
+                    ytdlp_media = await get_ytdlp_result()
                     return ExtractResult(
-                        title=ld_title or title or "Unknown",
-                        text=_clean_text(full),
+                        title=(ytdlp_media or {}).get("title") or ld_title or title or "Unknown",
+                        text=_clean_text((ytdlp_media or {}).get("text") or full),
                         platform="douyin",
                         final_url=final_url,
+                        media_urls=(ytdlp_media or {}).get("media_urls") or _ensure_douyin_video_candidate(None, final_url),
                     )
         except Exception:
             continue
 
     # 策略 5: 仅有标题时也返回
     if title and len(title) > 5:
+        ytdlp_media = await get_ytdlp_result()
         return ExtractResult(
-            title=title,
-            text=title,
+            title=(ytdlp_media or {}).get("title") or title,
+            text=(ytdlp_media or {}).get("text") or title,
             platform="douyin",
             final_url=final_url,
+            media_urls=(ytdlp_media or {}).get("media_urls") or _ensure_douyin_video_candidate(None, final_url),
         )
 
     return None

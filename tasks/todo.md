@@ -16,3 +16,14 @@
 - [x] Trace the live Douyin failure from extracted `playwm` URL through the downloader transport layer
 - [x] Normalize Douyin video URLs from `playwm` to `play` so the backend receives a downloadable stream
 - [x] Add resumable download handling for mid-stream disconnects and verify the live Douyin link end-to-end
+- [x] Move the mobile web capture flow to a browser-local outbox instead of direct-only submission
+- [x] Keep mobile web retries on app reopen/focus without touching desktop capture or downloader behavior
+- [x] Add a mobile web folder popup so captures can be created into a selected or newly created folder
+- [x] Split phone-specific capture behavior out of `/api/extract` into a dedicated phone route
+- [x] Keep desktop `/api/extract` on the plain extract contract while mobile queue/shortcut use `/api/phone-extract`
+- [x] Verify shortcut text fallback and phone folder assignment after the route split
+- [x] Change the mobile clipboard fallback prompt to the exact user-requested wording
+- [x] Keep uploads from the last 3 minutes on `刚刚`, and show minute-based labels from 3 minutes up to 1 hour
+- [x] Center the mobile folder picker status line for the `默认存入 X 个文件夹` copy
+- [x] Tighten the top spacing and increase the bottom spacing for the centered mobile folder status line
+- [ ] Revisit Douyin long-video transport fallback for `https://v.douyin.com/hMFN2-YovzM/` because this specific link still stores text and cover without video while other long-video links are working

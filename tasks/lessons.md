@@ -18,3 +18,9 @@
 - When the user asks for a mobile UI that is "just one centered pill input", remove helper sections and secondary controls instead of keeping extra cards, titles, or action rows.
 - When a capture endpoint has to support long-running video downloads from mobile shortcuts, only background the media pipeline for shortcut/mobile requests whose video duration exceeds the timeout threshold. Keep desktop captures, short videos, and normal links on the synchronous path.
 - When a spinner is positioned by absolute centering, never reuse a shared keyframe that includes positional transforms like `translateY(-50%)`. Split the motion into a dedicated rotate-only animation or the spinner will visibly drift each cycle.
+- When the user says the phone should only be a local staging inbox, confirm whether they mean the native app or the mobile webapp before changing a client. Apply the queue/retry model only in the requested mobile surface.
+- When the user wants to keep a core endpoint clean, move client-specific extras into a dedicated route instead of extending the shared extract contract. Keep `/api/extract` limited to extraction concerns and wrap it from phone-specific handlers.
+- When a social video page still yields good text but no direct media URL, do not stop at the extractor fallback. Preserve the page URL as a video candidate so the downloader can hand it to yt-dlp and still recover media plus duration.
+- When a live media bug reproduces on one concrete social-video URL but not on similar links, record that exact URL and pause the work if the user reprioritizes. Do not keep broadening the downloader after the user has switched focus.
+- When the user corrects relative-time copy, confirm both the threshold and the exact label direction before changing the UI text.
+- When tuning mobile modal spacing, scope the change to the mobile breakpoint and the specific state class instead of shifting the shared desktop footer layout.

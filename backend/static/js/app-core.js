@@ -29,6 +29,8 @@
         const boardShell = document.getElementById('boardShell');
         const mobileCaptureShell = document.getElementById('mobileCaptureShell');
         const mobileCaptureInput = document.getElementById('mobileCaptureInput');
+        const mobileFolderPickerBtn = document.getElementById('mobileFolderPickerBtn');
+        const mobileFolderSelection = document.getElementById('mobileFolderSelection');
         const mobilePasteBtn = document.getElementById('mobilePasteBtn');
         const mobileSubmitBtn = document.getElementById('mobileSubmitBtn');
         const mobileCaptureHint = document.getElementById('mobileCaptureHint');
@@ -106,6 +108,7 @@
         let currentFolderScope = 'all';
         let currentFolderId = null;
         let folderSearchQuery = '';
+        let folderPickerContext = 'assign';
         let sidebarExpanded = true;
         let folderPickerTargetIds = [];
         let folderPickerSelectedIds = new Set();
@@ -140,5 +143,27 @@
         let mobileClipboardPollTimer = null;
         let lastAutoCapturedClipboardText = '';
         let mobileCaptureSubmitInFlight = false;
+        let lastMobileCaptureSubmissionSignature = '';
+        let lastMobileCaptureSubmissionAt = 0;
+        let pendingMobileCaptureSubmission = null;
+        let folderPickerActionInFlight = false;
+        let commandExtractInFlight = false;
+        let lastCommandExtractSignature = '';
+        let lastCommandExtractAt = 0;
+        const MOBILE_CAPTURE_SELECTED_FOLDER_STORAGE_KEY = 'everything-grabber-mobile-folder-selection-v1';
+        let mobileCaptureSelectedFolderIds = (() => {
+            try {
+                const raw = window.localStorage.getItem(MOBILE_CAPTURE_SELECTED_FOLDER_STORAGE_KEY);
+                if (!raw) return [];
+                const parsed = JSON.parse(raw);
+                if (Array.isArray(parsed)) {
+                    return parsed.map((value) => String(value || '').trim()).filter(Boolean);
+                }
+                const legacyValue = String(parsed || '').trim();
+                return legacyValue ? [legacyValue] : [];
+            } catch (error) {
+                return [];
+            }
+        })();
         const nativeFetch = window.fetch.bind(window);
         const defaultSidebarAvatar = sidebarAvatarImage ? sidebarAvatarImage.getAttribute('src') : '';

@@ -51,6 +51,12 @@ def _is_ytdlp_candidate(url: str, media_type: str) -> bool:
         return False
     host = (urlparse(url).hostname or "").lower()
     return host in {
+        "douyin.com",
+        "www.douyin.com",
+        "m.douyin.com",
+        "v.douyin.com",
+        "iesdouyin.com",
+        "www.iesdouyin.com",
         "youtube.com",
         "www.youtube.com",
         "m.youtube.com",
@@ -62,6 +68,44 @@ def _is_ytdlp_candidate(url: str, media_type: str) -> bool:
         "www.vimeo.com",
         "player.vimeo.com",
     }
+
+
+def _should_retry_video_via_referer_page(url: str, media_type: str, referer: str) -> bool:
+    if media_type != "video" or not referer or not _is_ytdlp_candidate(referer, "video"):
+        return False
+
+    host = (urlparse(url).hostname or "").lower()
+    if not host:
+        return False
+
+    return (
+        host.endswith("snssdk.com")
+        or host.endswith("zjcdn.com")
+        or host.endswith("douyinvod.com")
+        or host.endswith("idouyinvod.com")
+    )
+
+
+async def _resolve_video_redirect_url(
+    client: httpx.AsyncClient,
+    url: str,
+    media_type: str,
+    referer: str,
+) -> str:
+    if not _should_retry_video_via_referer_page(url, media_type, referer):
+        return url
+
+    try:
+        response = await client.get(url, follow_redirects=False)
+    except Exception as exc:
+        logger.debug("视频跳转预解析失败 %s: %s", url[:80], exc)
+        return url
+
+    if 300 <= response.status_code < 400:
+        location = response.headers.get("location", "")
+        if location:
+            return str(response.url.join(location))
+    return url
 
 
 def _expected_total_size(headers: httpx.Headers, downloaded: int, current_total: int | None = None) -> int | None:
@@ -177,6 +221,16 @@ async def probe_video_duration_seconds(url: str, media_type: str, referer: str =
 
 async def download_file(url: str, save_path: Path, media_type: str, referer: str = "") -> tuple[Path | None, int]:
     """下载单个文件，返回 (实际文件路径, 文件大小)。失败返回 (None, 0)。"""
+    async def fallback_to_referer_page() -> tuple[Path | None, int]:
+        if not _should_retry_video_via_referer_page(url, media_type, referer):
+            return None, 0
+
+        if save_path.exists():
+            save_path.unlink()
+
+        logger.info("直接视频下载失败，回退到分享页 yt-dlp: %s via %s", url[:80], referer[:80])
+        return await _download_with_ytdlp(referer, save_path, referer=referer)
+
     try:
         if _is_ytdlp_candidate(url, media_type):
             ytdlp_path, ytdlp_size = await _download_with_ytdlp(url, save_path, referer=referer)
@@ -201,10 +255,16 @@ async def download_file(url: str, save_path: Path, media_type: str, referer: str
                     request_headers["Range"] = f"bytes={total}-"
 
                 try:
-                    async with client.stream("GET", url, headers=request_headers or None) as resp:
+                    stream_url = url
+                    stream_url = await _resolve_video_redirect_url(client, url, media_type, referer)
+
+                    async with client.stream("GET", stream_url, headers=request_headers or None) as resp:
                         resp.raise_for_status()
                         content_type = resp.headers.get("content-type", "")
                         if total == 0 and not _looks_like_downloadable_media(content_type, media_type):
+                            fallback_path, fallback_size = await fallback_to_referer_page()
+                            if fallback_size > 0 and fallback_path:
+                                return fallback_path, fallback_size
                             logger.info("跳过非媒体响应: %s (%s)", url, content_type)
                             return None, 0
 
@@ -246,6 +306,10 @@ async def download_file(url: str, save_path: Path, media_type: str, referer: str
                 )
     except Exception as e:
         logger.warning("下载失败 %s: %s", url[:80], e)
+        fallback_path, fallback_size = await fallback_to_referer_page()
+        if fallback_size > 0 and fallback_path:
+            logger.info("分享页 yt-dlp 回退成功: %s (%d bytes)", fallback_path.name, fallback_size)
+            return fallback_path, fallback_size
         # 清理不完整的文件
         if save_path.exists():
             save_path.unlink()

@@ -151,6 +151,7 @@
             if (!ensureAuthenticated({ showOverlay: false })) {
                 folderList.innerHTML = '<div class="folder-loading">登录后显示文件夹</div>';
                 folderMobileStrip.innerHTML = '';
+                updateMobileCaptureFolderSummary();
                 return;
             }
             try {
@@ -160,6 +161,10 @@
                 foldersData = Array.isArray(data.folders) ? data.folders : [];
                 totalFolderCount = Number(data.total_count || 0);
                 unfiledFolderCount = Number(data.unfiled_count || 0);
+                if (mobileCaptureSelectedFolderIds.length) {
+                    mobileCaptureSelectedFolderIds = mobileCaptureSelectedFolderIds.filter((folderId) => foldersData.some((folder) => folder.id === folderId));
+                    persistMobileCaptureSelectedFolder();
+                }
                 if (currentFolderScope === 'unfiled') {
                     currentFolderScope = 'all';
                     currentFolderId = null;
@@ -169,10 +174,12 @@
                     currentFolderId = null;
                 }
                 renderFolderNavigation();
+                updateMobileCaptureFolderSummary();
             } catch (error) {
                 if (!authState.authenticated) return;
                 folderList.innerHTML = '<div class="folder-loading">文件夹加载失败</div>';
                 folderMobileStrip.innerHTML = '';
+                updateMobileCaptureFolderSummary();
             }
         }
 
@@ -193,6 +200,7 @@
         }
 
         function openCreateFolderPrompt() {
+            folderPickerContext = 'create';
             folderCreateInput.value = '';
             folderPickerTargetIds = [];
             folderPickerSelectedIds = new Set(currentFolderScope === 'folder' && currentFolderId ? [currentFolderId] : []);
@@ -216,10 +224,11 @@
         }
 
         function getFolderPickerMode() {
-            return folderPickerTargetIds.length > 0 ? 'assign' : 'create';
+            return folderPickerContext;
         }
 
         function openFolderPicker(itemIds = [], preferredFolderIds = [], title = '加入文件夹') {
+            folderPickerContext = 'assign';
             folderPickerTargetIds = Array.isArray(itemIds) ? itemIds.filter(Boolean) : [];
             const nextSelectedIds = Array.isArray(preferredFolderIds) && preferredFolderIds.length
                 ? preferredFolderIds.filter(Boolean)
@@ -233,17 +242,87 @@
             requestAnimationFrame(() => folderCreateInput.focus());
         }
 
+        function persistMobileCaptureSelectedFolder() {
+            try {
+                if (mobileCaptureSelectedFolderIds.length) {
+                    window.localStorage.setItem(MOBILE_CAPTURE_SELECTED_FOLDER_STORAGE_KEY, JSON.stringify(mobileCaptureSelectedFolderIds));
+                } else {
+                    window.localStorage.removeItem(MOBILE_CAPTURE_SELECTED_FOLDER_STORAGE_KEY);
+                }
+            } catch (error) {
+                console.warn('Failed to persist mobile capture folder selection', error);
+            }
+        }
+
+        function updateMobileCaptureFolderSummary() {
+            if (!mobileFolderSelection || !mobileFolderPickerBtn) return;
+            const selectedFolders = foldersData.filter((folder) => mobileCaptureSelectedFolderIds.includes(folder.id));
+            mobileFolderSelection.textContent = selectedFolders.length
+                ? `当前：${selectedFolders.map((folder) => folder.name).join('、')}`
+                : '当前：不指定文件夹';
+            mobileFolderPickerBtn.textContent = selectedFolders.length ? '更换文件夹' : '选择文件夹';
+        }
+
+        async function openMobileCaptureFolderPicker(options = {}) {
+            const {
+                submitAfterSelection = false,
+                pendingText = '',
+            } = options;
+
+            folderPickerContext = submitAfterSelection ? 'mobile-capture-submit' : 'mobile-capture';
+            folderPickerTargetIds = [];
+            folderPickerSelectedIds = new Set(mobileCaptureSelectedFolderIds);
+            pendingMobileCaptureSubmission = submitAfterSelection ? {
+                text: String(pendingText || '').trim(),
+            } : null;
+            folderPickerTitle.textContent = submitAfterSelection ? '选择收录文件夹' : '手机端存入文件夹';
+            folderCreateInput.value = '';
+            folderCreateConfirmBtn.textContent = submitAfterSelection ? '新建并收录' : '新建并使用';
+            folderPickerOverlay.classList.add('active');
+            requestAnimationFrame(() => folderCreateInput.focus());
+
+            if (!foldersData.length && authState.authenticated) {
+                folderPickerList.innerHTML = '<div class="folder-picker-empty">正在加载文件夹...</div>';
+                updateFolderPickerStatus();
+                await fetchFolders();
+                if (!folderPickerOverlay.classList.contains('active')) return;
+                if (!['mobile-capture', 'mobile-capture-submit'].includes(folderPickerContext)) return;
+            }
+
+            renderFolderPickerOptions();
+        }
+
         function closeFolderPickerDialog() {
             folderPickerOverlay.classList.remove('active');
+            folderPickerContext = 'assign';
             folderPickerTargetIds = [];
             folderPickerSelectedIds = new Set();
             folderCreateInput.value = '';
+            pendingMobileCaptureSubmission = null;
+            folderPickerActionInFlight = false;
+            folderPickerApplyBtn.disabled = false;
+            folderPickerClearBtn.disabled = false;
+            folderCreateConfirmBtn.disabled = false;
+        }
+
+        function setFolderPickerActionState(isBusy) {
+            folderPickerActionInFlight = Boolean(isBusy);
+            folderPickerApplyBtn.disabled = Boolean(isBusy);
+            folderCreateConfirmBtn.disabled = Boolean(isBusy);
+            if (folderPickerClearBtn.hidden) {
+                folderPickerClearBtn.disabled = Boolean(isBusy);
+                return;
+            }
+            const hasSelection = folderPickerSelectedIds.size > 0;
+            folderPickerClearBtn.disabled = Boolean(isBusy) || !hasSelection;
         }
 
         function updateFolderPickerStatus() {
             const mode = getFolderPickerMode();
             const selectedFolders = foldersData.filter((folder) => folderPickerSelectedIds.has(folder.id));
             const selectedNames = selectedFolders.map((folder) => folder.name);
+            const isMobileCaptureMode = mode === 'mobile-capture' || mode === 'mobile-capture-submit';
+            folderPickerStatus.classList.toggle('is-centered', isMobileCaptureMode);
             if (mode === 'assign') {
                 folderPickerHint.textContent = folderPickerTargetIds.length > 1
                     ? `当前将同时更新 ${folderPickerTargetIds.length} 条内容，可多选文件夹。`
@@ -254,7 +333,33 @@
                 folderPickerClearBtn.hidden = false;
                 folderPickerApplyBtn.hidden = false;
                 folderPickerApplyBtn.textContent = '完成保存';
-                folderPickerClearBtn.disabled = selectedNames.length === 0;
+                folderPickerClearBtn.disabled = folderPickerActionInFlight || selectedNames.length === 0;
+                return;
+            }
+
+            if (mode === 'mobile-capture') {
+                folderPickerHint.textContent = '为手机端新收录内容选择默认文件夹，可以多选，也可以留空。';
+                folderPickerStatus.textContent = selectedNames.length
+                    ? `默认存入 ${selectedNames.length} 个文件夹：${selectedNames.join('、')}`
+                    : '当前不指定文件夹';
+                folderPickerClearBtn.hidden = false;
+                folderPickerApplyBtn.hidden = false;
+                folderPickerClearBtn.textContent = '不指定文件夹';
+                folderPickerApplyBtn.textContent = '保存选择';
+                folderPickerClearBtn.disabled = folderPickerActionInFlight || selectedNames.length === 0;
+                return;
+            }
+
+            if (mode === 'mobile-capture-submit') {
+                folderPickerHint.textContent = '这次收录前先选文件夹，可以多选，也可以直接不指定。';
+                folderPickerStatus.textContent = selectedNames.length
+                    ? `本次收录将存入 ${selectedNames.length} 个文件夹：${selectedNames.join('、')}`
+                    : '本次收录不指定文件夹';
+                folderPickerClearBtn.hidden = false;
+                folderPickerApplyBtn.hidden = false;
+                folderPickerClearBtn.textContent = '不指定文件夹';
+                folderPickerApplyBtn.textContent = '确认并收录';
+                folderPickerClearBtn.disabled = folderPickerActionInFlight || selectedNames.length === 0;
                 return;
             }
 
@@ -264,6 +369,8 @@
                 : '新建后会自动切换到对应文件夹。';
             folderPickerClearBtn.hidden = true;
             folderPickerApplyBtn.hidden = true;
+            folderPickerClearBtn.textContent = '清空选择';
+            folderPickerApplyBtn.textContent = '完成';
         }
 
         function renderFolderPickerOptions() {
@@ -275,7 +382,11 @@
                     <button class="folder-picker-option${active ? ' active' : ''}" type="button" onclick="toggleFolderPickerSelection('${option.id}')">
                         <span class="folder-picker-option-main">
                             <span class="folder-picker-option-label">${escapeHtml(option.label)}</span>
-                            <span class="folder-picker-option-subtitle">${mode === 'assign' ? '点击切换当前选择' : '点击切换到这个文件夹'}</span>
+                            <span class="folder-picker-option-subtitle">${mode === 'assign'
+                                ? '点击切换当前选择'
+                                : mode === 'mobile-capture' || mode === 'mobile-capture-submit'
+                                    ? '点击切换本次选择'
+                                    : '点击切换到这个文件夹'}</span>
                         </span>
                         <span class="folder-picker-option-side">
                             <span class="folder-picker-option-meta">${option.count} 条</span>
@@ -297,6 +408,26 @@
                 return;
             }
 
+            if (mode === 'mobile-capture') {
+                if (folderPickerSelectedIds.has(folderId)) {
+                    folderPickerSelectedIds.delete(folderId);
+                } else {
+                    folderPickerSelectedIds.add(folderId);
+                }
+                renderFolderPickerOptions();
+                return;
+            }
+
+            if (mode === 'mobile-capture-submit') {
+                if (folderPickerSelectedIds.has(folderId)) {
+                    folderPickerSelectedIds.delete(folderId);
+                } else {
+                    folderPickerSelectedIds.add(folderId);
+                }
+                renderFolderPickerOptions();
+                return;
+            }
+
             if (folderPickerSelectedIds.has(folderId)) {
                 folderPickerSelectedIds.delete(folderId);
             } else {
@@ -306,8 +437,38 @@
         }
 
         async function applyFolderSelection() {
+            if (folderPickerActionInFlight) return;
             try {
+                setFolderPickerActionState(true);
+                const mode = getFolderPickerMode();
                 const folderIds = Array.from(folderPickerSelectedIds);
+                if (mode === 'mobile-capture') {
+                    mobileCaptureSelectedFolderIds = folderIds;
+                    persistMobileCaptureSelectedFolder();
+                    updateMobileCaptureFolderSummary();
+                    closeFolderPickerDialog();
+                    showToast(
+                        mobileCaptureSelectedFolderIds.length
+                            ? `手机端将默认存入：${foldersData.filter((folder) => mobileCaptureSelectedFolderIds.includes(folder.id)).map((folder) => folder.name).join('、') || '已选文件夹'}`
+                            : '手机端将不指定文件夹',
+                        'success'
+                    );
+                    return;
+                }
+
+                if (mode === 'mobile-capture-submit') {
+                    mobileCaptureSelectedFolderIds = folderIds;
+                    persistMobileCaptureSelectedFolder();
+                    updateMobileCaptureFolderSummary();
+                    const submissionText = pendingMobileCaptureSubmission?.text || '';
+                    closeFolderPickerDialog();
+                    if (submissionText) {
+                        mobileCaptureInput.value = submissionText;
+                        await submitMobileCapture({ auto: false, skipFolderPrompt: true });
+                    }
+                    return;
+                }
+
                 if (folderPickerTargetIds.length > 1) {
                     const response = await fetch('/api/items/bulk-folder', {
                         method: 'POST',
@@ -336,15 +497,45 @@
                 closeFolderPickerDialog();
                 await Promise.all([fetchFolders(), fetchItems()]);
             } catch (error) {
+                setFolderPickerActionState(false);
                 showToast(error.message, 'error');
             }
         }
 
         async function createFolderAndApply() {
+            if (folderPickerActionInFlight) return;
             try {
+                setFolderPickerActionState(true);
+                const mode = getFolderPickerMode();
                 const folder = await createFolder(folderCreateInput.value);
-                if (!folder) return;
+                if (!folder) {
+                    setFolderPickerActionState(false);
+                    return;
+                }
                 folderCreateInput.value = '';
+                if (mode === 'mobile-capture') {
+                    folderPickerSelectedIds.add(folder.id);
+                    mobileCaptureSelectedFolderIds = Array.from(folderPickerSelectedIds);
+                    persistMobileCaptureSelectedFolder();
+                    updateMobileCaptureFolderSummary();
+                    closeFolderPickerDialog();
+                    showToast(`已创建并加入默认文件夹：${folder.name}`, 'success');
+                    return;
+                }
+                if (mode === 'mobile-capture-submit') {
+                    folderPickerSelectedIds.add(folder.id);
+                    mobileCaptureSelectedFolderIds = Array.from(folderPickerSelectedIds);
+                    persistMobileCaptureSelectedFolder();
+                    updateMobileCaptureFolderSummary();
+                    const submissionText = pendingMobileCaptureSubmission?.text || '';
+                    closeFolderPickerDialog();
+                    showToast(`已创建文件夹并用于本次收录：${folder.name}`, 'success');
+                    if (submissionText) {
+                        mobileCaptureInput.value = submissionText;
+                        await submitMobileCapture({ auto: false, skipFolderPrompt: true });
+                    }
+                    return;
+                }
                 if (folderPickerTargetIds.length > 0) {
                     folderPickerSelectedIds.add(folder.id);
                     renderFolderPickerOptions();
@@ -355,6 +546,7 @@
                 closeFolderPickerDialog();
                 setActiveFolder('folder', folder.id);
             } catch (error) {
+                setFolderPickerActionState(false);
                 showToast(error.message, 'error');
             }
         }

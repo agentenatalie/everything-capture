@@ -1,6 +1,7 @@
 import os
 import sys
 import unittest
+import asyncio
 
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
@@ -10,9 +11,10 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")
 
 from auth import reset_request_user_id, set_request_user_id  # noqa: E402
 from database import Base  # noqa: E402
-from models import Item, User  # noqa: E402
-from routers.ingest import _resolve_extract_url, _store_shared_text_capture  # noqa: E402
-from schemas import ExtractRequest  # noqa: E402
+from models import Folder, Item, User  # noqa: E402
+from routers.ingest import _resolve_extract_url, _store_shared_text_capture, execute_extract_request  # noqa: E402
+from routers.phone_webapp import build_phone_extract_item_finalizer  # noqa: E402
+from schemas import ExtractRequest, PhoneExtractRequest  # noqa: E402
 from tenant import DEFAULT_USER_EMAIL, DEFAULT_USER_ID, DEFAULT_USER_NAME  # noqa: E402
 
 
@@ -82,6 +84,43 @@ class ShortcutCompatibilityTests(unittest.TestCase):
                 self.assertEqual(item.canonical_text, "一段没有链接的分享文本\n\n第二段内容")
                 self.assertEqual(item.title, "快捷指令文本")
                 self.assertIn("<p>", item.canonical_html)
+        finally:
+            reset_request_user_id(request_token)
+
+    def test_phone_extract_assigns_requested_folder(self) -> None:
+        background_tasks = _BackgroundTasksStub()
+
+        with self.Session() as db:
+            folder = Folder(user_id=DEFAULT_USER_ID, name="Inbox")
+            db.add(folder)
+            db.commit()
+            db.refresh(folder)
+            folder_id = folder.id
+
+        request = PhoneExtractRequest(
+            text="一段准备归档到文件夹的文本",
+            title="归档文本",
+            folder_id=folder_id,
+        )
+
+        request_token = set_request_user_id(DEFAULT_USER_ID)
+        try:
+            with self.Session() as db:
+                response, _ = asyncio.run(
+                    execute_extract_request(
+                        request,
+                        None,
+                        background_tasks,
+                        db,
+                        DEFAULT_USER_ID,
+                        item_finalizer=build_phone_extract_item_finalizer(request, db, DEFAULT_USER_ID),
+                    )
+                )
+
+                item = db.query(Item).filter(Item.id == response.item_id).first()
+                self.assertIsNotNone(item)
+                self.assertEqual(item.folder_id, folder_id)
+                self.assertEqual([link.folder_id for link in item.folder_links], [folder_id])
         finally:
             reset_request_user_id(request_token)
 

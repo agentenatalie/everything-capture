@@ -66,6 +66,217 @@
             }
         }
 
+        const MOBILE_CAPTURE_QUEUE_STORAGE_KEY = 'everything-grabber-mobile-outbox-v1';
+        const MOBILE_CAPTURE_DUPLICATE_WINDOW_MS = 4000;
+        const COMMAND_EXTRACT_DUPLICATE_WINDOW_MS = 4000;
+        let mobileCaptureQueue = loadMobileCaptureQueue();
+        let mobileCaptureQueueFlushInFlight = false;
+        let mobileCaptureQueueFlushQueued = false;
+
+        function loadMobileCaptureQueue() {
+            try {
+                const raw = window.localStorage.getItem(MOBILE_CAPTURE_QUEUE_STORAGE_KEY);
+                const parsed = raw ? JSON.parse(raw) : [];
+                if (!Array.isArray(parsed)) return [];
+                return parsed
+                    .map((entry) => ({
+                        id: String(entry?.id || '').trim(),
+                        text: String(entry?.text || '').trim(),
+                        folderIds: Array.isArray(entry?.folderIds)
+                            ? entry.folderIds.map((value) => String(value || '').trim()).filter(Boolean)
+                            : (String(entry?.folderId || '').trim() ? [String(entry.folderId).trim()] : []),
+                        createdAt: String(entry?.createdAt || '').trim(),
+                    }))
+                    .filter((entry) => entry.id && entry.text);
+            } catch (error) {
+                return [];
+            }
+        }
+
+        function persistMobileCaptureQueue() {
+            try {
+                if (!mobileCaptureQueue.length) {
+                    window.localStorage.removeItem(MOBILE_CAPTURE_QUEUE_STORAGE_KEY);
+                    return;
+                }
+                window.localStorage.setItem(MOBILE_CAPTURE_QUEUE_STORAGE_KEY, JSON.stringify(mobileCaptureQueue));
+            } catch (error) {
+                console.warn('Failed to persist mobile capture queue', error);
+            }
+        }
+
+        function normalizeMobileQueueFolderIds(folderIds = []) {
+            return Array.isArray(folderIds)
+                ? folderIds.map((value) => String(value || '').trim()).filter(Boolean).sort()
+                : [];
+        }
+
+        function findQueuedMobileCapture(text, folderIds = []) {
+            const normalizedText = String(text || '').trim();
+            const normalizedFolderIds = normalizeMobileQueueFolderIds(folderIds);
+            if (!normalizedText) return null;
+            return mobileCaptureQueue.find((entry) => {
+                const entryFolderIds = normalizeMobileQueueFolderIds(entry.folderIds || []);
+                return entry.text === normalizedText && JSON.stringify(entryFolderIds) === JSON.stringify(normalizedFolderIds);
+            }) || null;
+        }
+
+        function queueMobileCapture(text) {
+            const normalizedText = String(text || '').trim();
+            if (!normalizedText) return { entry: null, alreadyQueued: false };
+            const normalizedFolderIds = normalizeMobileQueueFolderIds(mobileCaptureSelectedFolderIds);
+
+            const existingEntry = findQueuedMobileCapture(normalizedText, normalizedFolderIds);
+            if (existingEntry) {
+                return { entry: existingEntry, alreadyQueued: true };
+            }
+
+            const entry = {
+                id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+                text: normalizedText,
+                folderIds: normalizedFolderIds,
+                createdAt: new Date().toISOString(),
+            };
+            mobileCaptureQueue.push(entry);
+            persistMobileCaptureQueue();
+            return { entry, alreadyQueued: false };
+        }
+
+        function buildMobileCaptureSubmissionSignature(text, folderIds = []) {
+            const normalizedText = String(text || '').trim();
+            const normalizedFolderIds = normalizeMobileQueueFolderIds(folderIds);
+            return JSON.stringify({
+                text: normalizedText,
+                folderIds: normalizedFolderIds,
+            });
+        }
+
+        function isRecentDuplicateMobileCapture(signature) {
+            if (!signature) return false;
+            return (
+                signature === lastMobileCaptureSubmissionSignature
+                && Date.now() - lastMobileCaptureSubmissionAt < MOBILE_CAPTURE_DUPLICATE_WINDOW_MS
+            );
+        }
+
+        function buildCommandExtractSignature(value) {
+            return String(value || '').trim();
+        }
+
+        function isRecentDuplicateCommandExtract(signature) {
+            if (!signature) return false;
+            return (
+                signature === lastCommandExtractSignature
+                && Date.now() - lastCommandExtractAt < COMMAND_EXTRACT_DUPLICATE_WINDOW_MS
+            );
+        }
+
+        function refreshMobileCaptureQueueFeedback(message = '', tone = 'info') {
+            if (message) {
+                setMobileCaptureFeedback(message, tone);
+                return;
+            }
+            if (mobileCaptureQueue.length) {
+                setMobileCaptureFeedback(`本地待同步 ${mobileCaptureQueue.length} 条`, 'info');
+                return;
+            }
+            setMobileCaptureFeedback('');
+        }
+
+        async function flushMobileCaptureQueue(options = {}) {
+            const { silent = false } = options;
+            if (!mobileCaptureQueue.length) {
+                if (!silent) {
+                    refreshMobileCaptureQueueFeedback('');
+                }
+                return { deliveredCount: 0, pendingCount: 0 };
+            }
+
+            if (mobileCaptureQueueFlushInFlight) {
+                mobileCaptureQueueFlushQueued = true;
+                return {
+                    deliveredCount: 0,
+                    pendingCount: mobileCaptureQueue.length,
+                };
+            }
+
+            if (!authState.authenticated) {
+                refreshMobileCaptureQueueFeedback(`已保存到本地待同步 ${mobileCaptureQueue.length} 条，连接电脑并登录后自动同步`, 'info');
+                return {
+                    deliveredCount: 0,
+                    pendingCount: mobileCaptureQueue.length,
+                };
+            }
+
+            mobileCaptureQueueFlushInFlight = true;
+            if (mobileSubmitBtn) {
+                mobileSubmitBtn.disabled = true;
+                mobileSubmitBtn.classList.add('is-loading');
+            }
+
+            let deliveredCount = 0;
+            const remainingQueue = [];
+
+            try {
+                for (const entry of mobileCaptureQueue) {
+                    try {
+                        await submitExtractRequest({
+                            text: entry.text,
+                            ...(entry.folderIds?.length ? { folder_ids: entry.folderIds } : {}),
+                        }, {
+                            endpoint: '/api/phone-extract',
+                        });
+                        deliveredCount += 1;
+                    } catch (error) {
+                        remainingQueue.push(entry);
+                        console.warn('Mobile queued capture delivery failed', error);
+                    }
+                }
+
+                mobileCaptureQueue = remainingQueue;
+                persistMobileCaptureQueue();
+
+                if (deliveredCount > 0) {
+                    fetchItems();
+                }
+
+                const pendingCount = mobileCaptureQueue.length;
+                if (pendingCount === 0) {
+                    const message = '已同步到电脑，已清除本地暂存';
+                    refreshMobileCaptureQueueFeedback(message, 'success');
+                    if (!silent) {
+                        showToast(message, 'success');
+                    }
+                } else if (deliveredCount > 0) {
+                    const message = `已同步 ${deliveredCount} 条，剩余 ${pendingCount} 条待同步`;
+                    refreshMobileCaptureQueueFeedback(message, 'info');
+                    if (!silent) {
+                        showToast(message, 'info');
+                    }
+                } else {
+                    const message = `电脑暂未在线，已保留本地暂存 ${pendingCount} 条`;
+                    refreshMobileCaptureQueueFeedback(message, 'info');
+                    if (!silent) {
+                        showToast(message, 'info');
+                    }
+                }
+
+                return { deliveredCount, pendingCount };
+            } finally {
+                mobileCaptureQueueFlushInFlight = false;
+                if (mobileSubmitBtn) {
+                    mobileSubmitBtn.disabled = false;
+                    mobileSubmitBtn.classList.remove('is-loading');
+                }
+                if (mobileCaptureQueueFlushQueued) {
+                    mobileCaptureQueueFlushQueued = false;
+                    if (mobileCaptureQueue.length) {
+                        await flushMobileCaptureQueue({ silent: true });
+                    }
+                }
+            }
+        }
+
         function setButtonLoadingState(button, isLoading, idleLabel, loadingLabel) {
             if (!button) return;
             button.disabled = Boolean(isLoading);
@@ -436,11 +647,12 @@
             applyCommandSearch();
         }
 
-        async function submitExtractRequest(payloadOrUrl) {
+        async function submitExtractRequest(payloadOrUrl, options = {}) {
+            const endpoint = options.endpoint || '/api/extract';
             const payload = typeof payloadOrUrl === 'string'
                 ? { url: payloadOrUrl }
                 : { ...(payloadOrUrl || {}) };
-            const response = await fetch('/api/extract', {
+            const response = await fetch(endpoint, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(payload)
@@ -472,7 +684,17 @@
             const url = resolveCommandUrl(rawValue);
             if (!rawValue) { showToast('请输入链接', 'error'); return; }
             if (!url) { showToast('请输入有效的 http/https 链接', 'error'); return; }
+            if (commandExtractInFlight) return;
 
+            const extractSignature = buildCommandExtractSignature(url);
+            if (isRecentDuplicateCommandExtract(extractSignature)) {
+                showToast('这个链接刚刚已经提交过了', 'info');
+                return;
+            }
+
+            commandExtractInFlight = true;
+            lastCommandExtractSignature = extractSignature;
+            lastCommandExtractAt = Date.now();
             extractBtn.disabled = true;
             extractBtn.classList.add('is-loading');
             extractBtnLabel.textContent = '处理中...';
@@ -487,6 +709,7 @@
             } catch (e) {
                 showToast(`失败：${e.message}`, 'error');
             } finally {
+                commandExtractInFlight = false;
                 extractBtn.disabled = false;
                 extractBtn.classList.remove('is-loading');
                 updateCommandPaletteState();
@@ -516,8 +739,49 @@
             }
         }
 
+        async function pasteClipboardIntoMobileInput() {
+            let text = '';
+            let clipboardReadBlocked = false;
+
+            if (navigator.clipboard?.readText && window.isSecureContext) {
+                try {
+                    text = (await navigator.clipboard.readText()).trim();
+                } catch (error) {
+                    clipboardReadBlocked = true;
+                }
+            } else {
+                clipboardReadBlocked = true;
+            }
+
+            if (!text) {
+                const manualValue = window.prompt(
+                    clipboardReadBlocked
+                        ? '系统限制了网页直接读取剪切板，请在这里粘贴内容'
+                        : '请粘贴内容',
+                    ''
+                );
+                if (manualValue === null) {
+                    return;
+                }
+                text = String(manualValue || '').trim();
+            }
+
+            if (!text) {
+                showToast('没有可粘贴的内容', 'info');
+                return;
+            }
+
+            mobileCaptureInput.value = text;
+            mobileCaptureInput?.focus();
+            if (mobileCaptureInput?.setSelectionRange) {
+                const end = mobileCaptureInput.value.length;
+                mobileCaptureInput.setSelectionRange(end, end);
+            }
+            showToast('已粘贴到输入框', 'success');
+        }
+
         async function submitMobileCapture(options = {}) {
-            const { auto = false } = options;
+            const { auto = false, skipFolderPrompt = false } = options;
             const rawValue = mobileCaptureInput?.value?.trim() || '';
             if (!rawValue) {
                 if (!auto) showToast('请先粘贴链接或文字', 'error');
@@ -532,67 +796,74 @@
                 return;
             }
 
-            mobileCaptureSubmitInFlight = true;
-            if (mobileSubmitBtn) {
-                mobileSubmitBtn.disabled = true;
-                mobileSubmitBtn.classList.add('is-loading');
+            if (!auto && !skipFolderPrompt) {
+                try {
+                    await openMobileCaptureFolderPicker({
+                        submitAfterSelection: true,
+                        pendingText: rawValue,
+                    });
+                } catch (error) {
+                    showToast(`打开文件夹选择失败：${error.message}`, 'error');
+                }
+                return;
             }
-            try {
-                const data = await submitExtractRequest({ text: rawValue });
+
+            const submissionSignature = buildMobileCaptureSubmissionSignature(rawValue, mobileCaptureSelectedFolderIds);
+            if (isRecentDuplicateMobileCapture(submissionSignature)) {
+                if (!auto) {
+                    showToast('这条内容刚刚已经提交过了', 'info');
+                }
+                return;
+            }
+
+            const { alreadyQueued } = queueMobileCapture(rawValue);
+            lastMobileCaptureSubmissionSignature = submissionSignature;
+            lastMobileCaptureSubmissionAt = Date.now();
+            lastAutoCapturedClipboardText = rawValue;
+            if (mobileCaptureInput) {
                 mobileCaptureInput.value = '';
-                lastAutoCapturedClipboardText = rawValue;
-                showToast(formatExtractSuccessMessage(data), 'success');
-                if (authState.authenticated) {
-                    fetchItems();
-                }
-            } catch (error) {
-                if (!auto || error?.message) {
-                    showToast(`导入失败：${error.message}`, 'error');
-                }
+            }
+
+            const stagedMessage = alreadyQueued
+                ? `已在本地待同步队列中（${mobileCaptureQueue.length} 条）`
+                : `已保存到本地待同步（${mobileCaptureQueue.length} 条）`;
+            refreshMobileCaptureQueueFeedback(stagedMessage, 'info');
+            if (!auto) {
+                showToast(stagedMessage, 'info');
+            }
+
+            mobileCaptureSubmitInFlight = true;
+            try {
+                await flushMobileCaptureQueue({ silent: auto });
             } finally {
                 mobileCaptureSubmitInFlight = false;
-                if (mobileSubmitBtn) {
-                    mobileSubmitBtn.disabled = false;
-                    mobileSubmitBtn.classList.remove('is-loading');
-                }
             }
-        }
-
-        async function attemptMobileClipboardAutofillAndCapture(options = {}) {
-            const { silent = true } = options;
-            if (!isMobileCaptureViewport() || document.visibilityState === 'hidden') return;
-            if (mobileCaptureSubmitInFlight) return;
-
-            const text = await syncMobileClipboardIntoInput({ silent });
-            if (!text || text === lastAutoCapturedClipboardText) return;
-            if (!resolveCommandUrl(text)) return;
-            await submitMobileCapture({ auto: true });
         }
 
         function startMobileCaptureAutomation() {
             if (mobileCaptureAutomationStarted || !mobileCaptureInput) return;
             mobileCaptureAutomationStarted = true;
+            refreshMobileCaptureQueueFeedback();
+            if (typeof updateMobileCaptureFolderSummary === 'function') {
+                updateMobileCaptureFolderSummary();
+            }
 
             window.setTimeout(() => {
-                attemptMobileClipboardAutofillAndCapture({ silent: true });
+                flushMobileCaptureQueue({ silent: true });
             }, 260);
-
-            mobileClipboardPollTimer = window.setInterval(() => {
-                attemptMobileClipboardAutofillAndCapture({ silent: true });
-            }, 2200);
 
             document.addEventListener('visibilitychange', () => {
                 if (document.visibilityState === 'visible') {
-                    attemptMobileClipboardAutofillAndCapture({ silent: true });
+                    flushMobileCaptureQueue({ silent: true });
                 }
             });
 
             window.addEventListener('focus', () => {
-                attemptMobileClipboardAutofillAndCapture({ silent: true });
+                flushMobileCaptureQueue({ silent: true });
             });
 
-            mobileCaptureInput.addEventListener('focus', () => {
-                syncMobileClipboardIntoInput({ silent: true });
+            window.addEventListener('online', () => {
+                flushMobileCaptureQueue({ silent: true });
             });
         }
 
@@ -619,10 +890,8 @@
         mobileSubmitBtn?.addEventListener('click', () => {
             submitMobileCapture({ auto: false });
         });
-        mobileCaptureInput?.addEventListener('paste', () => {
-            window.setTimeout(() => {
-                submitMobileCapture({ auto: false });
-            }, 40);
+        mobilePasteBtn?.addEventListener('click', () => {
+            pasteClipboardIntoMobileInput();
         });
         mobileCaptureInput?.addEventListener('keydown', (event) => {
             if (event.key === 'Enter') {
@@ -721,7 +990,7 @@
             const diffHours = Math.max(0, Math.floor(diffMinutes / 60));
             const diffDays = Math.max(1, Math.floor(diffHours / 24));
 
-            if (diffMinutes < 5) return '刚刚';
+            if (diffMinutes < 3) return '刚刚';
             if (diffMinutes < 60) return `${diffMinutes}分钟前`;
             if (diffHours < 24) return `${diffHours}小时前`;
             return `${diffDays}天前`;

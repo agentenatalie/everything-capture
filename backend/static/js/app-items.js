@@ -237,6 +237,7 @@
         galleryViewBtn.addEventListener('click', () => setView('gallery'));
         listViewBtn.addEventListener('click', () => setView('list'));
         createFolderBtn.addEventListener('click', () => openCreateFolderPrompt());
+        mobileFolderPickerBtn?.addEventListener('click', () => openMobileCaptureFolderPicker());
         folderSearchInput.addEventListener('input', (e) => {
             folderSearchQuery = e.target.value || '';
             renderFolderNavigation();

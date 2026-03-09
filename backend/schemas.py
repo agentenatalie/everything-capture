@@ -63,6 +63,11 @@ class ExtractRequest(BaseModel):
     source_url: Optional[str] = None
     title: Optional[str] = None
 
+
+class PhoneExtractRequest(ExtractRequest):
+    folder_id: Optional[str] = None
+    folder_ids: list[str] = Field(default_factory=list)
+
 class ExtractResponse(BaseModel):
     item_id: str
     title: str

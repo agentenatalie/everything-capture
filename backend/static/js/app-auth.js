@@ -243,6 +243,9 @@
             clearAuthInputs();
             hideAuthOverlay();
             await bootstrapAuthenticatedData({ force: true });
+            if (typeof flushMobileCaptureQueue === 'function') {
+                await flushMobileCaptureQueue({ silent: true });
+            }
             if (successMessage) showToast(successMessage, 'success');
         }
 
@@ -466,14 +469,17 @@
             resetAuthenticatedAppState();
             updateSidebarState();
             updateCommandPaletteState();
+            if (typeof startMobileCaptureAutomation === 'function' && window.matchMedia('(max-width: 860px)').matches) {
+                startMobileCaptureAutomation();
+            }
             let session = await refreshAuthSession({ silent: true });
             if (!session.authenticated) {
                 session = await provisionLocalSession({ silent: true });
             }
             if (session.authenticated) {
                 await bootstrapAuthenticatedData({ force: true });
-                if (typeof startMobileCaptureAutomation === 'function') {
-                    startMobileCaptureAutomation();
+                if (typeof flushMobileCaptureQueue === 'function') {
+                    await flushMobileCaptureQueue({ silent: true });
                 }
             } else {
                 resetAuthenticatedAppState('无法初始化本地资料库连接。');

@@ -2,6 +2,7 @@ import html
 import json
 import logging
 import re
+from typing import Callable
 
 from fastapi import APIRouter, Depends, HTTPException, status, BackgroundTasks, Request
 from sqlalchemy.orm import Session
@@ -261,12 +262,13 @@ def background_finalize_extracted_media(
         db.close()
 
 
-def _store_shared_text_capture(
+def _store_shared_text_capture_record(
     request: ExtractRequest,
     db: Session,
     user_id: str,
     background_tasks: BackgroundTasks,
-) -> ExtractResponse:
+    item_finalizer: Callable[[Item], None] | None = None,
+) -> tuple[ExtractResponse, Item]:
     shared_text = (request.text or "").strip()
     if len(shared_text) < 3:
         raise HTTPException(status_code=422, detail="未检测到可保存的链接或文本内容")
@@ -287,13 +289,22 @@ def _store_shared_text_capture(
         platform="web",
         status="ready",
     )
-    db.add(new_item)
-    db.commit()
-    db.refresh(new_item)
+    try:
+        db.add(new_item)
+        if item_finalizer:
+            item_finalizer(new_item)
+        db.commit()
+        db.refresh(new_item)
+    except HTTPException:
+        db.rollback()
+        raise
+    except Exception:
+        db.rollback()
+        raise
 
     background_tasks.add_task(background_auto_sync, new_item.id, user_id)
 
-    return ExtractResponse(
+    response = ExtractResponse(
         item_id=new_item.id,
         title=title,
         status="ready",
@@ -301,40 +312,41 @@ def _store_shared_text_capture(
         text_length=len(shared_text),
         media_count=0,
     )
-
-@router.post("/ingest", response_model=IngestResponse, status_code=status.HTTP_201_CREATED)
-def ingest_page(request: IngestRequest, background_tasks: BackgroundTasks, db: Session = Depends(get_db)):
-    user_id = get_current_user_id()
-    try:
-        new_item = Item(
-            user_id=user_id,
-            source_url=request.source_url,
-            final_url=request.final_url,
-            title=request.title,
-            canonical_text=request.canonical_text,
-            canonical_text_length=len(request.canonical_text),
-            platform=request.client.platform,
-            status="ready",
-        )
-        db.add(new_item)
-        db.commit()
-        db.refresh(new_item)
-        
-        background_tasks.add_task(background_auto_sync, new_item.id, user_id)
-        
-        return IngestResponse(item_id=new_item.id, status="ready")
-    except Exception as e:
-        db.rollback()
-        raise HTTPException(status_code=500, detail=str(e))
+    return response, new_item
 
 
-@router.post("/extract", response_model=ExtractResponse, status_code=status.HTTP_201_CREATED)
-async def extract_page(request: ExtractRequest, http_request: Request, background_tasks: BackgroundTasks, db: Session = Depends(get_db)):
-    """服务端提取：优先提取 URL，兼容快捷指令 text 载荷并支持文本兜底入库"""
-    user_id = get_current_user_id()
+def _store_shared_text_capture(
+    request: ExtractRequest,
+    db: Session,
+    user_id: str,
+    background_tasks: BackgroundTasks,
+) -> ExtractResponse:
+    response, _ = _store_shared_text_capture_record(
+        request,
+        db,
+        user_id,
+        background_tasks,
+    )
+    return response
+
+
+async def execute_extract_request(
+    request: ExtractRequest,
+    http_request: Request,
+    background_tasks: BackgroundTasks,
+    db: Session,
+    user_id: str,
+    item_finalizer: Callable[[Item], None] | None = None,
+) -> tuple[ExtractResponse, Item]:
     resolved_url = _resolve_extract_url(request)
     if not resolved_url:
-        return _store_shared_text_capture(request, db, user_id, background_tasks)
+        return _store_shared_text_capture_record(
+            request,
+            db,
+            user_id,
+            background_tasks,
+            item_finalizer=item_finalizer,
+        )
 
     try:
         result = await extract_content(resolved_url)
@@ -361,6 +373,8 @@ async def extract_page(request: ExtractRequest, http_request: Request, backgroun
         )
         db.add(new_item)
         _store_initial_extracted_content(new_item, result.content_blocks, result.content_html)
+        if item_finalizer:
+            item_finalizer(new_item)
         db.commit()
         db.refresh(new_item)
 
@@ -393,7 +407,7 @@ async def extract_page(request: ExtractRequest, http_request: Request, backgroun
         else:
             background_tasks.add_task(background_auto_sync, new_item.id, user_id)
 
-        return ExtractResponse(
+        response = ExtractResponse(
             item_id=new_item.id,
             title=result.title,
             status="ready",
@@ -401,8 +415,50 @@ async def extract_page(request: ExtractRequest, http_request: Request, backgroun
             text_length=len(stored_text),
             media_count=media_count,
         )
+        return response, new_item
     except HTTPException:
+        db.rollback()
         raise
     except Exception as e:
         db.rollback()
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/ingest", response_model=IngestResponse, status_code=status.HTTP_201_CREATED)
+def ingest_page(request: IngestRequest, background_tasks: BackgroundTasks, db: Session = Depends(get_db)):
+    user_id = get_current_user_id()
+    try:
+        new_item = Item(
+            user_id=user_id,
+            source_url=request.source_url,
+            final_url=request.final_url,
+            title=request.title,
+            canonical_text=request.canonical_text,
+            canonical_text_length=len(request.canonical_text),
+            platform=request.client.platform,
+            status="ready",
+        )
+        db.add(new_item)
+        db.commit()
+        db.refresh(new_item)
+
+        background_tasks.add_task(background_auto_sync, new_item.id, user_id)
+
+        return IngestResponse(item_id=new_item.id, status="ready")
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/extract", response_model=ExtractResponse, status_code=status.HTTP_201_CREATED)
+async def extract_page(request: ExtractRequest, http_request: Request, background_tasks: BackgroundTasks, db: Session = Depends(get_db)):
+    """服务端提取：优先提取 URL，兼容快捷指令 text 载荷并支持文本兜底入库"""
+    user_id = get_current_user_id()
+    response, _ = await execute_extract_request(
+        request,
+        http_request,
+        background_tasks,
+        db,
+        user_id,
+    )
+    return response

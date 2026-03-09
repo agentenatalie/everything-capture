@@ -3,7 +3,7 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from auth import clear_session_cookie, extract_session_token, get_or_create_default_local_user, is_shortcut_bearer_token, reset_request_user_id, resolve_auth_session, set_request_user_id, touch_auth_session
 from database import engine, Base, SessionLocal, ensure_runtime_schema, init_search_index
-from routers import auth, connect, folders, ingest, items, settings
+from routers import auth, connect, folders, ingest, items, phone_webapp, settings
 import os
 from paths import STATIC_DIR
 
@@ -44,6 +44,7 @@ async def auth_session_middleware(request: Request, call_next):
 
 app.include_router(auth.router)
 app.include_router(ingest.router)
+app.include_router(phone_webapp.router)
 app.include_router(items.router)
 app.include_router(connect.router)
 app.include_router(folders.router)

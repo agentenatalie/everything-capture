@@ -183,11 +183,11 @@
             font-size: 0.88rem;
             font-weight: 600;
             z-index: 200;
-            transform: translateX(120%);
             transition: transform 0.42s cubic-bezier(0.22, 1, 0.36, 1);
             max-width: 420px;
             color: #293043;
             box-shadow: 0 20px 34px -24px rgba(15, 23, 42, 0.28);
+            transform: translateX(calc(100% + 32px));
         }
 
         .toast.show {
@@ -556,6 +556,81 @@
             border-top-color: #ffffff;
             border-radius: 50%;
             animation: btn-spin-centered 0.72s linear infinite;
+        }
+
+        .mobile-capture-tools {
+            margin-top: 14px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 12px;
+            flex-wrap: wrap;
+        }
+
+        .mobile-capture-folder-btn {
+            border: 1px solid rgba(15, 23, 42, 0.08);
+            background: rgba(255, 255, 255, 0.82);
+            color: #374151;
+            border-radius: 999px;
+            min-height: 34px;
+            padding: 0 14px;
+            font-size: 0.85rem;
+            font-weight: 600;
+            cursor: pointer;
+            transition: border-color 0.18s ease, background-color 0.18s ease, color 0.18s ease;
+        }
+
+        .mobile-capture-paste-btn {
+            background: #111111;
+            border-color: #111111;
+            color: #ffffff;
+        }
+
+        .mobile-capture-paste-btn:hover {
+            background: #000000;
+            border-color: #000000;
+            color: #ffffff;
+        }
+
+        .mobile-capture-folder-btn:hover {
+            border-color: rgba(15, 23, 42, 0.18);
+            color: #111827;
+            background: rgba(255, 255, 255, 0.96);
+        }
+
+        .mobile-capture-paste-btn.mobile-capture-folder-btn:hover {
+            background: #000000;
+            border-color: #000000;
+            color: #ffffff;
+        }
+
+        .mobile-capture-folder-selection {
+            width: 100%;
+            display: block;
+            font-size: 0.84rem;
+            line-height: 1.35;
+            color: #9ca3af;
+            text-align: center;
+        }
+
+        .mobile-capture-result {
+            margin-top: 16px;
+            text-align: center;
+            font-size: 0.92rem;
+            line-height: 1.45;
+            color: #9ca3af;
+        }
+
+        .mobile-capture-result.is-success {
+            color: #166534;
+        }
+
+        .mobile-capture-result.is-info {
+            color: #9a6700;
+        }
+
+        .mobile-capture-result.is-error {
+            color: #b42318;
         }
 
         .toolbar-left {
@@ -2179,6 +2254,11 @@
             line-height: 1.5;
         }
 
+        .folder-picker-status.is-centered {
+            width: 100%;
+            text-align: center;
+        }
+
         .folder-picker-footer .modal-footer-actions {
             gap: 8px;
         }
@@ -3381,6 +3461,11 @@
                 align-items: stretch;
             }
 
+            .folder-picker-status.is-centered {
+                margin-top: 0;
+                margin-bottom: 14px;
+            }
+
             .command-overlay {
                 padding: 12px;
             }
@@ -3418,6 +3503,11 @@
                 height: calc(100vh - 20px);
                 max-height: calc(100vh - 20px);
                 border-radius: 18px;
+            }
+
+            .folder-picker-modal {
+                height: calc(100vh - 132px);
+                max-height: calc(100vh - 132px);
             }
 
             .modal-footer {
@@ -3461,6 +3551,22 @@
             .mobile-capture-pill {
                 min-height: 72px;
                 padding: 12px 12px 12px 18px;
+            }
+
+            .mobile-capture-tools {
+                margin-top: 12px;
+                gap: 10px;
+            }
+
+            .mobile-capture-folder-btn {
+                min-height: 32px;
+                font-size: 0.82rem;
+                padding: 0 12px;
+            }
+
+            .mobile-capture-folder-selection {
+                width: 100%;
+                font-size: 0.8rem;
             }
 
             .mobile-capture-input {

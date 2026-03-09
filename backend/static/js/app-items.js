@@ -183,12 +183,11 @@
 
             grid.className = 'grid';
             grid.innerHTML = entries.map((item) => {
-                const length = item.canonical_text ? item.canonical_text.length : 0;
                 const activeClass = currentOpenItemId === item.id ? ' is-active' : '';
                 const title = escapeHtml(item.title || '无标题');
                 const sourceLabel = escapeHtml(`来自 ${platformDisplayLabel(item)}`);
                 const relativeTime = escapeHtml(formatRelativeTime(item.created_at));
-                const tagsHtml = renderCardTags(item, length);
+                const tagsHtml = renderCardTags(item);
 
                 return `
                     <div class="card${activeClass}" onclick="handleItemPrimaryAction('${item.id}')">

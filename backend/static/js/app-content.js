@@ -743,14 +743,8 @@
             }
         }
 
-        function renderCardTags(item, length) {
-            const values = [];
-            const platform = platformDisplayLabel(item);
-            if (platform) values.push(platform);
-            values.push(...getItemFolderNames(item));
-            if (!values.length && length > 0) values.push(`${length}字`);
-
-            return uniquePreserveOrder(values)
+        function renderCardTags(item) {
+            return uniquePreserveOrder(getItemFolderNames(item))
                 .slice(0, 3)
                 .map((tag) => `<span class="tag">${escapeHtml(tag)}</span>`)
                 .join('');

@@ -10,3 +10,9 @@
 - [x] Auto-submit mobile clipboard content only when a URL is detected
 - [x] Keep the mobile loading indicator visually fixed and move the input slightly upward
 - [x] Return `/api/extract` quickly only for shortcut/mobile captures whose videos exceed 15 minutes
+- [x] Diagnose why Douyin share links can ingest text without downloading video media
+- [x] Make Douyin `_ROUTER_DATA` parsing resilient to trailing script content and newer video URL fields
+- [x] Verify Douyin extraction and media download behavior with focused tests
+- [x] Trace the live Douyin failure from extracted `playwm` URL through the downloader transport layer
+- [x] Normalize Douyin video URLs from `playwm` to `play` so the backend receives a downloadable stream
+- [x] Add resumable download handling for mid-stream disconnects and verify the live Douyin link end-to-end

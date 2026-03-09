@@ -19,6 +19,12 @@ except ImportError:  # pragma: no cover - optional dependency at runtime
 logger = logging.getLogger(__name__)
 
 MEDIA_ROOT = MEDIA_DIR
+_RESUMABLE_DOWNLOAD_ERRORS = (
+    httpx.ReadError,
+    httpx.ReadTimeout,
+    httpx.RemoteProtocolError,
+)
+_MAX_RESUME_ATTEMPTS = 8
 
 _MOBILE_UA = (
     "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) "
@@ -56,6 +62,21 @@ def _is_ytdlp_candidate(url: str, media_type: str) -> bool:
         "www.vimeo.com",
         "player.vimeo.com",
     }
+
+
+def _expected_total_size(headers: httpx.Headers, downloaded: int, current_total: int | None = None) -> int | None:
+    content_range = headers.get("content-range", "")
+    if "/" in content_range:
+        total_str = content_range.rsplit("/", 1)[1].strip()
+        if total_str.isdigit():
+            return int(total_str)
+
+    content_length = headers.get("content-length", "")
+    if content_length.isdigit():
+        length = int(content_length)
+        return downloaded + length if downloaded > 0 else length
+
+    return current_total
 
 
 def _download_with_ytdlp_sync(url: str, save_path: Path, referer: str = "") -> tuple[Path | None, int]:
@@ -169,20 +190,60 @@ async def download_file(url: str, save_path: Path, media_type: str, referer: str
         async with httpx.AsyncClient(
             headers=headers, follow_redirects=True, timeout=60
         ) as client:
-            async with client.stream("GET", url) as resp:
-                resp.raise_for_status()
-                content_type = resp.headers.get("content-type", "")
-                if not _looks_like_downloadable_media(content_type, media_type):
-                    logger.info("跳过非媒体响应: %s (%s)", url, content_type)
-                    return None, 0
-                save_path.parent.mkdir(parents=True, exist_ok=True)
-                total = 0
-                with open(save_path, "wb") as f:
-                    async for chunk in resp.aiter_bytes(chunk_size=65536):
-                        f.write(chunk)
-                        total += len(chunk)
-                logger.info("下载完成: %s (%d bytes)", save_path.name, total)
-                return save_path, total
+            save_path.parent.mkdir(parents=True, exist_ok=True)
+            total = 0
+            expected_total = None
+            resume_attempts = 0
+
+            while True:
+                request_headers = {}
+                if total > 0:
+                    request_headers["Range"] = f"bytes={total}-"
+
+                try:
+                    async with client.stream("GET", url, headers=request_headers or None) as resp:
+                        resp.raise_for_status()
+                        content_type = resp.headers.get("content-type", "")
+                        if total == 0 and not _looks_like_downloadable_media(content_type, media_type):
+                            logger.info("跳过非媒体响应: %s (%s)", url, content_type)
+                            return None, 0
+
+                        expected_total = _expected_total_size(resp.headers, total, expected_total)
+                        mode = "ab" if total > 0 else "wb"
+                        with open(save_path, mode) as f:
+                            async for chunk in resp.aiter_bytes(chunk_size=65536):
+                                f.write(chunk)
+                                total += len(chunk)
+                except _RESUMABLE_DOWNLOAD_ERRORS as e:
+                    if total > 0 and expected_total and total < expected_total and resume_attempts < _MAX_RESUME_ATTEMPTS:
+                        resume_attempts += 1
+                        logger.warning(
+                            "下载中断，准备续传 %s (%d/%d, attempt %d)",
+                            url[:80],
+                            total,
+                            expected_total,
+                            resume_attempts,
+                        )
+                        continue
+                    raise e
+
+                if not expected_total or total >= expected_total:
+                    logger.info("下载完成: %s (%d bytes)", save_path.name, total)
+                    return save_path, total
+
+                if resume_attempts >= _MAX_RESUME_ATTEMPTS:
+                    raise httpx.ReadError(
+                        f"incomplete download after {resume_attempts} resume attempts: {total}/{expected_total}",
+                    )
+
+                resume_attempts += 1
+                logger.warning(
+                    "下载提前结束，准备续传 %s (%d/%d, attempt %d)",
+                    url[:80],
+                    total,
+                    expected_total,
+                    resume_attempts,
+                )
     except Exception as e:
         logger.warning("下载失败 %s: %s", url[:80], e)
         # 清理不完整的文件

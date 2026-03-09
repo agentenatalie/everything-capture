@@ -141,6 +141,18 @@ def _normalize_media_url(src: str, base_url: str = "") -> str:
     return ""
 
 
+def _normalize_douyin_video_url(src: str) -> str:
+    normalized = _normalize_media_url(src)
+    if not normalized:
+        return ""
+
+    parsed = urlparse(normalized)
+    host = (parsed.hostname or "").lower()
+    if host.endswith("snssdk.com") and parsed.path == "/aweme/v1/playwm/":
+        return normalized.replace("/aweme/v1/playwm/", "/aweme/v1/play/", 1)
+    return normalized
+
+
 def _canonicalize_video_embed_url(src: str, base_url: str = "") -> str:
     """Normalize embeddable video URLs so downstream rendering can treat them consistently."""
     normalized = _normalize_media_url(src, base_url=base_url)
@@ -850,20 +862,69 @@ def _parse_douyin_router_data(html: str, fallback_title: str = "") -> dict | Non
 
     该数据包含完整的视频信息：描述、作者名、作者简介、标签等。
     """
-    match = re.search(
-        r'window\._ROUTER_DATA\s*=\s*(\{.+?\})\s*;?\s*</script>',
-        html, re.DOTALL
-    )
-    if not match:
+    marker = "window._ROUTER_DATA"
+    idx = html.find(marker)
+    if idx == -1:
         return None
 
-    raw = match.group(1)
+    eq_idx = html.find("=", idx + len(marker))
+    if eq_idx == -1:
+        return None
+
+    json_start = eq_idx + 1
+    while json_start < len(html) and html[json_start] in " \t\n\r":
+        json_start += 1
+    if json_start >= len(html) or html[json_start] != "{":
+        return None
+
+    raw = _extract_balanced_json(html, json_start)
+    if not raw:
+        return None
+
     # 抖音用 \u002F 代替 /
-    raw = raw.replace(r'\u002F', '/')
+    raw = raw.replace(r"\u002F", "/").replace("undefined", "null")
     try:
         data = json.loads(raw)
     except json.JSONDecodeError:
         return None
+
+    def _first_media_url(source: dict | None) -> str:
+        if not isinstance(source, dict):
+            return ""
+        for candidate in source.get("url_list") or []:
+            normalized = _normalize_media_url(str(candidate or ""))
+            if normalized:
+                return normalized
+        return ""
+
+    def _best_video_url(video_data: dict) -> str:
+        best_url = ""
+        best_bitrate = -1
+
+        for variant in video_data.get("bit_rate") or []:
+            if not isinstance(variant, dict):
+                continue
+            bitrate = variant.get("bit_rate", -1)
+            try:
+                bitrate_value = int(bitrate if bitrate is not None else -1)
+            except (TypeError, ValueError):
+                bitrate_value = -1
+
+            for key in ("play_addr", "play_addr_h264", "play_addr_265", "download_addr"):
+                candidate = _first_media_url(variant.get(key))
+                if candidate and bitrate_value >= best_bitrate:
+                    best_url = _normalize_douyin_video_url(candidate)
+                    best_bitrate = bitrate_value
+
+        if best_url:
+            return best_url
+
+        for key in ("play_addr", "play_addr_h264", "play_addr_265", "download_addr"):
+            candidate = _first_media_url(video_data.get(key))
+            if candidate:
+                return _normalize_douyin_video_url(candidate)
+
+        return ""
 
     loader = data.get("loaderData", {})
     for key, page in loader.items():
@@ -896,18 +957,17 @@ def _parse_douyin_router_data(html: str, fallback_title: str = "") -> dict | Non
         media_urls = []
         video_data = item.get("video", {})
         if isinstance(video_data, dict):
-            # 视频播放地址
-            play_addr = video_data.get("play_addr", {})
-            if isinstance(play_addr, dict):
-                url_list = play_addr.get("url_list", [])
-                if url_list:
-                    media_urls.append({"type": "video", "url": url_list[0], "order": 0})
-            # 封面图
-            cover = video_data.get("cover", {}) or video_data.get("origin_cover", {})
-            if isinstance(cover, dict):
-                cover_urls = cover.get("url_list", [])
-                if cover_urls:
-                    media_urls.append({"type": "cover", "url": cover_urls[0], "order": 0})
+            video_url = _best_video_url(video_data)
+            if video_url:
+                media_urls.append({"type": "video", "url": video_url, "order": 0})
+
+            cover_url = ""
+            for key in ("origin_cover", "dynamic_cover", "cover"):
+                cover_url = _first_media_url(video_data.get(key))
+                if cover_url:
+                    break
+            if cover_url:
+                media_urls.append({"type": "cover", "url": cover_url, "order": 0})
 
         # 组装完整文本
         parts = []

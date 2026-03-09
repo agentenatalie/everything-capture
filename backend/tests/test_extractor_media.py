@@ -1,6 +1,7 @@
 import os
 import socket
 import sys
+import tempfile
 import threading
 import unittest
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -16,12 +17,14 @@ from services.extractor import (  # noqa: E402
     _extract_article_blocks,
     _extract_article_html,
     _extract_page_media,
+    _parse_douyin_router_data,
     _parse_x_article_result,
     _parse_twitter_oembed_html,
     extract_twitter,
     extract_generic,
 )
 from services.downloader import download_media_list  # noqa: E402
+from services.downloader import download_file  # noqa: E402
 
 
 class _StaticHtmlHandler(BaseHTTPRequestHandler):
@@ -39,7 +42,104 @@ class _StaticHtmlHandler(BaseHTTPRequestHandler):
         return
 
 
+class _InterruptingBinaryHandler(BaseHTTPRequestHandler):
+    payload = (b"0123456789abcdef" * 393216) + b"tail"
+    cutoff = 4 * 1024 * 1024
+
+    def do_GET(self):  # noqa: N802
+        total = len(self.payload)
+        range_header = self.headers.get("Range")
+
+        if range_header and range_header.startswith("bytes="):
+            start_str = range_header.split("=", 1)[1].split("-", 1)[0].strip()
+            start = int(start_str or "0")
+            body = self.payload[start:]
+            self.send_response(206)
+            self.send_header("Content-Type", "video/mp4")
+            self.send_header("Content-Length", str(len(body)))
+            self.send_header("Content-Range", f"bytes {start}-{total - 1}/{total}")
+            self.send_header("Accept-Ranges", "bytes")
+            self.end_headers()
+            self.wfile.write(body)
+            return
+
+        body = self.payload[: self.cutoff]
+        self.send_response(200)
+        self.send_header("Content-Type", "video/mp4")
+        self.send_header("Content-Length", str(total))
+        self.send_header("Accept-Ranges", "bytes")
+        self.end_headers()
+        self.wfile.write(body)
+        self.wfile.flush()
+        self.close_connection = True
+
+    def log_message(self, format, *args):  # noqa: A003
+        return
+
+
 class ExtractorMediaTests(unittest.IsolatedAsyncioTestCase):
+    def test_parse_douyin_router_data_extracts_media_from_script_assignment(self) -> None:
+        html = """
+        <html><body><script>
+        window._ROUTER_DATA = {
+          "loaderData": {
+            "video_(id)": {
+              "videoInfoRes": {
+                "item_list": [{
+                  "desc": "石油美元的底层逻辑",
+                  "author": {
+                    "nickname": "财经观察",
+                    "signature": "长期研究金融与舆论"
+                  },
+                  "text_extra": [
+                    {"hashtag_name": "石油美元"},
+                    {"hashtag_name": "金融与舆论"}
+                  ],
+                  "video": {
+                    "bit_rate": [
+                      {
+                        "bit_rate": 480000,
+                        "play_addr": {
+                          "url_list": ["https://cdn.example.com/low.mp4"]
+                        }
+                      },
+                      {
+                        "bit_rate": 1280000,
+                        "play_addr_h264": {
+                          "url_list": ["https://aweme.snssdk.com/aweme/v1/playwm/?video_id=high"]
+                        }
+                      }
+                    ],
+                    "play_addr": {
+                      "url_list": ["https://aweme.snssdk.com/aweme/v1/playwm/?video_id=fallback"]
+                    },
+                    "origin_cover": {
+                      "url_list": ["https://cdn.example.com/cover.webp"]
+                    }
+                  }
+                }]
+              }
+            }
+          }
+        };
+        window.__NEXT_DATA__ = {"unused": true};
+        </script></body></html>
+        """
+
+        result = _parse_douyin_router_data(html, "石油美元")
+
+        self.assertIsNotNone(result)
+        self.assertEqual(result["title"], "石油美元")
+        self.assertIn("财经观察", result["text"])
+        self.assertIn("#石油美元", result["text"])
+        self.assertEqual(
+            result["media_urls"],
+            [
+                {"type": "video", "url": "https://aweme.snssdk.com/aweme/v1/play/?video_id=high", "order": 0},
+                {"type": "cover", "url": "https://cdn.example.com/cover.webp", "order": 0},
+            ],
+        )
+
     def test_page_media_detects_youtube_iframe(self) -> None:
         soup = BeautifulSoup(
             """
@@ -252,6 +352,33 @@ class ExtractorMediaTests(unittest.IsolatedAsyncioTestCase):
         mocked_ytdlp.assert_called_once()
         self.assertEqual(len(results), 1)
         self.assertEqual(results[0]["local_path"], "media/test-youtube/video_000.mp4")
+
+    async def test_download_file_resumes_after_midstream_disconnect(self) -> None:
+        with socket.socket() as sock:
+            sock.bind(("127.0.0.1", 0))
+            port = sock.getsockname()[1]
+
+        server = ThreadingHTTPServer(("127.0.0.1", port), _InterruptingBinaryHandler)
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+
+        save_path = Path(tempfile.gettempdir()) / "douyin-resume-test.mp4"
+        try:
+            final_path, file_size = await download_file(
+                f"http://127.0.0.1:{port}/video.mp4",
+                save_path,
+                "video",
+                referer=f"http://127.0.0.1:{port}/",
+            )
+        finally:
+            server.shutdown()
+            server.server_close()
+            thread.join(timeout=5)
+            if save_path.exists():
+                save_path.unlink()
+
+        self.assertIsNotNone(final_path)
+        self.assertEqual(file_size, len(_InterruptingBinaryHandler.payload))
 
     async def test_download_media_list_uses_user_scoped_media_path(self) -> None:
         item_dir = os.path.abspath(

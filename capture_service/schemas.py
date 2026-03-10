@@ -13,6 +13,24 @@ class CaptureCreateRequest(BaseModel):
     folder_names: list[str] = Field(default_factory=list)
 
 
+class CaptureFolderResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: str
+    name: str
+    created_at: datetime
+    updated_at: datetime
+
+
+class CaptureFolderListResponse(BaseModel):
+    folders: list[CaptureFolderResponse] = Field(default_factory=list)
+    total_count: int = 0
+
+
+class CaptureFolderCreateRequest(BaseModel):
+    name: str
+
+
 class CaptureItemResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
@@ -34,6 +52,9 @@ class CaptureItemResponse(BaseModel):
 
 class CaptureCreateResponse(BaseModel):
     success: bool = True
+    captured: bool = True
+    item_id: str
+    status: str = "pending"
     item: CaptureItemResponse
 
 

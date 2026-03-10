@@ -1,6 +1,6 @@
 # Capture Service
 
-Deploy this service to the cloud and keep the existing `backend/` app local.
+Deploy this service to the cloud and keep the existing `backend/` app local. The deployed root path serves the phone capture webapp UI, and `/api/*` serves the capture endpoints.
 
 ## Responsibilities
 
@@ -13,6 +13,8 @@ It does not do scraping, media downloading, AI analysis, or local file sync.
 ## Endpoints
 
 - `POST /api/capture`
+- `GET /api/folders`
+- `POST /api/folders`
 - `GET /api/items?status=pending&limit=20`
 - `POST /api/items/{id}/claim`
 - `POST /api/items/{id}/complete`
@@ -29,6 +31,41 @@ It does not do scraping, media downloading, AI analysis, or local file sync.
 cd /Users/hbz/everything-grabber
 backend/venv/bin/uvicorn capture_service.api:app --host 0.0.0.0 --port 9000
 ```
+
+## Phone Webapp
+
+Open `/` on your phone to use the deployed capture webapp. It supports:
+
+- paste text or URLs
+- submit to `pending`
+- choose cloud folders
+- create new cloud folders
+
+## Shortcut Response
+
+`POST /api/capture` returns an explicit acceptance contract for shortcuts:
+
+```json
+{
+  "success": true,
+  "captured": true,
+  "item_id": "uuid",
+  "status": "pending"
+}
+```
+
+The nested `item` payload is still returned for richer clients.
+
+## Vercel Preview Packaging
+
+To build a deploy-only package for the capture layer:
+
+```bash
+cd /Users/hbz/everything-grabber
+backend/venv/bin/python scripts/prepare_capture_vercel_deploy.py /tmp/everything-grabber-capture-vercel
+```
+
+Then deploy that generated folder instead of the whole repo.
 
 ## Local Worker
 

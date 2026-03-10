@@ -31,3 +31,12 @@ class CaptureItem(Base):
     result_json = Column(Text, nullable=True)
     created_at = Column(DateTime, nullable=False, default=dt.datetime.utcnow, index=True)
     updated_at = Column(DateTime, nullable=False, default=dt.datetime.utcnow, onupdate=dt.datetime.utcnow)
+
+
+class CaptureFolder(Base):
+    __tablename__ = "capture_folders"
+
+    id = Column(String, primary_key=True, default=generate_uuid)
+    name = Column(String, nullable=False, unique=True, index=True)
+    created_at = Column(DateTime, nullable=False, default=dt.datetime.utcnow, index=True)
+    updated_at = Column(DateTime, nullable=False, default=dt.datetime.utcnow, onupdate=dt.datetime.utcnow)

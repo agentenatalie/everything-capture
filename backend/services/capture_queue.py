@@ -1,12 +1,54 @@
 import json
 import os
+from pathlib import Path
 from typing import Any
 
 import httpx
 
 
+def _load_capture_service_file_values() -> dict[str, str]:
+    candidate_paths = [
+        Path(__file__).resolve().parents[1] / ".local" / "capture_service.env",
+        Path(__file__).resolve().parents[2] / ".local" / "capture_service.env",
+    ]
+    values: dict[str, str] = {}
+
+    for candidate_path in candidate_paths:
+        if not candidate_path.exists():
+            continue
+
+        try:
+            for raw_line in candidate_path.read_text(encoding="utf-8").splitlines():
+                line = raw_line.strip()
+                if not line or line.startswith("#"):
+                    continue
+                if line.startswith("export "):
+                    line = line[7:].strip()
+                if "=" not in line:
+                    continue
+                key, value = line.split("=", 1)
+                key = key.strip()
+                value = value.strip().strip("\"'")
+                if key:
+                    values[key] = value
+        except OSError:
+            continue
+
+        if values:
+            return values
+
+    return values
+
+
+def _read_capture_service_setting(name: str) -> str:
+    env_value = (os.environ.get(name) or "").strip()
+    if env_value:
+        return env_value
+    return (_load_capture_service_file_values().get(name) or "").strip()
+
+
 def get_capture_service_base_url() -> str | None:
-    value = (os.environ.get("CAPTURE_SERVICE_URL") or "").strip().rstrip("/")
+    value = _read_capture_service_setting("CAPTURE_SERVICE_URL").rstrip("/")
     return value or None
 
 
@@ -16,7 +58,7 @@ def capture_service_enabled() -> bool:
 
 def _capture_service_headers() -> dict[str, str]:
     headers = {"Content-Type": "application/json"}
-    token = (os.environ.get("CAPTURE_SERVICE_TOKEN") or "").strip()
+    token = _read_capture_service_setting("CAPTURE_SERVICE_TOKEN")
     if token:
         headers["Authorization"] = f"Bearer {token}"
     return headers

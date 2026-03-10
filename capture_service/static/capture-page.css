@@ -1,0 +1,41 @@
+body {
+    background: #ececec;
+}
+
+main {
+    padding: 0 20px;
+    min-height: 100vh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+body.sidebar-collapsed main {
+    padding-left: 20px;
+}
+
+.mobile-capture-shell {
+    display: block;
+    width: 100%;
+    transform: translateY(-34px);
+}
+
+.mobile-capture-card {
+    width: min(100%, 720px);
+}
+
+.board-shell,
+.folder-sidebar,
+.folder-mobile-strip {
+    display: none !important;
+}
+
+@media (max-width: 860px) {
+    main {
+        padding: 0 20px;
+    }
+
+    body.sidebar-collapsed main {
+        padding-left: 20px;
+    }
+}

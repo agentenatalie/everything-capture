@@ -25,3 +25,7 @@
 - When the user corrects relative-time copy, confirm both the threshold and the exact label direction before changing the UI text.
 - When tuning mobile modal spacing, scope the change to the mobile breakpoint and the specific state class instead of shifting the shared desktop footer layout.
 - When the user distinguishes capture from processing in a grabber architecture, do not describe the solution as “deploy web and mobile.” Keep the deployed surface strictly to the capture API, and keep scraping/downloading/AI/file-sync responsibilities local.
+- When a shortcut-facing capture API is meant to behave like an inbox drop, make the response contract explicitly state top-level acceptance success instead of forcing the client to infer success from nested queue metadata.
+- When the user says the phone should connect to the deployed service, do not assume they only need the API reachable. Confirm whether they also need the actual phone webapp UI online, and if so deploy the phone-facing UI together with the capture API.
+- When reusing a mobile-only stylesheet for a standalone deployed page, audit its breakpoint visibility rules before shipping. If the page has no desktop fallback content, never leave the primary shell hidden outside the mobile breakpoint.
+- In a cloud-capture/local-processing architecture, do not rely on transient shell exports for the worker's queue URL. Persist the capture-service connection in a local config source and make the worker retry instead of exiting on the first network error.

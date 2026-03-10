@@ -1,0 +1,86 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+    <title>Everything Capture - 手机端收录</title>
+    <link
+        href="https://fonts.googleapis.com/css2?family=Manrope:wght@500;600;700&family=Noto+Sans+SC:wght@400;500;600;700&display=swap"
+        rel="stylesheet">
+    <link rel="stylesheet" href="/static/index.css">
+    <link rel="stylesheet" href="/static/capture-page.css">
+</head>
+<body>
+    <div class="bg-shapes">
+        <div class="blob blob-1"></div>
+        <div class="blob blob-2"></div>
+    </div>
+
+    <div class="toast" id="toast"></div>
+
+    <main>
+        <section class="mobile-capture-shell" id="mobileCaptureShell" aria-label="手机端收录入口">
+            <div class="mobile-capture-card">
+                <label class="mobile-capture-pill" for="mobileCaptureInput">
+                    <input
+                        id="mobileCaptureInput"
+                        class="mobile-capture-input"
+                        type="text"
+                        inputmode="text"
+                        autocomplete="off"
+                        autocapitalize="off"
+                        spellcheck="false"
+                        placeholder="粘贴链接或文字"
+                    />
+                    <button id="mobileSubmitBtn" class="mobile-capture-submit" type="button" aria-label="立即收录">↑</button>
+                </label>
+                <div class="mobile-capture-tools">
+                    <button id="mobilePasteBtn" class="mobile-capture-folder-btn mobile-capture-paste-btn" type="button">
+                        粘贴
+                    </button>
+                    <button id="mobileFolderPickerBtn" class="mobile-capture-folder-btn" type="button">
+                        选择文件夹
+                    </button>
+                    <div id="mobileFolderSelection" class="mobile-capture-folder-selection">当前：不指定文件夹</div>
+                </div>
+                <div id="mobileCaptureResult" class="mobile-capture-result" hidden aria-live="polite"></div>
+            </div>
+        </section>
+    </main>
+
+    <div class="modal-overlay" id="folderPickerOverlay">
+        <div class="modal folder-picker-modal" role="dialog" aria-modal="true" aria-label="文件夹面板">
+            <div class="modal-header">
+                <div class="folder-picker-headline">
+                    <h2 class="modal-title folder-picker-title" id="folderPickerTitle">手机端存入文件夹</h2>
+                    <div class="folder-picker-hint" id="folderPickerHint">为手机端新收录内容选择默认文件夹，可以多选，也可以留空。</div>
+                </div>
+                <div class="modal-header-actions">
+                    <button class="close-btn" id="closeFolderPicker" type="button" aria-label="关闭文件夹面板">×</button>
+                </div>
+            </div>
+            <div class="modal-body folder-picker-body">
+                <div class="folder-picker-commandbar">
+                    <svg viewBox="0 0 24 24" fill="none" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                        <path d="M4 12h16"></path>
+                        <path d="M12 4v16"></path>
+                    </svg>
+                    <input type="text" id="folderCreateInput" class="folder-picker-input" placeholder="输入新文件夹名称，回车创建" />
+                    <button id="folderCreateConfirmBtn" class="folder-picker-create-btn" type="button">新建并使用</button>
+                </div>
+                <div class="folder-picker-section-title">现有文件夹</div>
+                <div class="folder-picker-list" id="folderPickerList"></div>
+            </div>
+            <div class="modal-footer folder-picker-footer">
+                <div class="folder-picker-status is-centered" id="folderPickerStatus">当前不指定文件夹</div>
+                <div class="modal-footer-actions">
+                    <button id="folderPickerClearBtn" class="modal-action-btn folder-picker-clear-btn" type="button">不指定文件夹</button>
+                    <button id="folderPickerApplyBtn" class="modal-action-btn folder-picker-apply-btn" type="button">保存选择</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="/static/mobile.js"></script>
+</body>
+</html>

@@ -31,6 +31,17 @@
 - [x] Add a local processing worker that pulls pending captures and reuses the existing extractor/downloader pipeline
 - [x] Allow phone capture flows to forward into the capture service when configured, while keeping the local fallback
 - [x] Verify the capture queue flow with focused tests for create/list/update and worker item processing
+- [x] Make `POST /api/capture` return an explicit top-level capture success contract for shortcuts/clients
+- [x] Add a deploy-only packaging path for `capture_service` so cloud deploys do not depend on the whole repo layout
+- [x] Deploy the capture-only package as a preview and record the resulting URL/limits
+- [x] Add a deployable phone-only capture webapp on top of the capture service instead of exposing only a raw API
+- [x] Add cloud folder APIs for the phone capture app so folder selection works on the deployed webapp
+- [x] Package and redeploy the phone capture webapp plus capture API together
+- [x] Add capture item status polling so the phone webapp shows pending/processing/processed/failed instead of only enqueue success
+- [x] Auto-start the local processing worker from the main run path when `CAPTURE_SERVICE_URL` is configured
+- [x] Add automatic clipboard detection that fills the phone webapp input when safe browser clipboard access is available
+- [x] Persist the local capture-service connection in a local config file so the worker can reconnect without manual shell exports
+- [x] Keep the processing worker alive across transient capture-service connection failures instead of exiting permanently
 - [ ] Revisit Douyin long-video transport fallback for `https://v.douyin.com/hMFN2-YovzM/` because this specific link still stores text and cover without video while other long-video links are working
 - [x] Diagnose why card detail content lost inline formatting after capture
 - [x] Restore inline rich-text rendering for captured card detail content and verify with real stored data

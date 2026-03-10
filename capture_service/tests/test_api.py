@@ -28,6 +28,10 @@ class CaptureServiceApiTests(unittest.TestCase):
         os.environ.pop("CAPTURE_SERVICE_DB_PATH", None)
 
     def test_capture_queue_claim_and_complete_flow(self) -> None:
+        root_response = self.client.get("/")
+        self.assertEqual(root_response.status_code, 200)
+        self.assertIn("Everything Capture", root_response.text)
+
         create_response = self.client.post(
             "/api/capture",
             json={
@@ -38,7 +42,12 @@ class CaptureServiceApiTests(unittest.TestCase):
             },
         )
         self.assertEqual(create_response.status_code, 201)
-        created_item = create_response.json()["item"]
+        create_payload = create_response.json()
+        self.assertTrue(create_payload["success"])
+        self.assertTrue(create_payload["captured"])
+        self.assertEqual(create_payload["status"], "pending")
+        created_item = create_payload["item"]
+        self.assertEqual(create_payload["item_id"], created_item["id"])
         self.assertEqual(created_item["status"], "pending")
         self.assertEqual(created_item["folder_names"], ["Inbox"])
 
@@ -47,6 +56,10 @@ class CaptureServiceApiTests(unittest.TestCase):
         listed_items = list_response.json()["items"]
         self.assertEqual(len(listed_items), 1)
         self.assertEqual(listed_items[0]["id"], created_item["id"])
+
+        item_response = self.client.get(f"/api/items/{created_item['id']}")
+        self.assertEqual(item_response.status_code, 200)
+        self.assertEqual(item_response.json()["status"], "pending")
 
         claim_response = self.client.post(
             f"/api/items/{created_item['id']}/claim",
@@ -77,7 +90,9 @@ class CaptureServiceApiTests(unittest.TestCase):
                 "source": "api",
             },
         )
-        item_id = create_response.json()["item"]["id"]
+        create_payload = create_response.json()
+        self.assertTrue(create_payload["captured"])
+        item_id = create_payload["item_id"]
 
         claim_response = self.client.post(
             f"/api/items/{item_id}/claim",
@@ -92,6 +107,20 @@ class CaptureServiceApiTests(unittest.TestCase):
         self.assertEqual(fail_response.status_code, 200)
         self.assertEqual(fail_response.json()["status"], "failed")
         self.assertEqual(fail_response.json()["error_reason"], "download failed")
+
+    def test_folder_api_lists_and_creates_folders(self) -> None:
+        initial = self.client.get("/api/folders")
+        self.assertEqual(initial.status_code, 200)
+        self.assertEqual(initial.json()["total_count"], 0)
+
+        created = self.client.post("/api/folders", json={"name": "Inbox"})
+        self.assertEqual(created.status_code, 201)
+        self.assertEqual(created.json()["name"], "Inbox")
+
+        listed = self.client.get("/api/folders")
+        self.assertEqual(listed.status_code, 200)
+        self.assertEqual(listed.json()["total_count"], 1)
+        self.assertEqual(listed.json()["folders"][0]["name"], "Inbox")
 
 
 if __name__ == "__main__":

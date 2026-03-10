@@ -164,14 +164,21 @@ def main() -> int:
     logger.info("Starting processing worker %s", worker_id)
 
     if args.once:
-        processed = process_once(args.limit, worker_id)
+        try:
+            processed = process_once(args.limit, worker_id)
+        except Exception:
+            logger.exception("Processing worker batch failed")
+            return 1
         logger.info("Processed %d capture items", processed)
         return 0
 
     while True:
-        processed = process_once(args.limit, worker_id)
-        if processed:
-            logger.info("Processed %d capture items", processed)
+        try:
+            processed = process_once(args.limit, worker_id)
+            if processed:
+                logger.info("Processed %d capture items", processed)
+        except Exception:
+            logger.exception("Processing worker loop failed; retrying after backoff")
         time.sleep(max(args.interval, 1.0))
 
 

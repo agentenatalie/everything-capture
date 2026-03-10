@@ -1,5 +1,7 @@
 # Capture Service
 
+完整部署说明见 [DEPLOYMENT.md](/Users/hbz/everything-grabber/DEPLOYMENT.md)。
+
 Deploy this service to the cloud and keep the existing `backend/` app local. The deployed root path serves the phone capture webapp UI, and `/api/*` serves the capture endpoints.
 
 ## Responsibilities

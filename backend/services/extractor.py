@@ -132,6 +132,50 @@ def _clean_text(text: str) -> str:
     return text.strip()
 
 
+_XHS_GENERIC_TITLES = {"小红书", "小红书 - 你的生活兴趣社区"}
+
+
+def _normalize_xhs_title_candidate(value: str | None) -> str:
+    candidate = re.sub(r"\s+", " ", str(value or "")).strip()
+    if not candidate or candidate in _XHS_GENERIC_TITLES:
+        return ""
+    return candidate[:200]
+
+
+def _first_meaningful_text_line(text: str | None) -> str:
+    for raw_line in str(text or "").splitlines():
+        line = re.sub(r"\s+", " ", raw_line).strip()
+        if not line:
+            continue
+        if re.fullmatch(r"(#.+?\[话题\]#\s*)+", line):
+            continue
+        return line[:200]
+    return ""
+
+
+def _compose_title_and_desc(title: str, desc: str) -> str:
+    normalized_title = _normalize_xhs_title_candidate(title)
+    normalized_desc = str(desc or "").strip()
+    if not normalized_desc:
+        return normalized_title
+    if not normalized_title:
+        return normalized_desc
+
+    compact_title = re.sub(r"\s+", " ", normalized_title)
+    compact_desc = re.sub(r"\s+", " ", normalized_desc)
+    if compact_desc.startswith(compact_title):
+        return normalized_desc
+    return f"{normalized_title}\n\n{normalized_desc}"
+
+
+def _resolve_xhs_title(title: str | None, desc: str | None = None, fallback_text: str | None = None) -> str:
+    return (
+        _normalize_xhs_title_candidate(title)
+        or _first_meaningful_text_line(desc)
+        or _first_meaningful_text_line(fallback_text)
+    )
+
+
 def _normalize_media_url(src: str, base_url: str = "") -> str:
     if not src:
         return ""
@@ -711,10 +755,11 @@ async def extract_xiaohongshu(url: str) -> ExtractResult | None:
 
     # 策略 2: OG meta 标签
     soup = BeautifulSoup(html, "lxml")
-    title = _html_meta(soup, "og:title") or soup.title.string if soup.title else ""
+    page_title = soup.title.string.strip() if soup.title and soup.title.string else ""
     desc = _html_meta(soup, "og:description") or ""
+    title = _resolve_xhs_title(_html_meta(soup, "og:title") or page_title, desc)
     if desc and len(desc) > 10:
-        full = f"{title}\n\n{desc}" if title else desc
+        full = _compose_title_and_desc(title, desc)
         return ExtractResult(
             title=title or "Unknown",
             text=_clean_text(full),
@@ -725,8 +770,9 @@ async def extract_xiaohongshu(url: str) -> ExtractResult | None:
     # 策略 3: DOM 文本
     body_text = _extract_visible_text(soup)
     if body_text and len(body_text) > 30:
+        body_title = _resolve_xhs_title(title or page_title, desc, body_text)
         return ExtractResult(
-            title=title or "Unknown",
+            title=body_title or "Unknown",
             text=_clean_text(body_text),
             platform="xiaohongshu",
             final_url=final_url,
@@ -788,21 +834,18 @@ def _parse_xhs_initial_state(html: str) -> dict | None:
 
 
 def _extract_xhs_note(note: dict) -> dict | None:
-    title = note.get("title", "")
-    desc = note.get("desc", "")
+    raw_title = note.get("title", "")
+    desc = str(note.get("desc", "") or "")
+    title = _resolve_xhs_title(raw_title, desc)
     tags = ""
     tag_list = note.get("tagList", [])
     if tag_list:
         names = [t.get("name") or t.get("tagName", "") for t in tag_list if isinstance(t, dict)]
         tags = " ".join(f"#{n}" for n in names if n)
 
-    full = ""
-    if title:
-        full += title + "\n\n"
-    if desc:
-        full += desc
+    full = _compose_title_and_desc(title, desc)
     if tags:
-        full += "\n\n" + tags
+        full = f"{full}\n\n{tags}" if full else tags
 
     full = full.strip()
     if len(full) <= 20:

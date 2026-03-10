@@ -47,3 +47,4 @@
 - [x] Restore inline rich-text rendering for captured card detail content and verify with real stored data
 - [x] Trace why newly downloaded links still lose formatting while older links retain formatting
 - [x] Fix the iOS fallback ingest path so new captures preserve HTML formatting end to end
+- [x] Diagnose why phone webapp Xiaohongshu `xhslink` captures can store `Unknown` titles while desktop capture keeps the note title

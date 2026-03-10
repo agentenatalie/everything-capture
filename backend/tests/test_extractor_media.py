@@ -19,6 +19,7 @@ from services.extractor import (  # noqa: E402
     _extract_article_blocks,
     _extract_article_html,
     _extract_page_media,
+    _parse_xhs_initial_state,
     _parse_douyin_router_data,
     _parse_x_article_result,
     _parse_twitter_oembed_html,
@@ -82,6 +83,42 @@ class _InterruptingBinaryHandler(BaseHTTPRequestHandler):
 
 
 class ExtractorMediaTests(unittest.IsolatedAsyncioTestCase):
+    def test_parse_xhs_initial_state_uses_desc_first_line_when_title_missing(self) -> None:
+        html = """
+        <html><body><script>
+        window.__INITIAL_STATE__ = {
+          "noteData": {
+            "data": {
+              "noteData": {
+                "title": "",
+                "desc": "一篇读懂 | OpenClaw“养龙虾”指南：不只是“养”，更要“防”\\n\\n最近，工业和信息化部网络安全威胁和漏洞信息共享平台监测发现，OpenClaw 在默认配置下存在较高安全风险。",
+                "imageList": [
+                  {
+                    "urlDefault": "//sns-webpic-qc.xhscdn.com/example.jpg"
+                  }
+                ],
+                "tagList": [
+                  {"name": "热点"}
+                ]
+              }
+            }
+          }
+        };
+        </script></body></html>
+        """
+
+        result = _parse_xhs_initial_state(html)
+
+        self.assertIsNotNone(result)
+        self.assertEqual(result["title"], "一篇读懂 | OpenClaw“养龙虾”指南：不只是“养”，更要“防”")
+        self.assertTrue(result["text"].startswith("一篇读懂 | OpenClaw“养龙虾”指南：不只是“养”，更要“防”"))
+        self.assertEqual(result["text"].count("一篇读懂 | OpenClaw“养龙虾”指南：不只是“养”，更要“防”"), 1)
+        self.assertIn("最近，工业和信息化部网络安全威胁", result["text"])
+        self.assertEqual(
+            result["media_urls"],
+            [{"type": "image", "url": "https://sns-webpic-qc.xhscdn.com/example.jpg", "order": 0}],
+        )
+
     def test_build_douyin_page_media_reference_returns_video_entry(self) -> None:
         self.assertEqual(
             _build_douyin_page_media_reference("https://v.douyin.com/test123/"),

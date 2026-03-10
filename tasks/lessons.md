@@ -29,3 +29,4 @@
 - When the user says the phone should connect to the deployed service, do not assume they only need the API reachable. Confirm whether they also need the actual phone webapp UI online, and if so deploy the phone-facing UI together with the capture API.
 - When reusing a mobile-only stylesheet for a standalone deployed page, audit its breakpoint visibility rules before shipping. If the page has no desktop fallback content, never leave the primary shell hidden outside the mobile breakpoint.
 - In a cloud-capture/local-processing architecture, do not rely on transient shell exports for the worker's queue URL. Persist the capture-service connection in a local config source and make the worker retry instead of exiting on the first network error.
+- When desktop and phone capture results differ, verify whether one path supplies client-side page metadata while the other relies on backend extraction before attributing the bug to the queue or webapp layer.

@@ -26,4 +26,13 @@
 - [x] Keep uploads from the last 3 minutes on `刚刚`, and show minute-based labels from 3 minutes up to 1 hour
 - [x] Center the mobile folder picker status line for the `默认存入 X 个文件夹` copy
 - [x] Tighten the top spacing and increase the bottom spacing for the centered mobile folder status line
+- [x] Split the system into a cloud-only capture service and a local-only processing worker
+- [x] Add a minimal `capture_service/` app with pending-item storage plus capture/list/update APIs
+- [x] Add a local processing worker that pulls pending captures and reuses the existing extractor/downloader pipeline
+- [x] Allow phone capture flows to forward into the capture service when configured, while keeping the local fallback
+- [x] Verify the capture queue flow with focused tests for create/list/update and worker item processing
 - [ ] Revisit Douyin long-video transport fallback for `https://v.douyin.com/hMFN2-YovzM/` because this specific link still stores text and cover without video while other long-video links are working
+- [x] Diagnose why card detail content lost inline formatting after capture
+- [x] Restore inline rich-text rendering for captured card detail content and verify with real stored data
+- [x] Trace why newly downloaded links still lose formatting while older links retain formatting
+- [x] Fix the iOS fallback ingest path so new captures preserve HTML formatting end to end

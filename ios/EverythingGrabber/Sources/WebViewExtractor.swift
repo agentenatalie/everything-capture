@@ -5,6 +5,7 @@ import Foundation
 struct ExtractionData {
     let title: String
     let text: String
+    let html: String?
 }
 
 class WebViewExtractor: NSObject, WKNavigationDelegate {
@@ -203,7 +204,7 @@ class WebViewExtractor: NSObject, WKNavigationDelegate {
         
         let trimmedText = fullText.trimmingCharacters(in: .whitespacesAndNewlines)
         guard trimmedText.count > 20 else { return nil }
-        return ExtractionData(title: title.isEmpty ? "Unknown" : title, text: trimmedText)
+        return ExtractionData(title: title.isEmpty ? "Unknown" : title, text: trimmedText, html: nil)
     }
     
     private func parseXHSMetaTags(from html: String) -> ExtractionData? {
@@ -223,7 +224,7 @@ class WebViewExtractor: NSObject, WKNavigationDelegate {
         
         let trimmedText = fullText.trimmingCharacters(in: .whitespacesAndNewlines)
         guard trimmedText.count > 10 else { return nil }
-        return ExtractionData(title: title.isEmpty ? "Unknown" : title, text: trimmedText)
+        return ExtractionData(title: title.isEmpty ? "Unknown" : title, text: trimmedText, html: nil)
     }
     
     private func extractMetaContent(from html: String, attribute: String, value: String) -> String? {
@@ -388,7 +389,7 @@ class WebViewExtractor: NSObject, WKNavigationDelegate {
                         var doc = document.cloneNode(true);
                         var article = new Readability(doc).parse();
                         if (article && article.textContent && article.textContent.trim().length > 100) {
-                            return { title: article.title || document.title, text: article.textContent };
+                            return { title: article.title || document.title, text: article.textContent, html: article.content || "" };
                         }
                     } catch(e) {}
                     return null;
@@ -399,8 +400,9 @@ class WebViewExtractor: NSObject, WKNavigationDelegate {
                     if let dict = result as? [String: Any],
                        let title = dict["title"] as? String,
                        let text = dict["text"] as? String,
+                       let html = dict["html"] as? String,
                        text.trimmingCharacters(in: .whitespacesAndNewlines).count > 100 {
-                        self.resumeContinuation(with: ExtractionData(title: title, text: text))
+                        self.resumeContinuation(with: ExtractionData(title: title, text: text, html: html))
                     } else {
                         self.executeFallbackExtraction()
                     }
@@ -489,7 +491,7 @@ class WebViewExtractor: NSObject, WKNavigationDelegate {
                let title = dict["title"] as? String,
                let text = dict["text"] as? String,
                text.trimmingCharacters(in: .whitespacesAndNewlines).count > 20 {
-                self.resumeContinuation(with: ExtractionData(title: title, text: text))
+                self.resumeContinuation(with: ExtractionData(title: title, text: text, html: nil))
                 return
             }
             
@@ -532,7 +534,7 @@ class WebViewExtractor: NSObject, WKNavigationDelegate {
                     var node = document.querySelector(selectors[i]);
                     if (node && node.innerText && node.innerText.trim().length > 20) {
                         var text = title + '\\n\\n' + node.innerText.trim();
-                        return { title: title, text: text };
+                        return { title: title, text: text, html: node.innerHTML || "" };
                     }
                 } catch(e) {}
             }
@@ -548,14 +550,14 @@ class WebViewExtractor: NSObject, WKNavigationDelegate {
                 }
             }
             if (allText.trim().length > 50) {
-                return { title: title, text: allText.trim() };
+                return { title: title, text: allText.trim(), html: '' };
             }
             
             // 最终兜底
             var bodyText = document.body ? document.body.innerText : '';
             // 简单清理兜底中的引导文本
             bodyText = bodyText.replace(/已下载[？?]点击右上角[，,]在浏览器中打开/g, '').replace(/打开App/gi, '');
-            return { title: title, text: bodyText || '' };
+            return { title: title, text: bodyText || '', html: '' };
         })();
         """
         
@@ -563,9 +565,10 @@ class WebViewExtractor: NSObject, WKNavigationDelegate {
             if let dict = result as? [String: Any],
                let title = dict["title"] as? String,
                let text = dict["text"] as? String {
-                self?.resumeContinuation(with: ExtractionData(title: title, text: text))
+                let html = dict["html"] as? String
+                self?.resumeContinuation(with: ExtractionData(title: title, text: text, html: html))
             } else {
-                self?.resumeContinuation(with: ExtractionData(title: "Unknown", text: ""))
+                self?.resumeContinuation(with: ExtractionData(title: "Unknown", text: "", html: nil))
             }
         }
     }
@@ -598,26 +601,29 @@ class WebViewExtractor: NSObject, WKNavigationDelegate {
             for (var i = 0; i < selectors.length; i++) {
                 var node = document.querySelector(selectors[i]);
                 if (node && node.innerText && node.innerText.trim().length > 50) {
-                    return { title: title, text: node.innerText.trim() };
+                    return { title: title, text: node.innerText.trim(), html: node.innerHTML || "" };
                 }
             }
             
             // 策略 2：暴力收集所有段落
             var allText = "";
+            var allHtml = "";
             var tags = document.querySelectorAll('p, h1, h2, h3, h4, h5, h6, li, blockquote, pre, td');
             for (var j = 0; j < tags.length; j++) {
                 var t = tags[j].innerText;
                 if (t && t.trim().length > 5) {
                     allText += t.trim() + "\\n\\n";
+                    allHtml += tags[j].outerHTML || "";
                 }
             }
             if (allText.trim().length > 50) {
-                return { title: title, text: allText.trim() };
+                return { title: title, text: allText.trim(), html: allHtml };
             }
             
             // 策略 3：直接拿 body
             var bodyText = document.body ? document.body.innerText : "";
-            return { title: title, text: bodyText || "" };
+            var bodyHtml = document.body ? document.body.innerHTML : "";
+            return { title: title, text: bodyText || "", html: bodyHtml || "" };
         })();
         """
         
@@ -625,9 +631,10 @@ class WebViewExtractor: NSObject, WKNavigationDelegate {
             if let dict = result as? [String: Any],
                let title = dict["title"] as? String,
                let text = dict["text"] as? String {
-                self?.resumeContinuation(with: ExtractionData(title: title, text: text))
+                let html = dict["html"] as? String
+                self?.resumeContinuation(with: ExtractionData(title: title, text: text, html: html))
             } else {
-                self?.resumeContinuation(with: ExtractionData(title: "Unknown", text: ""))
+                self?.resumeContinuation(with: ExtractionData(title: "Unknown", text: "", html: nil))
             }
         }
     }

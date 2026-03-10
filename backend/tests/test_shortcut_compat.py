@@ -12,9 +12,9 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")
 from auth import reset_request_user_id, set_request_user_id  # noqa: E402
 from database import Base  # noqa: E402
 from models import Folder, Item, User  # noqa: E402
-from routers.ingest import _resolve_extract_url, _store_shared_text_capture, execute_extract_request  # noqa: E402
+from routers.ingest import _resolve_extract_url, _store_shared_text_capture, execute_extract_request, ingest_page  # noqa: E402
 from routers.phone_webapp import build_phone_extract_item_finalizer  # noqa: E402
-from schemas import ExtractRequest, PhoneExtractRequest  # noqa: E402
+from schemas import ClientInfo, ExtractRequest, IngestRequest, PhoneExtractRequest  # noqa: E402
 from tenant import DEFAULT_USER_EMAIL, DEFAULT_USER_ID, DEFAULT_USER_NAME  # noqa: E402
 
 
@@ -121,6 +121,29 @@ class ShortcutCompatibilityTests(unittest.TestCase):
                 self.assertIsNotNone(item)
                 self.assertEqual(item.folder_id, folder_id)
                 self.assertEqual([link.folder_id for link in item.folder_links], [folder_id])
+        finally:
+            reset_request_user_id(request_token)
+
+    def test_ingest_page_persists_supplied_html_formatting(self) -> None:
+        background_tasks = _BackgroundTasksStub()
+        request = IngestRequest(
+            source_url="https://example.com/article",
+            final_url="https://example.com/article",
+            title="带排版的文章",
+            canonical_text="Start bold link",
+            canonical_html='<article><p>Start <strong>bold</strong> and <a href="https://example.com/ref">link</a>.</p><script>alert(1)</script></article>',
+            client=ClientInfo(platform="ios"),
+        )
+
+        request_token = set_request_user_id(DEFAULT_USER_ID)
+        try:
+            with self.Session() as db:
+                response = ingest_page(request, background_tasks, db)
+                item = db.query(Item).filter(Item.id == response.item_id).first()
+                self.assertIsNotNone(item)
+                self.assertIn("<strong>bold</strong>", item.canonical_html)
+                self.assertIn('href="https://example.com/ref"', item.canonical_html)
+                self.assertNotIn("<script>", item.canonical_html)
         finally:
             reset_request_user_id(request_token)
 

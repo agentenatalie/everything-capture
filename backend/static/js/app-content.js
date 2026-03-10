@@ -16,6 +16,59 @@
             return value.length > maxLength ? `${value.slice(0, maxLength)}…` : value;
         }
 
+        function hasInlineMarkdownSyntax(value) {
+            return /(\[[^\]\n]+\]\(https?:\/\/[^\s)]+\)|\*\*[^*\n]+\*\*|__[^_\n]+__|`[^`\n]+`|~~[^~\n]+~~)/.test(String(value || ''));
+        }
+
+        function renderInlineMarkdown(value) {
+            const source = String(value || '').trim();
+            if (!source) return '';
+
+            const replacements = [];
+            const createToken = (html) => {
+                const token = `@@EGMD${replacements.length}@@`;
+                replacements.push({ token, html });
+                return token;
+            };
+
+            let rendered = source
+                .replace(/`([^`\n]+)`/g, (_, code) => createToken(`<code class="inline-code">${escapeHtml(code)}</code>`))
+                .replace(/\[([^\]\n]+)\]\((https?:\/\/[^\s)]+)\)/g, (_, label, url) => {
+                    try {
+                        const parsed = new URL(url);
+                        if (!['http:', 'https:'].includes(parsed.protocol)) {
+                            return createToken(escapeHtml(label));
+                        }
+                    } catch (error) {
+                        return createToken(escapeHtml(label));
+                    }
+
+                    return createToken(
+                        `<a href="${escapeAttribute(url)}" target="_blank" rel="noreferrer noopener">${escapeHtml(label)}</a>`
+                    );
+                });
+
+            rendered = escapeHtml(rendered)
+                .replace(/\*\*([^*\n][^*]*?)\*\*/g, '<strong>$1</strong>')
+                .replace(/__([^_\n][^_]*?)__/g, '<strong>$1</strong>')
+                .replace(/~~([^~\n][^~]*?)~~/g, '<del>$1</del>')
+                .replace(/(^|[^*])\*([^*\n][^*]*?)\*(?=[^*]|$)/g, '$1<em>$2</em>')
+                .replace(/(^|[^_])_([^_\n][^_]*?)_(?=[^_]|$)/g, '$1<em>$2</em>');
+
+            replacements.forEach(({ token, html }) => {
+                rendered = rendered.replaceAll(token, html);
+            });
+
+            return rendered;
+        }
+
+        function blockUsesInlineFormatting(block) {
+            const markdown = String(block?.markdown || '').trim();
+            const content = String(block?.content || '').trim();
+            if (!markdown) return false;
+            return markdown !== content || hasInlineMarkdownSyntax(markdown);
+        }
+
         function extractFirstHttpUrl(value) {
             if (!value) return null;
             const match = String(value).match(/https?:\/\/[^\s<>"'`]+/i);
@@ -425,26 +478,27 @@
         function renderStructuredBlocks(blocks) {
             return blocks.map((block) => {
                 const content = String(block.markdown || block.content || '').trim();
+                const renderedContent = renderInlineMarkdown(content);
                 if ((block.type === 'text' || block.type === 'paragraph') && content) {
-                    return `<p class="content-para">${escapeHtml(content).replace(/\n/g, '<br>')}</p>`;
+                    return `<p class="content-para">${renderedContent.replace(/\n/g, '<br>')}</p>`;
                 }
                 if (block.type === 'heading_1' && content) {
-                    return `<h1 class="content-title">${escapeHtml(content)}</h1>`;
+                    return `<h1 class="content-title">${renderedContent}</h1>`;
                 }
                 if (block.type === 'heading_2' && content) {
-                    return `<h2 class="content-subtitle">${escapeHtml(content)}</h2>`;
+                    return `<h2 class="content-subtitle">${renderedContent}</h2>`;
                 }
                 if (block.type === 'heading_3' && content) {
-                    return `<h3 class="content-subtitle" style="font-size:1.05rem;">${escapeHtml(content)}</h3>`;
+                    return `<h3 class="content-subtitle" style="font-size:1.05rem;">${renderedContent}</h3>`;
                 }
                 if (block.type === 'bulleted_list_item' && content) {
-                    return `<p class="content-para">• ${escapeHtml(content)}</p>`;
+                    return `<p class="content-para">• ${renderedContent}</p>`;
                 }
                 if (block.type === 'numbered_list_item' && content) {
-                    return `<p class="content-para">1. ${escapeHtml(content)}</p>`;
+                    return `<p class="content-para">1. ${renderedContent}</p>`;
                 }
                 if (block.type === 'quote' && content) {
-                    return `<blockquote class="note-quote">${escapeHtml(content).replace(/\n/g, '<br>')}</blockquote>`;
+                    return `<blockquote class="note-quote">${renderedContent.replace(/\n/g, '<br>')}</blockquote>`;
                 }
                 if (block.type === 'code' && content) {
                     return `<pre class="preview-code"><code>${escapeHtml(content)}</code></pre>`;
@@ -469,10 +523,13 @@
             const summary = summarizeStructuredBlocks(blocks);
             const htmlImageUrls = extractImageUrlsFromHtml(item.canonical_html);
             const htmlHasRichFormatting = /<(h[1-6]|blockquote|ul|ol|pre|code|figure)\b/i.test(item.canonical_html);
+            const htmlHasInlineFormatting = /<(a|strong|em|b|i|mark|del|sup|sub)\b/i.test(item.canonical_html);
+            const blocksContainInlineFormatting = blocks.some((block) => blockUsesInlineFormatting(block));
 
-            if (summary.textOnly && (htmlImageUrls.length > 0 || htmlHasRichFormatting)) return true;
+            if (summary.textOnly && (htmlImageUrls.length > 0 || htmlHasRichFormatting || htmlHasInlineFormatting)) return true;
             if (!summary.hasMedia && htmlImageUrls.length > 0) return true;
-            if (!summary.hasRichStructure && htmlHasRichFormatting) return true;
+            if (!summary.hasRichStructure && (htmlHasRichFormatting || htmlHasInlineFormatting)) return true;
+            if (blocksContainInlineFormatting && (htmlHasRichFormatting || htmlHasInlineFormatting)) return true;
             if (hasSuspiciousRepeatedImages(htmlImageUrls, mediaImageUrls)) return false;
             return false;
         }

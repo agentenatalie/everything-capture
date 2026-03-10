@@ -24,3 +24,4 @@
 - When a live media bug reproduces on one concrete social-video URL but not on similar links, record that exact URL and pause the work if the user reprioritizes. Do not keep broadening the downloader after the user has switched focus.
 - When the user corrects relative-time copy, confirm both the threshold and the exact label direction before changing the UI text.
 - When tuning mobile modal spacing, scope the change to the mobile breakpoint and the specific state class instead of shifting the shared desktop footer layout.
+- When the user distinguishes capture from processing in a grabber architecture, do not describe the solution as “deploy web and mobile.” Keep the deployed surface strictly to the capture API, and keep scraping/downloading/AI/file-sync responsibilities local.

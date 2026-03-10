@@ -54,7 +54,7 @@ class APIClient {
         case unknown
     }
     
-    func ingest(url: String, title: String, canonicalText: String) async throws -> String {
+    func ingest(url: String, title: String, canonicalText: String, canonicalHTML: String? = nil) async throws -> String {
         guard let ingestURL = URL(string: "\(baseURL)/ingest") else {
             throw APIError.invalidURL
         }
@@ -68,7 +68,7 @@ class APIClient {
             "final_url": url,
             "title": title,
             "canonical_text": canonicalText,
-            "canonical_html": "", // Skipping HTML
+            "canonical_html": canonicalHTML ?? "",
             "client": [
                 "platform": "ios"
             ]

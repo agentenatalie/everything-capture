@@ -10,7 +10,7 @@ from auth import extract_session_token, is_shortcut_bearer_token
 from database import get_db, SessionLocal
 from models import Item, Media, Settings
 from schemas import IngestRequest, IngestResponse, ExtractRequest, ExtractResponse
-from services.extractor import extract_content
+from services.extractor import _SAFE_ATTRS, _SAFE_TAGS, extract_content
 from services.downloader import download_media_list, probe_video_duration_seconds
 from tenant import get_current_user_id
 from bs4 import BeautifulSoup
@@ -315,6 +315,63 @@ def _store_shared_text_capture_record(
     return response, new_item
 
 
+def _build_paragraph_html(text: str | None) -> str | None:
+    paragraphs = [segment.strip() for segment in re.split(r"\n{2,}", text or "") if segment.strip()]
+    if not paragraphs:
+        return None
+    return "".join(f"<p>{html.escape(paragraph)}</p>" for paragraph in paragraphs)
+
+
+def _sanitize_client_html(content_html: str | None) -> str | None:
+    value = (content_html or "").strip()
+    if not value:
+        return None
+
+    soup = BeautifulSoup(value, "html.parser")
+    for tag in soup.find_all(["script", "style", "nav", "footer", "header", "noscript", "form", "button", "input", "textarea"]):
+        tag.decompose()
+
+    for tag in soup.find_all(True):
+        tag_name = tag.name.lower()
+        if tag_name not in _SAFE_TAGS:
+            tag.unwrap()
+            continue
+
+        allowed = _SAFE_ATTRS.get(tag_name, set())
+        attrs_to_remove = [attr for attr in list(tag.attrs) if attr not in allowed]
+        for attr in attrs_to_remove:
+            del tag[attr]
+
+        if tag_name == "a":
+            href = _normalize_http_url(tag.get("href"))
+            if href:
+                tag["href"] = href
+            elif "href" in tag.attrs:
+                del tag["href"]
+
+        if tag_name in {"img", "video", "source", "iframe"}:
+            for attr_name in ("src", "data-src", "data-original", "poster"):
+                if attr_name in tag.attrs:
+                    normalized = _normalize_http_url(tag.get(attr_name)) or tag.get(attr_name, "").strip()
+                    if normalized:
+                        tag[attr_name] = normalized
+                    else:
+                        del tag[attr_name]
+
+        if tag_name == "iframe":
+            src = _normalize_http_url(tag.get("src"))
+            if not src:
+                tag.decompose()
+                continue
+            tag["src"] = src
+            tag["loading"] = "lazy"
+            tag["referrerpolicy"] = "strict-origin-when-cross-origin"
+            tag["allowfullscreen"] = "allowfullscreen"
+
+    sanitized = str(soup).strip()
+    return sanitized if sanitized else None
+
+
 def _store_shared_text_capture(
     request: ExtractRequest,
     db: Session,
@@ -428,6 +485,7 @@ async def execute_extract_request(
 def ingest_page(request: IngestRequest, background_tasks: BackgroundTasks, db: Session = Depends(get_db)):
     user_id = get_current_user_id()
     try:
+        canonical_html = _sanitize_client_html(request.canonical_html) or _build_paragraph_html(request.canonical_text)
         new_item = Item(
             user_id=user_id,
             source_url=request.source_url,
@@ -435,6 +493,7 @@ def ingest_page(request: IngestRequest, background_tasks: BackgroundTasks, db: S
             title=request.title,
             canonical_text=request.canonical_text,
             canonical_text_length=len(request.canonical_text),
+            canonical_html=canonical_html,
             platform=request.client.platform,
             status="ready",
         )

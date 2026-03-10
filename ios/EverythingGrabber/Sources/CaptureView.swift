@@ -111,7 +111,12 @@ struct CaptureView: View {
                 
                 switch qualityResult {
                 case .passed(let cleanedText):
-                    let _ = try await APIClient.shared.ingest(url: url.absoluteString, title: result.title, canonicalText: cleanedText)
+                    let _ = try await APIClient.shared.ingest(
+                        url: url.absoluteString,
+                        title: result.title,
+                        canonicalText: cleanedText,
+                        canonicalHTML: result.html
+                    )
                     DispatchQueue.main.async {
                         self.isExtracting = false
                         self.extractionResult = "收录成功 (本地提取, 内容长度: \(cleanedText.count))"

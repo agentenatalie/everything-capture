@@ -43,6 +43,16 @@ body.sidebar-collapsed main {
 
 .backend-connection-status {
     margin: 0 auto 10px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: fit-content;
+    max-width: 100%;
+    padding: 7px 14px;
+    border-radius: 999px;
+    border: 1px solid rgba(203, 213, 225, 0.95);
+    background: rgba(248, 250, 252, 0.92);
+    box-shadow: 0 10px 26px -24px rgba(15, 23, 42, 0.45);
     font-weight: 700;
     font-size: 0.8rem;
     line-height: 1.2;
@@ -52,10 +62,14 @@ body.sidebar-collapsed main {
 
 .backend-connection-status.is-online {
     color: #166534;
+    background: rgba(220, 252, 231, 0.88);
+    border-color: rgba(134, 239, 172, 0.95);
 }
 
 .backend-connection-status.is-offline {
     color: #9a6700;
+    background: rgba(254, 243, 199, 0.9);
+    border-color: rgba(253, 224, 71, 0.92);
 }
 
 .mobile-queue-summary:focus-visible {

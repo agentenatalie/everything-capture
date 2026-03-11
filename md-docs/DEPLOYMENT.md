@@ -241,6 +241,7 @@ https://capture.example.com/
 - 自动尝试读取剪贴板并填入输入框
 - 选择云端文件夹
 - 新建云端文件夹
+- 点击“等待列表”查看当前等待中/处理中条目和累计上传数量
 - 收录后轮询状态：
   - `已收录到待处理队列`
   - `处理中`
@@ -387,6 +388,13 @@ cd everything-grabber/backend
 - 演示页面
 - 联调接口
 - 测试 UI
+
+如果你要让隔夜未处理的队列继续存在，必须给 capture service 配置持久数据库：
+
+- `CAPTURE_SERVICE_DATABASE_URL`
+- 或 `DATABASE_URL`
+
+不要把生产队列只放在 `/tmp/capture.db`。
 
 不适合正式长期运行，因为默认 SQLite 不是持久化存储。
 

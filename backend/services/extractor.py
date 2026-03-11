@@ -203,6 +203,12 @@ def _normalize_douyin_video_url(src: str) -> str:
     return normalized
 
 
+def _extract_douyin_aweme_id(url: str) -> str:
+    path = urlparse(url).path or ""
+    match = re.search(r"/(?:share/(?:video|slides)|note)/(\d+)", path)
+    return match.group(1) if match else ""
+
+
 def _build_douyin_page_media_reference(page_url: str) -> list[dict] | None:
     normalized = _normalize_media_url(page_url)
     if not normalized:
@@ -781,6 +787,49 @@ async def extract_xiaohongshu(url: str) -> ExtractResult | None:
     return None
 
 
+def _extract_xhs_video_url(note: dict) -> str:
+    video = note.get("video")
+    if not isinstance(video, dict):
+        return ""
+
+    media = video.get("media")
+    stream = media.get("stream") if isinstance(media, dict) else None
+    if not isinstance(stream, dict):
+        stream = video.get("stream")
+    if not isinstance(stream, dict):
+        return ""
+
+    best_url = ""
+    best_score = -1
+    for codec_name in ("h264", "h265", "av1", "h266"):
+        variants = stream.get(codec_name) or []
+        if not isinstance(variants, list):
+            continue
+        for variant in variants:
+            if not isinstance(variant, dict):
+                continue
+            candidate = _normalize_media_url(str(variant.get("masterUrl") or variant.get("master_url") or ""))
+            if not candidate:
+                backup_urls = variant.get("backupUrls") or variant.get("backup_urls") or []
+                if isinstance(backup_urls, list):
+                    for backup in backup_urls:
+                        candidate = _normalize_media_url(str(backup or ""))
+                        if candidate:
+                            break
+            if not candidate:
+                continue
+            score = 0
+            for key in ("avgBitrate", "videoBitrate", "size", "weight"):
+                try:
+                    score += int(variant.get(key) or 0)
+                except (TypeError, ValueError):
+                    continue
+            if score >= best_score:
+                best_url = candidate
+                best_score = score
+    return best_url
+
+
 def _parse_xhs_initial_state(html: str) -> dict | None:
     """解析小红书 SSR JSON: window.__INITIAL_STATE__ = {...}"""
     for marker in ("window.__INITIAL_STATE__", "window.__INITIAL_SSR_STATE__"):
@@ -851,10 +900,14 @@ def _extract_xhs_note(note: dict) -> dict | None:
     if len(full) <= 20:
         return None
 
-    # 提取图片 URL
     media_urls = []
+    video_url = _extract_xhs_video_url(note)
+    if video_url:
+        media_urls.append({"type": "video", "url": video_url, "order": 0})
+
+    image_urls: list[str] = []
     image_list = note.get("imageList", []) or note.get("image_list", [])
-    for i, img in enumerate(image_list):
+    for img in image_list:
         if not isinstance(img, dict):
             continue
         # 优先用 urlDefault > url > infoList 中最大尺寸
@@ -869,6 +922,12 @@ def _extract_xhs_note(note: dict) -> dict | None:
             # 补全协议
             if img_url.startswith("//"):
                 img_url = "https:" + img_url
+            image_urls.append(img_url)
+
+    if video_url and len(image_urls) == 1:
+        media_urls.append({"type": "cover", "url": image_urls[0], "order": 0})
+    else:
+        for i, img_url in enumerate(image_urls):
             media_urls.append({"type": "image", "url": img_url, "order": i})
 
     return {"title": title or "Unknown", "text": full, "media_urls": media_urls or None}
@@ -949,6 +1008,19 @@ async def extract_douyin(url: str) -> ExtractResult | None:
             media_urls=media_urls,
         )
 
+    slides_result = await _extract_douyin_slides_info(
+        final_url,
+        fallback_title=title,
+    )
+    if slides_result:
+        return ExtractResult(
+            title=slides_result["title"],
+            text=slides_result["text"],
+            platform="douyin",
+            final_url=final_url,
+            media_urls=slides_result.get("media_urls"),
+        )
+
     # 策略 2: <meta name="description"> (抖音经常在这里放完整描述)
     desc = _html_meta(soup, "description") or ""
     if not desc:
@@ -1016,6 +1088,112 @@ async def extract_douyin(url: str) -> ExtractResult | None:
         )
 
     return None
+
+
+async def _extract_douyin_slides_info(url: str, fallback_title: str = "") -> dict | None:
+    aweme_id = _extract_douyin_aweme_id(url)
+    if not aweme_id:
+        return None
+
+    path = urlparse(url).path or ""
+    if "/share/slides/" not in path and "/note/" not in path:
+        return None
+
+    query = parse_qs(urlparse(url).query or "")
+    params = {
+        "aweme_ids": f"[{aweme_id}]",
+        "request_source": 200,
+    }
+    aweme_type = (query.get("aweme_type") or [""])[0]
+    if aweme_type:
+        params["aweme_type"] = aweme_type
+
+    async with _build_client(ua=_MOBILE_UA) as client:
+        client.headers["Referer"] = url
+        try:
+            resp = await client.get("https://www.douyin.com/web/api/v2/aweme/slidesinfo/", params=params)
+            resp.raise_for_status()
+            payload = resp.json()
+        except Exception as exc:
+            logger.debug("抖音 slidesinfo API 解析失败: %s", exc)
+            return None
+
+    return _parse_douyin_slides_response(payload, fallback_title=fallback_title)
+
+
+def _parse_douyin_slides_response(payload: dict, fallback_title: str = "") -> dict | None:
+    aweme_details = payload.get("aweme_details") or ((payload.get("data") or {}).get("aweme_details")) or []
+    if not isinstance(aweme_details, list) or not aweme_details:
+        return None
+
+    item = aweme_details[0]
+    if not isinstance(item, dict):
+        return None
+
+    images = item.get("images") or item.get("image_infos") or []
+    media_urls = []
+    if isinstance(images, list):
+        for index, image in enumerate(images):
+            if not isinstance(image, dict):
+                continue
+            candidate_lists = [
+                image.get("url_list"),
+                image.get("download_url_list"),
+            ]
+            image_url = ""
+            for url_list in candidate_lists:
+                if not isinstance(url_list, list):
+                    continue
+                for candidate in url_list:
+                    image_url = _normalize_media_url(str(candidate or ""))
+                    if image_url:
+                        break
+                if image_url:
+                    break
+            if image_url:
+                media_urls.append({"type": "image", "url": image_url, "order": index})
+
+    desc = str(item.get("desc") or "").strip()
+    preview_title = str(item.get("preview_title") or "").strip()
+    normalized_fallback_title = str(fallback_title or "").strip()
+    if normalized_fallback_title in {"抖音", "Douyin"}:
+        normalized_fallback_title = ""
+    title = preview_title or normalized_fallback_title or desc.split("\n")[0][:60]
+
+    author = item.get("author") or {}
+    nickname = str(author.get("nickname") or "").strip()
+    signature = str(author.get("signature") or "").strip()
+    hashtags = [
+        f"#{extra.get('hashtag_name', '')}"
+        for extra in (item.get("text_extra") or [])
+        if isinstance(extra, dict) and extra.get("hashtag_name")
+    ]
+
+    parts = []
+    if title:
+        parts.append(title)
+    if nickname:
+        parts.append(f"作者：{nickname}")
+    if desc:
+        if parts:
+            parts.append("")
+        parts.append(desc)
+    if signature:
+        parts.append(f"\n作者简介：{signature}")
+    if hashtags:
+        parts.append("\n" + " ".join(hashtags))
+
+    text = _clean_text("\n".join(parts))
+    if not text and media_urls:
+        text = title or desc or "Douyin image note"
+    if not text and not media_urls:
+        return None
+
+    return {
+        "title": title or "Unknown",
+        "text": text,
+        "media_urls": media_urls or None,
+    }
 
 
 def _parse_douyin_router_data(html: str, fallback_title: str = "") -> dict | None:

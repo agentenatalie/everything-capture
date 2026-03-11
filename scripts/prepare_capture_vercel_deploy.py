@@ -17,6 +17,7 @@ sqlalchemy==2.0.47
 pydantic==2.12.5
 uvicorn==0.41.0
 httpx==0.28.1
+psycopg[binary]==3.2.12
 """
 
 VERCEL_JSON = """{
@@ -38,7 +39,8 @@ VERCEL_JSON = """{
 
 API_INDEX = """import os
 
-os.environ.setdefault("CAPTURE_SERVICE_DB_PATH", "/tmp/capture.db")
+if not ((os.environ.get("CAPTURE_SERVICE_DATABASE_URL") or "").strip() or (os.environ.get("DATABASE_URL") or "").strip()):
+    os.environ.setdefault("CAPTURE_SERVICE_DB_PATH", "/tmp/capture.db")
 
 from capture_service.api import app
 """
@@ -49,8 +51,8 @@ This folder is generated from `/capture_service`.
 
 Notes:
 - It deploys only the capture layer.
-- It defaults `CAPTURE_SERVICE_DB_PATH` to `/tmp/capture.db` on Vercel so preview deploys can boot.
-- `/tmp` is not durable storage. For real usage, set `CAPTURE_SERVICE_DB_PATH` to a durable path on a stateful host or migrate the service to an external database before production.
+- If neither `CAPTURE_SERVICE_DATABASE_URL` nor `DATABASE_URL` is set, it defaults `CAPTURE_SERVICE_DB_PATH` to `/tmp/capture.db` on Vercel so preview deploys can boot.
+- `/tmp` is not durable storage. For real usage, set `CAPTURE_SERVICE_DATABASE_URL` or `DATABASE_URL` to a durable database before production.
 """
 
 

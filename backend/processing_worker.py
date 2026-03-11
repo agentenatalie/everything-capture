@@ -18,6 +18,7 @@ from services.capture_queue import (
     complete_capture_item,
     fail_capture_item,
     list_capture_items,
+    report_capture_worker_heartbeat,
 )
 from tenant import DEFAULT_USER_ID, DEFAULT_WORKSPACE_ID
 
@@ -149,6 +150,19 @@ def process_once(limit: int, worker_id: str) -> int:
     return processed_count
 
 
+def send_worker_heartbeat(worker_id: str, hostname: str, *, state: str, processed_count: int = 0, last_error: str | None = None) -> None:
+    try:
+        report_capture_worker_heartbeat(
+            worker_id,
+            hostname=hostname,
+            state=state,
+            processed_count=processed_count,
+            last_error=last_error,
+        )
+    except Exception:
+        logger.debug("Failed to report processing worker heartbeat", exc_info=True)
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Process pending capture-service items locally.")
     parser.add_argument("--once", action="store_true", help="Process one batch and exit.")
@@ -160,13 +174,16 @@ def main() -> int:
         logger.error("CAPTURE_SERVICE_URL is not configured")
         return 1
 
-    worker_id = f"{socket.gethostname()}-{int(time.time())}"
+    hostname = socket.gethostname()
+    worker_id = f"{hostname}-{int(time.time())}"
     logger.info("Starting processing worker %s", worker_id)
 
     if args.once:
         try:
             processed = process_once(args.limit, worker_id)
+            send_worker_heartbeat(worker_id, hostname, state="connected", processed_count=processed)
         except Exception:
+            send_worker_heartbeat(worker_id, hostname, state="connected", last_error="processing worker batch failed")
             logger.exception("Processing worker batch failed")
             return 1
         logger.info("Processed %d capture items", processed)
@@ -175,9 +192,11 @@ def main() -> int:
     while True:
         try:
             processed = process_once(args.limit, worker_id)
+            send_worker_heartbeat(worker_id, hostname, state="connected", processed_count=processed)
             if processed:
                 logger.info("Processed %d capture items", processed)
         except Exception:
+            send_worker_heartbeat(worker_id, hostname, state="connected", last_error="processing worker loop failed")
             logger.exception("Processing worker loop failed; retrying after backoff")
         time.sleep(max(args.interval, 1.0))
 

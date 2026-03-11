@@ -110,6 +110,36 @@ def claim_capture_item(item_id: str, worker_id: str, timeout: float = 15.0) -> d
         return response.json()
 
 
+def report_capture_worker_heartbeat(
+    worker_id: str,
+    *,
+    hostname: str | None = None,
+    state: str = "connected",
+    processed_count: int = 0,
+    last_error: str | None = None,
+    timeout: float = 15.0,
+) -> dict[str, Any]:
+    base_url = get_capture_service_base_url()
+    if not base_url:
+        raise RuntimeError("CAPTURE_SERVICE_URL is not configured")
+
+    payload = {
+        "worker_id": worker_id,
+        "hostname": hostname,
+        "state": state,
+        "processed_count": max(int(processed_count or 0), 0),
+        "last_error": last_error,
+    }
+    with httpx.Client(timeout=timeout) as client:
+        response = client.post(
+            f"{base_url}/api/worker-heartbeat",
+            headers=_capture_service_headers(),
+            json=payload,
+        )
+        response.raise_for_status()
+        return response.json()
+
+
 def complete_capture_item(
     item_id: str,
     lease_token: str,

@@ -61,6 +61,24 @@ class CaptureCreateResponse(BaseModel):
 class CaptureListResponse(BaseModel):
     items: list[CaptureItemResponse] = Field(default_factory=list)
     total_count: int = 0
+    status_counts: dict[str, int] = Field(default_factory=dict)
+
+
+class CaptureWorkerHeartbeatRequest(BaseModel):
+    worker_id: str
+    hostname: str | None = None
+    state: str = "connected"
+    processed_count: int = 0
+    last_error: str | None = None
+
+
+class CaptureWorkerStatusResponse(BaseModel):
+    connected: bool = False
+    status_label: str = "后端未连接"
+    connected_worker_count: int = 0
+    last_seen_at: datetime | None = None
+    last_success_at: datetime | None = None
+    last_error: str | None = None
 
 
 class CaptureClaimRequest(BaseModel):

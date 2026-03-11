@@ -24,8 +24,11 @@ It does not do scraping, media downloading, AI analysis, or local file sync.
 
 ## Environment
 
-- `CAPTURE_SERVICE_DB_PATH` optional SQLite path
+- `CAPTURE_SERVICE_DATABASE_URL` optional durable database URL, recommended for deployed environments
+- `DATABASE_URL` optional fallback database URL if you prefer using a platform-provided variable
+- `CAPTURE_SERVICE_DB_PATH` optional SQLite path for local or stateful hosts
 - `CAPTURE_SERVICE_TOKEN` optional bearer token for all queue endpoints
+- `CAPTURE_SERVICE_LEASE_TIMEOUT_SECONDS` optional stale-lease timeout before abandoned `processing` items go back to `pending`
 
 ## Run
 
@@ -42,6 +45,7 @@ Open `/` on your phone to use the deployed capture webapp. It supports:
 - submit to `pending`
 - choose cloud folders
 - create new cloud folders
+- open a waiting list to see queued items and counts
 
 ## Shortcut Response
 
@@ -84,3 +88,7 @@ Then run the local processing worker:
 cd /Users/hbz/everything-grabber/backend
 ../backend/venv/bin/python processing_worker.py --once
 ```
+
+## Persistence Note
+
+If you deploy to a serverless environment such as Vercel and only use `/tmp/capture.db`, queued items will disappear after instance recycling. Use `CAPTURE_SERVICE_DATABASE_URL` or `DATABASE_URL` for real queue persistence.

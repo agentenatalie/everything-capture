@@ -3,6 +3,7 @@ import os
 import sys
 import tempfile
 import unittest
+from datetime import datetime, timedelta
 
 from fastapi.testclient import TestClient
 
@@ -20,6 +21,7 @@ class CaptureServiceApiTests(unittest.TestCase):
         ]:
             sys.modules.pop(module_name, None)
 
+        self.database = importlib.import_module("capture_service.database")
         self.api = importlib.import_module("capture_service.api")
         self.client = TestClient(self.api.app)
 
@@ -107,6 +109,66 @@ class CaptureServiceApiTests(unittest.TestCase):
         self.assertEqual(fail_response.status_code, 200)
         self.assertEqual(fail_response.json()["status"], "failed")
         self.assertEqual(fail_response.json()["error_reason"], "download failed")
+
+    def test_waiting_list_requeues_stale_processing_items_and_returns_counts(self) -> None:
+        create_response = self.client.post(
+            "/api/capture",
+            json={
+                "text": "waiting capture",
+                "source": "phone-webapp",
+                "source_app": "capture-webapp",
+                "folder_names": ["Inbox"],
+            },
+        )
+        item_id = create_response.json()["item_id"]
+
+        claim_response = self.client.post(
+            f"/api/items/{item_id}/claim",
+            json={"worker_id": "worker-stale"},
+        )
+        self.assertEqual(claim_response.status_code, 200)
+        self.assertEqual(claim_response.json()["item"]["status"], "processing")
+
+        with self.database.SessionLocal() as db:
+            item = db.query(self.api.CaptureItem).filter(self.api.CaptureItem.id == item_id).first()
+            item.leased_at = datetime.utcnow() - timedelta(days=1)
+            db.add(item)
+            db.commit()
+
+        waiting_response = self.client.get("/api/items", params={"status": "waiting", "limit": 20})
+        self.assertEqual(waiting_response.status_code, 200)
+        payload = waiting_response.json()
+        self.assertEqual(payload["total_count"], 1)
+        self.assertEqual(payload["status_counts"]["pending"], 1)
+        self.assertEqual(payload["status_counts"]["processing"], 0)
+        self.assertEqual(payload["items"][0]["status"], "pending")
+
+        item_response = self.client.get(f"/api/items/{item_id}")
+        self.assertEqual(item_response.status_code, 200)
+        self.assertEqual(item_response.json()["status"], "pending")
+
+    def test_worker_status_reflects_recent_heartbeat(self) -> None:
+        initial_status = self.client.get("/api/worker-status")
+        self.assertEqual(initial_status.status_code, 200)
+        self.assertFalse(initial_status.json()["connected"])
+
+        heartbeat_response = self.client.post(
+            "/api/worker-heartbeat",
+            json={
+                "worker_id": "worker-online",
+                "hostname": "macbook",
+                "state": "connected",
+                "processed_count": 2,
+            },
+        )
+        self.assertEqual(heartbeat_response.status_code, 200)
+        self.assertTrue(heartbeat_response.json()["connected"])
+        self.assertEqual(heartbeat_response.json()["status_label"], "后端已连接")
+
+        status_response = self.client.get("/api/worker-status")
+        self.assertEqual(status_response.status_code, 200)
+        self.assertTrue(status_response.json()["connected"])
+        self.assertEqual(status_response.json()["connected_worker_count"], 1)
 
     def test_folder_api_lists_and_creates_folders(self) -> None:
         initial = self.client.get("/api/folders")

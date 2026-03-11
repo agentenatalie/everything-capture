@@ -1,7 +1,7 @@
 import datetime as dt
 import uuid
 
-from sqlalchemy import Column, DateTime, String, Text
+from sqlalchemy import Column, DateTime, Integer, String, Text
 
 from capture_service.database import Base
 
@@ -38,5 +38,20 @@ class CaptureFolder(Base):
 
     id = Column(String, primary_key=True, default=generate_uuid)
     name = Column(String, nullable=False, unique=True, index=True)
+    created_at = Column(DateTime, nullable=False, default=dt.datetime.utcnow, index=True)
+    updated_at = Column(DateTime, nullable=False, default=dt.datetime.utcnow, onupdate=dt.datetime.utcnow)
+
+
+class CaptureWorkerHeartbeat(Base):
+    __tablename__ = "capture_worker_heartbeats"
+
+    worker_id = Column(String, primary_key=True)
+    hostname = Column(String, nullable=True)
+    state = Column(String, nullable=False, default="offline", index=True)
+    last_seen_at = Column(DateTime, nullable=False, default=dt.datetime.utcnow, index=True)
+    last_success_at = Column(DateTime, nullable=True, index=True)
+    last_error_at = Column(DateTime, nullable=True)
+    last_error = Column(Text, nullable=True)
+    processed_count = Column(Integer, nullable=False, default=0)
     created_at = Column(DateTime, nullable=False, default=dt.datetime.utcnow, index=True)
     updated_at = Column(DateTime, nullable=False, default=dt.datetime.utcnow, onupdate=dt.datetime.utcnow)

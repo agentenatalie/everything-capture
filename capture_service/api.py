@@ -1,16 +1,17 @@
 import json
 import os
 import secrets
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Query, status
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
-from capture_service.database import Base, engine, get_db
-from capture_service.models import CaptureFolder, CaptureItem
+from capture_service.database import Base, engine, get_db, get_storage_info
+from capture_service.models import CaptureFolder, CaptureItem, CaptureWorkerHeartbeat
 from capture_service.schemas import (
     CaptureClaimRequest,
     CaptureClaimResponse,
@@ -23,6 +24,8 @@ from capture_service.schemas import (
     CaptureFolderResponse,
     CaptureItemResponse,
     CaptureListResponse,
+    CaptureWorkerHeartbeatRequest,
+    CaptureWorkerStatusResponse,
 )
 
 
@@ -88,6 +91,90 @@ def _serialize_folder(folder: CaptureFolder) -> CaptureFolderResponse:
     )
 
 
+def _get_lease_timeout_seconds() -> int:
+    raw_value = (os.environ.get("CAPTURE_SERVICE_LEASE_TIMEOUT_SECONDS") or "").strip()
+    try:
+        lease_timeout = int(raw_value) if raw_value else 6 * 60 * 60
+    except ValueError:
+        lease_timeout = 6 * 60 * 60
+    return max(lease_timeout, 60)
+
+
+def _release_stale_processing_items(db: Session) -> int:
+    cutoff = datetime.utcnow() - timedelta(seconds=_get_lease_timeout_seconds())
+    stale_items = (
+        db.query(CaptureItem)
+        .filter(CaptureItem.status == "processing")
+        .filter(CaptureItem.leased_at.isnot(None))
+        .filter(CaptureItem.leased_at < cutoff)
+        .all()
+    )
+    if not stale_items:
+        return 0
+
+    for item in stale_items:
+        item.status = "pending"
+        item.lease_token = None
+        item.leased_at = None
+        item.error_reason = None
+        db.add(item)
+
+    db.commit()
+    return len(stale_items)
+
+
+def _build_status_counts(db: Session) -> dict[str, int]:
+    rows = db.query(CaptureItem.status, func.count(CaptureItem.id)).group_by(CaptureItem.status).all()
+    status_counts = {status: count for status, count in rows}
+    for status_name in ("pending", "processing", "processed", "failed"):
+        status_counts.setdefault(status_name, 0)
+    return status_counts
+
+
+def _get_worker_timeout_seconds() -> int:
+    raw_value = (os.environ.get("CAPTURE_SERVICE_WORKER_TIMEOUT_SECONDS") or "").strip()
+    try:
+        worker_timeout = int(raw_value) if raw_value else 45
+    except ValueError:
+        worker_timeout = 45
+    return max(worker_timeout, 10)
+
+
+def _build_worker_status(db: Session) -> CaptureWorkerStatusResponse:
+    cutoff = datetime.utcnow() - timedelta(seconds=_get_worker_timeout_seconds())
+    connected_workers = (
+        db.query(CaptureWorkerHeartbeat)
+        .filter(CaptureWorkerHeartbeat.last_seen_at >= cutoff)
+        .order_by(CaptureWorkerHeartbeat.last_seen_at.desc())
+        .all()
+    )
+    latest_worker = (
+        db.query(CaptureWorkerHeartbeat)
+        .order_by(CaptureWorkerHeartbeat.updated_at.desc())
+        .first()
+    )
+
+    if connected_workers:
+        freshest = connected_workers[0]
+        return CaptureWorkerStatusResponse(
+            connected=True,
+            status_label="后端已连接",
+            connected_worker_count=len(connected_workers),
+            last_seen_at=freshest.last_seen_at,
+            last_success_at=freshest.last_success_at,
+            last_error=freshest.last_error,
+        )
+
+    return CaptureWorkerStatusResponse(
+        connected=False,
+        status_label="后端未连接",
+        connected_worker_count=0,
+        last_seen_at=latest_worker.last_seen_at if latest_worker else None,
+        last_success_at=latest_worker.last_success_at if latest_worker else None,
+        last_error=latest_worker.last_error if latest_worker else None,
+    )
+
+
 def _ensure_seed_folders() -> None:
     if not FOLDER_SEED_PATH.exists():
         return
@@ -144,8 +231,45 @@ def app_config():
         "service": "everything-grabber-capture-service",
         "capture_endpoint": "/api/capture",
         "folders_endpoint": "/api/folders",
+        "items_endpoint": "/api/items",
+        "worker_status_endpoint": "/api/worker-status",
         "supports_folder_creation": True,
+        "storage": get_storage_info(),
     }
+
+
+@app.get("/api/worker-status", response_model=CaptureWorkerStatusResponse)
+def worker_status(db: Session = Depends(get_db)):
+    return _build_worker_status(db)
+
+
+@app.post("/api/worker-heartbeat", response_model=CaptureWorkerStatusResponse, dependencies=[Depends(_require_service_token)])
+def worker_heartbeat(request: CaptureWorkerHeartbeatRequest, db: Session = Depends(get_db)):
+    worker_id = (request.worker_id or "").strip()
+    if not worker_id:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="worker_id is required")
+
+    worker = db.query(CaptureWorkerHeartbeat).filter(CaptureWorkerHeartbeat.worker_id == worker_id).first()
+    if not worker:
+        worker = CaptureWorkerHeartbeat(worker_id=worker_id, created_at=datetime.utcnow())
+
+    now = datetime.utcnow()
+    worker.hostname = (request.hostname or "").strip() or None
+    worker.state = (request.state or "connected").strip() or "connected"
+    worker.last_seen_at = now
+    worker.processed_count = max(int(request.processed_count or 0), 0)
+
+    last_error = (request.last_error or "").strip()
+    if worker.state == "connected":
+        worker.last_success_at = now
+        worker.last_error = None
+    elif last_error:
+        worker.last_error = last_error[:2000]
+        worker.last_error_at = now
+
+    db.add(worker)
+    db.commit()
+    return _build_worker_status(db)
 
 
 @app.get("/api/folders", response_model=CaptureFolderListResponse, dependencies=[Depends(_require_service_token)])
@@ -207,18 +331,26 @@ def list_items(
     limit: int = Query(default=50, ge=1, le=200),
     db: Session = Depends(get_db),
 ):
-    query = db.query(CaptureItem).order_by(CaptureItem.created_at.asc())
-    if status_filter != "all":
+    _release_stale_processing_items(db)
+
+    query = db.query(CaptureItem)
+    if status_filter == "waiting":
+        query = query.filter(CaptureItem.status.in_(("pending", "processing")))
+    elif status_filter != "all":
         query = query.filter(CaptureItem.status == status_filter)
-    items = query.limit(limit).all()
+
+    total_count = query.count()
+    items = query.order_by(CaptureItem.created_at.asc()).limit(limit).all()
     return CaptureListResponse(
         items=[_serialize_item(item) for item in items],
-        total_count=len(items),
+        total_count=total_count,
+        status_counts=_build_status_counts(db),
     )
 
 
 @app.get("/api/items/{item_id}", response_model=CaptureItemResponse, dependencies=[Depends(_require_service_token)])
 def get_item(item_id: str, db: Session = Depends(get_db)):
+    _release_stale_processing_items(db)
     item = db.query(CaptureItem).filter(CaptureItem.id == item_id).first()
     if not item:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Capture item not found")
@@ -227,6 +359,7 @@ def get_item(item_id: str, db: Session = Depends(get_db)):
 
 @app.post("/api/items/{item_id}/claim", response_model=CaptureClaimResponse, dependencies=[Depends(_require_service_token)])
 def claim_item(item_id: str, request: CaptureClaimRequest, db: Session = Depends(get_db)):
+    _release_stale_processing_items(db)
     item = db.query(CaptureItem).filter(CaptureItem.id == item_id).first()
     if not item:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Capture item not found")

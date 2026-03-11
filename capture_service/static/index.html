@@ -21,6 +21,7 @@
     <main>
         <section class="mobile-capture-shell" id="mobileCaptureShell" aria-label="手机端收录入口">
             <div class="mobile-capture-card">
+                <div id="backendConnectionStatus" class="backend-connection-status is-offline">后端：未连接</div>
                 <label class="mobile-capture-pill" for="mobileCaptureInput">
                     <input
                         id="mobileCaptureInput"
@@ -41,8 +42,8 @@
                     <button id="mobileFolderPickerBtn" class="mobile-capture-folder-btn" type="button">
                         选择文件夹
                     </button>
-                    <div id="mobileFolderSelection" class="mobile-capture-folder-selection">当前：不指定文件夹</div>
                 </div>
+                <a id="mobileQueueSummary" class="mobile-queue-summary" href="#">等待列表</a>
                 <div id="mobileCaptureResult" class="mobile-capture-result" hidden aria-live="polite"></div>
             </div>
         </section>
@@ -52,7 +53,7 @@
         <div class="modal folder-picker-modal" role="dialog" aria-modal="true" aria-label="文件夹面板">
             <div class="modal-header">
                 <div class="folder-picker-headline">
-                    <h2 class="modal-title folder-picker-title" id="folderPickerTitle">手机端存入文件夹</h2>
+                    <h2 class="modal-title folder-picker-title" id="folderPickerTitle">选择文件夹</h2>
                     <div class="folder-picker-hint" id="folderPickerHint">为手机端新收录内容选择默认文件夹，可以多选，也可以留空。</div>
                 </div>
                 <div class="modal-header-actions">
@@ -77,6 +78,43 @@
                     <button id="folderPickerClearBtn" class="modal-action-btn folder-picker-clear-btn" type="button">不指定文件夹</button>
                     <button id="folderPickerApplyBtn" class="modal-action-btn folder-picker-apply-btn" type="button">保存选择</button>
                 </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="modal-overlay" id="queueOverlay">
+        <div class="modal queue-modal" role="dialog" aria-modal="true" aria-label="等待列表">
+            <div class="modal-header">
+                <div class="folder-picker-headline">
+                    <h2 class="modal-title folder-picker-title">等待列表</h2>
+                    <div class="folder-picker-hint">查看已上传条目里，哪些还在等待本地处理器下载处理。</div>
+                </div>
+                <div class="modal-header-actions">
+                    <button id="queueRefreshBtn" class="queue-refresh-btn" type="button">刷新</button>
+                    <button class="close-btn" id="closeQueueOverlay" type="button" aria-label="关闭等待列表">×</button>
+                </div>
+            </div>
+            <div class="modal-body queue-body">
+                <div class="queue-metrics">
+                    <div class="queue-metric-card is-active" data-filter="pending">
+                        <span class="queue-metric-label">等待中</span>
+                        <strong class="queue-metric-value" id="queuePendingCount">0</strong>
+                    </div>
+                    <div class="queue-metric-card" data-filter="processing">
+                        <span class="queue-metric-label">处理中</span>
+                        <strong class="queue-metric-value" id="queueProcessingCount">0</strong>
+                    </div>
+                    <div class="queue-metric-card" data-filter="all">
+                        <span class="queue-metric-label">已上传总数</span>
+                        <strong class="queue-metric-value" id="queueTotalCount">0</strong>
+                    </div>
+                </div>
+                <div id="queueFilterStatus" class="queue-filter-status">当前查看：等待中</div>
+                <div id="queueListStatus" class="queue-list-status">正在加载等待列表…</div>
+                <div id="queueList" class="queue-list"></div>
+            </div>
+            <div class="modal-footer queue-footer">
+                <div class="queue-footer-note">列表展示当前仍在等待或处理中的条目。</div>
             </div>
         </div>
     </div>

@@ -19,6 +19,7 @@ from services.extractor import (  # noqa: E402
     _extract_article_blocks,
     _extract_article_html,
     _extract_page_media,
+    _parse_douyin_slides_response,
     _parse_xhs_initial_state,
     _parse_douyin_router_data,
     _parse_x_article_result,
@@ -117,6 +118,50 @@ class ExtractorMediaTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(
             result["media_urls"],
             [{"type": "image", "url": "https://sns-webpic-qc.xhscdn.com/example.jpg", "order": 0}],
+        )
+
+    def test_parse_xhs_initial_state_extracts_video_notes(self) -> None:
+        html = """
+        <html><body><script>
+        window.__INITIAL_STATE__ = {
+          "noteData": {
+            "data": {
+              "noteData": {
+                "title": "会动的产品展示页",
+                "desc": "用 AI 做 3D 风动效网页",
+                "imageList": [
+                  {
+                    "urlDefault": "//sns-webpic-qc.xhscdn.com/video-cover.jpg"
+                  }
+                ],
+                "video": {
+                  "media": {
+                    "stream": {
+                      "h264": [
+                        {
+                          "masterUrl": "http://sns-video-alos.xhscdn.com/example.mp4",
+                          "avgBitrate": 800000
+                        }
+                      ]
+                    }
+                  }
+                }
+              }
+            }
+          }
+        };
+        </script></body></html>
+        """
+
+        result = _parse_xhs_initial_state(html)
+
+        self.assertIsNotNone(result)
+        self.assertEqual(
+            result["media_urls"],
+            [
+                {"type": "video", "url": "http://sns-video-alos.xhscdn.com/example.mp4", "order": 0},
+                {"type": "cover", "url": "https://sns-webpic-qc.xhscdn.com/video-cover.jpg", "order": 0},
+            ],
         )
 
     def test_build_douyin_page_media_reference_returns_video_entry(self) -> None:
@@ -298,6 +343,78 @@ class ExtractorMediaTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result.platform, "douyin")
         self.assertEqual(result.media_urls[0]["type"], "video")
         self.assertEqual(result.media_urls[0]["url"], "https://www.iesdouyin.com/share/video/1234567890/")
+
+    def test_parse_douyin_slides_response_extracts_images(self) -> None:
+        result = _parse_douyin_slides_response(
+            {
+                "aweme_details": [
+                    {
+                        "aweme_id": "7615238530122883769",
+                        "preview_title": "Gemini互联网世界中绝对冷静地观察者",
+                        "desc": "Gemini互联网世界中绝对冷静地观察者",
+                        "author": {"nickname": "AI观察员"},
+                        "images": [
+                            {
+                                "url_list": ["https://p3-sign.douyinpic.com/example-1.webp"],
+                                "download_url_list": ["https://p3-sign.douyinpic.com/example-1-download.webp"],
+                            },
+                            {
+                                "url_list": ["https://p3-sign.douyinpic.com/example-2.webp"],
+                                "download_url_list": ["https://p3-sign.douyinpic.com/example-2-download.webp"],
+                            },
+                        ],
+                    }
+                ]
+            }
+        )
+
+        self.assertIsNotNone(result)
+        self.assertEqual(result["title"], "Gemini互联网世界中绝对冷静地观察者")
+        self.assertIn("作者：AI观察员", result["text"])
+        self.assertEqual(
+            result["media_urls"],
+            [
+                {"type": "image", "url": "https://p3-sign.douyinpic.com/example-1.webp", "order": 0},
+                {"type": "image", "url": "https://p3-sign.douyinpic.com/example-2.webp", "order": 1},
+            ],
+        )
+
+    async def test_extract_douyin_uses_slides_api_when_share_page_has_no_text(self) -> None:
+        class _FakeResponse:
+            def __init__(self) -> None:
+                self.text = "<html><head><title>抖音</title></head><body></body></html>"
+                self.url = "https://www.iesdouyin.com/share/slides/7615238530122883769/"
+
+            def raise_for_status(self) -> None:
+                return None
+
+        class _FakeClient:
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, exc_type, exc, tb):
+                return None
+
+            async def get(self, url):
+                return _FakeResponse()
+
+        with patch("services.extractor._build_client", return_value=_FakeClient()):
+            with patch(
+                "services.extractor._extract_douyin_slides_info",
+                return_value={
+                    "title": "图文笔记标题",
+                    "text": "图文笔记标题\n\n正文",
+                    "media_urls": [
+                        {"type": "image", "url": "https://p3-sign.douyinpic.com/example.webp", "order": 0}
+                    ],
+                },
+            ):
+                result = await extract_douyin("https://v.douyin.com/test123/")
+
+        self.assertIsNotNone(result)
+        self.assertEqual(result.platform, "douyin")
+        self.assertEqual(result.title, "图文笔记标题")
+        self.assertEqual(result.media_urls[0]["type"], "image")
 
     def test_page_media_detects_youtube_iframe(self) -> None:
         soup = BeautifulSoup(

@@ -48,3 +48,7 @@
 - [x] Trace why newly downloaded links still lose formatting while older links retain formatting
 - [x] Fix the iOS fallback ingest path so new captures preserve HTML formatting end to end
 - [x] Diagnose why phone webapp Xiaohongshu `xhslink` captures can store `Unknown` titles while desktop capture keeps the note title
+- [x] Complete Xiaohongshu video extraction and Douyin image-note extraction so both platforms support video and 图文 captures
+- [x] Add durable capture-service storage support so queued uploads survive cloud restarts and overnight worker downtime
+- [x] Requeue stale claimed capture items so the local worker can resume interrupted work instead of losing it in `processing`
+- [x] Add a waiting-list view on the capture site that shows queued item counts and the items still waiting/processing

@@ -10,13 +10,15 @@ from bs4 import BeautifulSoup
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
-from models import Item, Media  # noqa: E402
+from models import Folder, Item, ItemFolderLink, Media  # noqa: E402
 from routers.connect import (  # noqa: E402
     _build_notion_page_properties,
     _build_notion_children,
     _build_obsidian_note,
+    _collect_referenced_media,
     _format_item_datetime,
     _get_structured_blocks,
+    _sync_blocks,
 )
 from services.extractor import _extract_article_blocks, _extract_article_html  # noqa: E402
 
@@ -129,6 +131,34 @@ class HtmlFallbackFormattingTests(unittest.TestCase):
             ],
         )
 
+    def test_html_fallback_preserves_preformatted_code_from_span_wrapped_blocks(self) -> None:
+        item = Item(
+            id="item-code",
+            title="Code Sample",
+            source_url="https://example.com/repo",
+            final_url="https://example.com/repo",
+            platform="generic",
+            canonical_text="code sample",
+            canonical_html=(
+                "<article>"
+                "<h3>Example</h3>"
+                '<div><pre><span>import</span> <span>easyquotation</span>\n'
+                '<span>quotation</span>  <span>=</span> <span>easyquotation</span>.<span>use</span>(<span>"daykline"</span>)\n'
+                '<span>print</span>(<span>quotation</span>)</pre></div>'
+                "</article>"
+            ),
+            created_at=datetime.datetime(2026, 3, 6, 12, 0, 0),
+        )
+
+        blocks = _get_structured_blocks(item)
+
+        self.assertEqual(blocks[0]["type"], "heading_3")
+        self.assertEqual(blocks[1]["type"], "code")
+        self.assertEqual(
+            blocks[1]["content"],
+            'import easyquotation\nquotation  = easyquotation.use("daykline")\nprint(quotation)',
+        )
+
     def test_obsidian_note_keeps_inline_image_and_markdown(self) -> None:
         item = self.make_item()
 
@@ -146,8 +176,171 @@ class HtmlFallbackFormattingTests(unittest.TestCase):
         self.assertLess(note.index("Start **bold**"), note.index("![[EverythingCapture_Media/item-1234/first.png]]"))
         self.assertLess(note.index("![[EverythingCapture_Media/item-1234/first.png]]"), note.index("After image paragraph."))
 
+    def test_obsidian_note_keeps_list_items_compact(self) -> None:
+        item = Item(
+            id="item-list",
+            title="Roadmap",
+            source_url="https://example.com/roadmap",
+            final_url="https://example.com/roadmap",
+            platform="generic",
+            canonical_text="Roadmap",
+            canonical_html=(
+                "<article>"
+                "<h2>Roadmap</h2>"
+                "<ul>"
+                "<li>Claude Code Plugin support</li>"
+                "<li>Custom agent (subagent) support</li>"
+                "</ul>"
+                "</article>"
+            ),
+            created_at=datetime.datetime(2026, 3, 6, 12, 0, 0),
+        )
+
+        note = _build_obsidian_note(item, {})
+
+        self.assertIn("## Roadmap", note)
+        self.assertIn("- Claude Code Plugin support\n- Custom agent (subagent) support", note)
+        self.assertNotIn("- Claude Code Plugin support\n\n- Custom agent (subagent) support", note)
+
+    def test_obsidian_note_skips_douyin_cover_when_video_exists(self) -> None:
+        item = Item(
+            id="item-douyin",
+            title="Douyin Video",
+            source_url="https://www.douyin.com/video/123",
+            final_url="https://www.douyin.com/video/123",
+            platform="douyin",
+            canonical_text="Douyin video",
+            created_at=datetime.datetime(2026, 3, 6, 12, 0, 0),
+        )
+        item.content_blocks_json = json.dumps(
+            [
+                {"type": "paragraph", "content": "Video body"},
+                {"type": "cover", "url": "/static/media/douyin-cover.webp"},
+                {"type": "video", "url": "/static/media/douyin-video.mp4"},
+            ]
+        )
+        item.media = [
+            Media(
+                id="media-cover",
+                item_id=item.id,
+                type="cover",
+                original_url="https://cdn.example.com/douyin-cover.webp",
+                local_path="media/douyin-cover.webp",
+                display_order=0,
+            ),
+            Media(
+                id="media-video",
+                item_id=item.id,
+                type="video",
+                original_url="https://cdn.example.com/douyin-video.mp4",
+                local_path="media/douyin-video.mp4",
+                display_order=1,
+            ),
+        ]
+
+        note = _build_obsidian_note(
+            item,
+            {
+                "/static/media/douyin-cover.webp": "EverythingCapture_Media/item-douyin/douyin-cover.webp",
+                "/static/media/douyin-video.mp4": "EverythingCapture_Media/item-douyin/douyin-video.mp4",
+            },
+        )
+        referenced_media = _collect_referenced_media(item, _sync_blocks(item))
+
+        self.assertNotIn("douyin-cover.webp", note)
+        self.assertIn("douyin-video.mp4", note)
+        self.assertEqual([media.type for media in referenced_media], ["video"])
+
+    def test_notion_children_skip_douyin_cover_when_video_exists(self) -> None:
+        item = Item(
+            id="item-douyin-notion",
+            title="Douyin Video",
+            source_url="https://www.douyin.com/video/456",
+            final_url="https://www.douyin.com/video/456",
+            platform="douyin",
+            canonical_text="Douyin video",
+            created_at=datetime.datetime(2026, 3, 6, 12, 0, 0),
+        )
+        item.content_blocks_json = json.dumps(
+            [
+                {"type": "paragraph", "content": "Video body"},
+                {"type": "cover", "url": "https://cdn.example.com/douyin-cover.webp"},
+                {"type": "video", "url": "https://cdn.example.com/douyin-video.mp4"},
+            ]
+        )
+
+        children = asyncio.run(
+            _build_notion_children(
+                object(),
+                {"Authorization": "Bearer test", "Notion-Version": "2025-09-03"},
+                item,
+            )
+        )
+
+        self.assertEqual([child["type"] for child in children[:2]], ["paragraph", "bookmark"])
+        self.assertEqual(children[1]["bookmark"]["url"], "https://cdn.example.com/douyin-video.mp4")
+
+    def test_xiaohongshu_sync_omits_trailing_topic_tags(self) -> None:
+        item = Item(
+            id="item-xhs",
+            title="XHS Note",
+            source_url="https://www.xiaohongshu.com/explore/123",
+            final_url="https://www.xiaohongshu.com/explore/123",
+            platform="xiaohongshu",
+            canonical_text=(
+                "港股和 AI 的一些观察。\n"
+                "#港股[话题]# #ai[话题]# #minimax[话题]# #我的理财日记[话题]# #港股 #ai #minimax #我的理财日记"
+            ),
+            created_at=datetime.datetime(2026, 3, 6, 12, 0, 0),
+        )
+        item.content_blocks_json = json.dumps(
+            [
+                {
+                    "type": "paragraph",
+                    "content": (
+                        "港股和 AI 的一些观察。 "
+                        "#港股[话题]# #ai[话题]# #minimax[话题]# #我的理财日记[话题]# #港股 #ai #minimax #我的理财日记"
+                    ),
+                    "markdown": (
+                        "港股和 AI 的一些观察。 "
+                        "#港股[话题]# #ai[话题]# #minimax[话题]# #我的理财日记[话题]# #港股 #ai #minimax #我的理财日记"
+                    ),
+                }
+            ]
+        )
+
+        note = _build_obsidian_note(item, {})
+        children = asyncio.run(
+            _build_notion_children(
+                object(),
+                {"Authorization": "Bearer test", "Notion-Version": "2025-09-03"},
+                item,
+            )
+        )
+
+        self.assertIn("港股和 AI 的一些观察。", note)
+        self.assertNotIn("#港股[话题]#", note)
+        self.assertNotIn("#我的理财日记", note)
+        self.assertEqual(children[0]["paragraph"]["rich_text"][0]["text"]["content"], "港股和 AI 的一些观察。")
+
     def test_notion_page_properties_include_sync_fields(self) -> None:
         item = self.make_item()
+        folder_a = Folder(id="folder-a", name="Alpha")
+        folder_b = Folder(id="folder-b", name="Beta")
+        item.folder_links = [
+            ItemFolderLink(
+                item_id=item.id,
+                folder_id="folder-b",
+                folder=folder_b,
+                created_at=datetime.datetime(2026, 3, 6, 12, 2, 0),
+            ),
+            ItemFolderLink(
+                item_id=item.id,
+                folder_id="folder-a",
+                folder=folder_a,
+                created_at=datetime.datetime(2026, 3, 6, 12, 1, 0),
+            ),
+        ]
 
         properties = _build_notion_page_properties(
             item,
@@ -157,6 +350,7 @@ class HtmlFallbackFormattingTests(unittest.TestCase):
                     "date": "Date",
                     "source": "Source",
                     "platform": "Platform",
+                    "folder": "Folder",
                 },
             },
         )
@@ -165,6 +359,30 @@ class HtmlFallbackFormattingTests(unittest.TestCase):
         self.assertEqual(properties["Date"]["rich_text"][0]["text"]["content"], "03/06 07:00")
         self.assertEqual(properties["Source"]["url"], "https://example.com/article")
         self.assertEqual(properties["Platform"]["rich_text"][0]["text"]["content"], "generic")
+        self.assertEqual(properties["Folder"]["rich_text"][0]["text"]["content"], "Alpha, Beta")
+
+    def test_obsidian_note_frontmatter_includes_ordered_folder_property(self) -> None:
+        item = self.make_item()
+        folder_a = Folder(id="folder-a", name="Alpha")
+        folder_b = Folder(id="folder-b", name="Beta")
+        item.folder_links = [
+            ItemFolderLink(
+                item_id=item.id,
+                folder_id="folder-b",
+                folder=folder_b,
+                created_at=datetime.datetime(2026, 3, 6, 12, 2, 0),
+            ),
+            ItemFolderLink(
+                item_id=item.id,
+                folder_id="folder-a",
+                folder=folder_a,
+                created_at=datetime.datetime(2026, 3, 6, 12, 1, 0),
+            ),
+        ]
+
+        note = _build_obsidian_note(item, {"/static/media/first.png": "EverythingCapture_Media/item-1234/first.png"})
+
+        self.assertIn('folder: "Alpha, Beta"', note)
 
     def test_notion_children_keep_inline_image_order(self) -> None:
         item = self.make_item()

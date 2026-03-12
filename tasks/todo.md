@@ -66,3 +66,12 @@
 - [ ] Remove the sidebar logout action and treat the app shell as local-only mode
 - [ ] Replace the frontend auth flow with automatic local-session bootstrap/recovery only
 - [ ] Verify the local-only shell still loads folders, items, settings, and bulk sync without the auth UI
+- [x] Diagnose GitHub code blocks being split into one token per line in synced output
+- [x] Preserve `<pre>` whitespace when converting HTML to structured code blocks
+- [x] Remove blank lines between consecutive Markdown list items in Obsidian note output
+- [x] Render structured list blocks as real `<ul>/<ol>` groups in the reader instead of loose paragraphs
+- [x] Keep Douyin video syncs to Notion/Obsidian free of duplicate cover blocks when a video block exists
+- [x] Strip Xiaohongshu topic-tag boilerplate during Notion/Obsidian sync output without mutating stored extraction data
+- [x] Expose item folder assignment as a sync property when writing to Notion and Obsidian
+- [x] Keep synced folder names ordered the same way as item serialization and UI display
+- [x] Verify folder sync metadata with focused connect formatting tests

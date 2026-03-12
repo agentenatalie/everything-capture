@@ -476,44 +476,70 @@
         }
 
         function renderStructuredBlocks(blocks) {
-            return blocks.map((block) => {
+            const htmlParts = [];
+            let index = 0;
+
+            while (index < blocks.length) {
+                const block = blocks[index];
                 const content = String(block.markdown || block.content || '').trim();
                 const renderedContent = renderInlineMarkdown(content);
+
+                if (block.type === 'bulleted_list_item' || block.type === 'numbered_list_item') {
+                    const listTag = block.type === 'numbered_list_item' ? 'ol' : 'ul';
+                    const listClass = block.type === 'numbered_list_item' ? 'content-list content-list-ordered' : 'content-list';
+                    const items = [];
+                    while (index < blocks.length && blocks[index].type === block.type) {
+                        const itemContent = String(blocks[index].markdown || blocks[index].content || '').trim();
+                        if (itemContent) {
+                            items.push(`<li>${renderInlineMarkdown(itemContent)}</li>`);
+                        }
+                        index += 1;
+                    }
+                    if (items.length) {
+                        htmlParts.push(`<${listTag} class="${listClass}">${items.join('')}</${listTag}>`);
+                    }
+                    continue;
+                }
+
+                index += 1;
                 if ((block.type === 'text' || block.type === 'paragraph') && content) {
-                    return `<p class="content-para">${renderedContent.replace(/\n/g, '<br>')}</p>`;
+                    htmlParts.push(`<p class="content-para">${renderedContent.replace(/\n/g, '<br>')}</p>`);
+                    continue;
                 }
                 if (block.type === 'heading_1' && content) {
-                    return `<h1 class="content-title">${renderedContent}</h1>`;
+                    htmlParts.push(`<h1 class="content-title">${renderedContent}</h1>`);
+                    continue;
                 }
                 if (block.type === 'heading_2' && content) {
-                    return `<h2 class="content-subtitle">${renderedContent}</h2>`;
+                    htmlParts.push(`<h2 class="content-subtitle">${renderedContent}</h2>`);
+                    continue;
                 }
                 if (block.type === 'heading_3' && content) {
-                    return `<h3 class="content-subtitle" style="font-size:1.05rem;">${renderedContent}</h3>`;
-                }
-                if (block.type === 'bulleted_list_item' && content) {
-                    return `<p class="content-para">• ${renderedContent}</p>`;
-                }
-                if (block.type === 'numbered_list_item' && content) {
-                    return `<p class="content-para">1. ${renderedContent}</p>`;
+                    htmlParts.push(`<h3 class="content-subtitle" style="font-size:1.05rem;">${renderedContent}</h3>`);
+                    continue;
                 }
                 if (block.type === 'quote' && content) {
-                    return `<blockquote class="note-quote">${renderedContent.replace(/\n/g, '<br>')}</blockquote>`;
+                    htmlParts.push(`<blockquote class="note-quote">${renderedContent.replace(/\n/g, '<br>')}</blockquote>`);
+                    continue;
                 }
                 if (block.type === 'code' && content) {
-                    return `<pre class="preview-code"><code>${escapeHtml(content)}</code></pre>`;
+                    htmlParts.push(`<pre class="preview-code"><code>${escapeHtml(content)}</code></pre>`);
+                    continue;
                 }
                 if (block.type === 'divider') {
-                    return '<hr class="divider-line">';
+                    htmlParts.push('<hr class="divider-line">');
+                    continue;
                 }
                 if (block.type === 'image' && block.url) {
-                    return `<div class="inline-img-wrap"><img src="${escapeAttribute(block.url)}" alt="" class="inline-img"></div>`;
+                    htmlParts.push(`<div class="inline-img-wrap"><img src="${escapeAttribute(block.url)}" alt="" class="inline-img"></div>`);
+                    continue;
                 }
                 if (block.type === 'video' && block.url) {
-                    return renderVideoMedia(block.url);
+                    htmlParts.push(renderVideoMedia(block.url));
                 }
-                return '';
-            }).join('');
+            }
+
+            return htmlParts.join('');
         }
 
         function shouldPreferCanonicalHtml(item, blocks, mediaImageUrls) {

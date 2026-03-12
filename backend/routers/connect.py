@@ -43,9 +43,23 @@ NOTION_SYNC_PROPERTY_SPECS = {
     "Date": {"type": "rich_text", "rich_text": {}},
     "Source": {"type": "url", "url": {}},
     "Platform": {"type": "rich_text", "rich_text": {}},
+    "Folder": {"type": "rich_text", "rich_text": {}},
 }
 
 _NOTION_ID_RE = re.compile(r"([0-9a-fA-F]{32}|[0-9a-fA-F]{8}(?:-[0-9a-fA-F]{4}){3}-[0-9a-fA-F]{12})")
+_XHS_TAG_TOKEN_PATTERN = r"#(?:[^\s#\[]+)(?:\[[^\]]+\])?#?"
+_XHS_TAG_ONLY_LINE_RE = re.compile(rf"^\s*(?:{_XHS_TAG_TOKEN_PATTERN}\s*)+$")
+_XHS_TRAILING_TAGS_RE = re.compile(rf"(?:\s+|^)(?:{_XHS_TAG_TOKEN_PATTERN}\s*)+$")
+_SYNC_TEXT_BLOCK_TYPES = {
+    "text",
+    "paragraph",
+    "heading_1",
+    "heading_2",
+    "heading_3",
+    "bulleted_list_item",
+    "numbered_list_item",
+    "quote",
+}
 _SYNC_STATUS_CACHE: dict[str, dict[str, object]] = {}
 
 
@@ -354,7 +368,10 @@ def _html_structured_blocks(item: Item) -> list[dict]:
                 continue
 
             if tag_name == "pre":
-                code_text = child.get_text("\n", strip=False).strip("\n")
+                # Preserve the source code's original whitespace. GitHub wraps tokens
+                # in many inline spans, so using a separator here would inject fake
+                # newlines between every token and destroy readability.
+                code_text = child.get_text("", strip=False).replace("\r\n", "\n").replace("\r", "\n").strip("\n")
                 language = ""
                 class_names = child.get("class") or []
                 for class_name in class_names:
@@ -477,6 +494,83 @@ def _media_lookup(item: Item) -> dict[str, object]:
     return lookup
 
 
+def _ordered_item_folder_names(item: Item) -> list[str]:
+    ordered_links = sorted(
+        [
+            link
+            for link in (item.folder_links or [])
+            if getattr(link, "folder", None) is not None and getattr(link.folder, "name", None)
+        ],
+        key=lambda link: (
+            getattr(link, "created_at", None) or getattr(item, "created_at", None),
+            (link.folder.name or "").lower(),
+            link.folder_id,
+        ),
+    )
+    if not ordered_links and item.folder and item.folder.name:
+        return [item.folder.name]
+    return [link.folder.name for link in ordered_links if link.folder and link.folder.name]
+
+
+def _folder_property_text(item: Item) -> str:
+    return ", ".join(_ordered_item_folder_names(item))
+
+
+def _strip_xiaohongshu_sync_tags(text: str | None) -> str:
+    normalized = (text or "").replace("\r\n", "\n").replace("\r", "\n")
+    if not normalized.strip():
+        return ""
+
+    cleaned_lines: list[str] = []
+    for raw_line in normalized.split("\n"):
+        stripped_line = raw_line.strip()
+        if not stripped_line:
+            if cleaned_lines and cleaned_lines[-1] != "":
+                cleaned_lines.append("")
+            continue
+        if _XHS_TAG_ONLY_LINE_RE.fullmatch(stripped_line):
+            continue
+        cleaned_line = _XHS_TRAILING_TAGS_RE.sub("", raw_line).strip()
+        if cleaned_line:
+            cleaned_lines.append(cleaned_line)
+
+    while cleaned_lines and cleaned_lines[-1] == "":
+        cleaned_lines.pop()
+
+    return "\n".join(cleaned_lines)
+
+
+def _sync_blocks(item: Item) -> list[dict]:
+    raw_blocks = _get_structured_blocks(item)
+    has_douyin_video = item.platform == "douyin" and (
+        any((block.get("type") or "") == "video" for block in raw_blocks)
+        or any((media.type or "") == "video" for media in item.media)
+    )
+
+    prepared: list[dict] = []
+    for block in raw_blocks:
+        block_type = block.get("type")
+        if has_douyin_video and block_type == "cover":
+            continue
+
+        updated_block = dict(block)
+        if item.platform == "xiaohongshu" and block_type in _SYNC_TEXT_BLOCK_TYPES:
+            for field_name in ("content", "markdown"):
+                field_value = updated_block.get(field_name)
+                if isinstance(field_value, str):
+                    cleaned_value = _strip_xiaohongshu_sync_tags(field_value)
+                    if cleaned_value:
+                        updated_block[field_name] = cleaned_value
+                    else:
+                        updated_block.pop(field_name, None)
+            if not any(updated_block.get(field_name) for field_name in ("content", "markdown")):
+                continue
+
+        prepared.append(updated_block)
+
+    return prepared
+
+
 def _collect_referenced_media(item: Item, blocks: list[dict]) -> list:
     lookup = _media_lookup(item)
     referenced = []
@@ -493,7 +587,16 @@ def _collect_referenced_media(item: Item, blocks: list[dict]) -> list:
         return referenced
 
     return sorted(
-        [media for media in item.media if media.type in {"image", "cover", "video"}],
+        [
+            media
+            for media in item.media
+            if media.type in {"image", "cover", "video"}
+            and not (
+                item.platform == "douyin"
+                and any((block.get("type") or "") == "video" for block in blocks)
+                and media.type == "cover"
+            )
+        ],
         key=lambda entry: (entry.display_order, entry.original_url or ""),
     )
 
@@ -677,7 +780,7 @@ async def _build_notion_children(
     auth_headers: dict[str, str],
     item: Item,
 ) -> list[dict]:
-    structured_blocks = _get_structured_blocks(item)
+    structured_blocks = _sync_blocks(item)
     media_lookup = _media_lookup(item)
     notion_children: list[dict] = []
     upload_cache: dict[str, dict] = {}
@@ -898,15 +1001,25 @@ def _store_sync_status_cache(item: Item) -> None:
 
 
 def _build_obsidian_note(item: Item, media_references: dict[str, str]) -> str:
-    structured_blocks = _get_structured_blocks(item)
-    yaml_frontmatter = (
-        f"---\nitem_id: {item.id}\nsource: {item.source_url}\nplatform: {item.platform}\ndate: {_format_item_datetime(item.created_at)}\n---\n\n"
-    )
+    structured_blocks = _sync_blocks(item)
+    yaml_lines = [
+        "---",
+        f"item_id: {item.id}",
+        f"source: {item.source_url}",
+        f"platform: {item.platform}",
+        f"date: {_format_item_datetime(item.created_at)}",
+    ]
+    folder_value = _folder_property_text(item)
+    if folder_value:
+        yaml_lines.append(f"folder: {json.dumps(folder_value, ensure_ascii=False)}")
+    yaml_lines.append("---")
+    yaml_frontmatter = "\n".join(yaml_lines) + "\n\n"
     title = item.title or f"Capture {item.id}"
     parts = [yaml_frontmatter, f"# {title}\n\n"]
 
-    for block in structured_blocks:
+    for index, block in enumerate(structured_blocks):
         block_type = block.get("type")
+        next_block_type = structured_blocks[index + 1].get("type") if index + 1 < len(structured_blocks) else None
         if block_type in {
             "text",
             "paragraph",
@@ -921,7 +1034,8 @@ def _build_obsidian_note(item: Item, media_references: dict[str, str]) -> str:
         }:
             content = _block_markdown(block)
             if content:
-                parts.append(f"{content}\n\n")
+                separator = "\n" if next_block_type == block_type and block_type in {"bulleted_list_item", "numbered_list_item"} else "\n\n"
+                parts.append(f"{content}{separator}")
         elif block_type in {"image", "cover"}:
             media_path = media_references.get(block.get("url", ""))
             if media_path:
@@ -1024,6 +1138,7 @@ async def _ensure_notion_sync_properties(
         "date": "Date",
         "source": "Source",
         "platform": "Platform",
+        "folder": "Folder",
     }
     return notion_target
 
@@ -1061,6 +1176,15 @@ def _build_notion_page_properties(item: Item, notion_target: dict) -> dict:
                 {
                     "type": "text",
                     "text": {"content": _truncate_text(item.platform, NOTION_RICH_TEXT_LIMIT, "")},
+                }
+            ]
+        }
+    if sync_property_names.get("folder"):
+        properties[sync_property_names["folder"]] = {
+            "rich_text": [
+                {
+                    "type": "text",
+                    "text": {"content": _truncate_text(_folder_property_text(item), NOTION_RICH_TEXT_LIMIT, "")},
                 }
             ]
         }
@@ -1547,7 +1671,7 @@ async def _sync_item_to_obsidian(item: Item, db: Session, *, settings: Settings 
                         if note_state == "missing" or (note_content and not _obsidian_note_matches_item(note_content, item)):
                             item.obsidian_path = None
                             db.commit()
-                structured_blocks = _get_structured_blocks(item)
+                structured_blocks = _sync_blocks(item)
                 media_references: dict[str, str] = {}
                 media_folder = f"{OBSIDIAN_MEDIA_FOLDER}/{item.id}"
                 referenced_media = _collect_referenced_media(item, structured_blocks)

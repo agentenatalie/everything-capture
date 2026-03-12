@@ -44,3 +44,4 @@
 - When media OCR is only an enhancement step, never let one unreadable local image or cover abort the entire parse flow. Treat OCR as best-effort and keep subtitle/transcript extraction running.
 - When a capture response should feel immediate, do not leave heavy parse/sync follow-up inside the same completion path. Persist the item, mark parse state up front if needed, and hand parsing/sync to a detached background postprocess.
 - When the user asks to remove tag boilerplate only from knowledge-base sync output, do not push that cleanup down into extractor/storage. Keep raw capture data intact and clean it at the export layer.
+- When the user drops the native mobile client but keeps the iOS webapp, remove the `ios/` client and native-client docs together, but leave `phone_webapp`, mobile capture UI, and Shortcut-compatible routes intact.

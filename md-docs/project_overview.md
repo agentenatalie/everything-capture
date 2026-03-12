@@ -2,7 +2,7 @@
 
 本文档旨在为其他编码代理（Coding Agents）和开发者提供整个项目的全景概览。在进行修改前，请仔细阅读本指南，以便快速理解每个文件的核心功能、限制以及不可触碰的红线，避免进行不必要的全局文件分析或破坏现有逻辑。
 
-本项目主要包含三部分：基于 FastAPI 的 Python 后端、Vanilla HTML/CSS/JS 构成的前端看板（挂载在 static 目录下），以及一个 iOS 应用（抓取扩展端）。
+本项目主要包含三部分：基于 FastAPI 的 Python 后端、Vanilla HTML/CSS/JS 构成的前端看板（挂载在 static 目录下），以及一个面向手机浏览器 / WebApp / Shortcut 的移动收录入口。
 
 ---
 
@@ -25,7 +25,7 @@
 - **不可被修改的部分**: 已有的关键字段名（如 `canonical_text`, `content_blocks_json`, `status`），因为这些直接影响着与之前存量数据的兼容性。
 
 ### 4. `backend/schemas.py`
-- **功能 / 作用**: 定义 Pydantic 模型，用于请求载荷的验证和响应序列化（例如 `ItemResponse`, `IngestRequest`）。它是与前端及 iOS 客户端进行 API 交互的契约。
+- **功能 / 作用**: 定义 Pydantic 模型，用于请求载荷的验证和响应序列化（例如 `ItemResponse`, `IngestRequest`）。它是与前端及手机 WebApp / Shortcut 收录链路进行 API 交互的契约。
 - **相关限制**: 所有新增的属性都应提供 Optional 或者默认值，以避免向后不兼容导致客户端报错。
 - **不可被修改的部分**: 不能重命名现有的响应字段（如 `item_id`, `media`, `inline_position`），因为它们已被前端或客户端重度依赖。
 
@@ -40,8 +40,8 @@
 
 ### 2. `backend/routers/ingest.py`
 - **功能 / 作用**: 最核心的内容摄入路由。包含两个接口：
-  - `POST /api/ingest`: 供 iOS 端使用的本地提取上传接口。
-  - `POST /api/extract`: 供前端（和 iOS 端首选）使用的服务端 URL 解析接口。此接口会调用提取器并利用下载器将媒体对象存入数据库。
+  - `POST /api/ingest`: 供本地文本回填 / 兼容导入使用的上传接口。
+  - `POST /api/extract`: 供前端主入口使用的服务端 URL 解析接口。此接口会调用提取器并利用下载器将媒体对象存入数据库。
 - **需要保留的内容**: `extract` 接口中，针对图片和视频 URL 返回映射的替换逻辑（生成安全的 `canonical_html` 和 `content_blocks_json`），非常关键且脆弱。
 - **不可被修改的部分**: 必须确保提取失败时能够正确地 `db.rollback()`，以免数据库出现脏数据。
 
@@ -76,17 +76,17 @@
 
 ---
 
-## 五、 iOS 客户端 (iOS App)
+## 五、 手机 Web 入口 (iOS WebApp / Mobile Web)
 
-### 1. `ios/EverythingGrabber/Sources/CaptureView.swift`
-- **功能 / 作用**: 提供了 iOS App 复制链接后的首个弹窗交互视图、手动检测入口及抓取状态展示。
+### 1. `backend/static/index.html`
+- **功能 / 作用**: 同一首页同时承载桌面 Library 与手机端收录壳层。手机端主要依赖 `#mobileCaptureShell`、输入 pill、文件夹选择和提交反馈。
 - **针对 UI 修改的红线与限制**:
-  - **状态反馈不可隐藏**: 提取过程中的“双保险策略”（先尝试服务端拉取、失败回退到本地 WebView 提取）会产生多种加载和错误/拦截提示（如屏蔽词拦截、字数过短拦截）。在重构 UI 时，这些状态反馈（`isExtracting`, `extractionResult`）必须在界面上得到准确和完整的展示，不可仅为了界面简洁而省略报错信息。
-  - **核心链路强依赖**: “剪贴板收录提示弹窗” (`showCapturePrompt`) 及其绑定的“手动检测剪贴板”触发点是 iOS App 的核心入口，任何重构不得影响 `clipboardManager.checkClipboard()` 的时序和弹窗触发逻辑。
+  - **移动壳层必须保留最短路径**: 手机入口的目标是快速投递，不要把桌面看板的复杂控件搬进去。
+  - **移动与桌面共用同一 DOM 基线**: 改动 ID、类名或弹层结构时，必须同步核对桌面 Library 与手机壳层两条链路。
 
-### 2. `ios/EverythingGrabber/Sources/QualityGate.swift`
-- **功能 / 作用**: 客户端用于拦截无意义数据（如需要跳转到 App 才能阅读的文章的提示语）的质控机制，包含对屏蔽词、被删文章提示、全表情数据和过短内容的检查。
-- **需要保留的内容**: 里面对诸如 “为保证您的帐户安全”、“访问受限” 的硬编码词汇拦截不可修改。字符数限制的放宽设定不能随意调整，以避免拦截单纯的图集文章。
+### 2. `backend/routers/phone_webapp.py`
+- **功能 / 作用**: 处理 `POST /api/phone-extract`，把手机 WebApp / Shortcut 的请求转成本地处理或 capture queue 入队。
+- **需要保留的内容**: 文件夹分配逻辑要继续复用 `normalize_requested_folder_ids`、`resolve_folders` 和 `sync_item_folder_assignments`，保证手机入口与桌面 Library 的归类行为一致。
 
 ---
 
@@ -96,4 +96,4 @@
 1. **如果是新增爬虫支持**：主要修改 `backend/services/extractor.py` 中的解析路由。
 2. **如果涉及数据库字段变更**：务必同时更新 `models.py`、`schemas.py` 与 `routers/items.py` 或 `routers/ingest.py`。最后在前端 `index.html` 中增加呈现逻辑。
 3. **如果是提升性能/搜索**：请避免在页面初始加载进行耗时的全局拉取。
-4. **如果遇到 bug**：先确定是服务端提取失败还是本地客户端提取失败，再沿着 `ingest.py` -> `extractor.py` 的链路查询。
+4. **如果遇到 bug**：先确定是桌面 Web、手机 WebApp / Shortcut，还是服务端提取失败，再沿着 `phone_webapp.py` / `ingest.py` -> `extractor.py` 的链路查询。

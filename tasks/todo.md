@@ -72,7 +72,7 @@
 - [x] Diagnose why card detail content lost inline formatting after capture
 - [x] Restore inline rich-text rendering for captured card detail content and verify with real stored data
 - [x] Trace why newly downloaded links still lose formatting while older links retain formatting
-- [x] Fix the iOS fallback ingest path so new captures preserve HTML formatting end to end
+- [x] Fix the legacy mobile fallback ingest path so new captures preserve HTML formatting end to end
 - [x] Diagnose why phone webapp Xiaohongshu `xhslink` captures can store `Unknown` titles while desktop capture keeps the note title
 - [x] Complete Xiaohongshu video extraction and Douyin image-note extraction so both platforms support video and 图文 captures
 - [x] Add durable capture-service storage support so queued uploads survive cloud restarts and overnight worker downtime
@@ -112,3 +112,7 @@
 - [x] Remove the sidebar avatar block, keep the local-mode label left-aligned, and anchor settings in the collapsed footer slot
 - [x] Flatten the list view into a plain white surface instead of card-style framing
 - [x] Add motion to parse/sync/in-flight UI states so processing feedback is visible across the app
+- [x] Shrink dragged cards into a compact row-style drag preview instead of dragging the full card silhouette
+- [x] Shift parse-state visuals to a lighter purple treatment and replace the small parse action glyph with a real spinner
+- [x] Enlarge the reader note and close icons slightly so the toolbar actions read more clearly
+- [x] Remove the native mobile client directory and stale native-client documentation while preserving the iOS webapp and shortcut flow

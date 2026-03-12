@@ -1,11 +1,11 @@
 # Everything Grabber (万物收藏夹)
 
-**Everything Grabber** 是一个跨平台的高质量内容抓取与知识管理系统，旨在帮助用户从各个主流平台（如小红书、微信公众号、抖音、X/Twitter 等）一键无缝抓取网页内容、解析正文，并将内容与多媒体资源永久保存。整个系统由 **iOS 客户端** 和 **FastAPI 服务端** 组成。
+**Everything Grabber** 是一个跨平台的高质量内容抓取与知识管理系统，旨在帮助用户从各个主流平台（如小红书、微信公众号、抖音、X/Twitter 等）一键无缝抓取网页内容、解析正文，并将内容与多媒体资源永久保存。当前系统由 **FastAPI 服务端**、**网页看板**，以及面向手机浏览器 / iOS WebApp / Shortcut 的移动收录入口组成。
 
 ## 🌟 核心特性
 
 - **跨平台深度抓取**：原生支持并优化了小红书、微信公众平台、抖音、X 等具有复杂动态加载与防抓取机制的平台内容提取。
-- **iOS 原生捕获与共享**：利用 Swift 编写的 iOS App，通过 Share Extension 与内部 `WebViewExtractor`，实现所见即所得的页面捕获与一键收录。
+- **手机 WebApp / Shortcut 收录**：在同一套 Web 前端中提供移动收录入口，可作为 iOS WebApp 保存到主屏，也可通过 Shortcut 直接投递到本地或云端 capture 队列。
 - **服务端智能解析引擎**：结合 [Jina Reader](https://jina.ai/reader/) 增强解析与服务端定制提取逻辑，精准抽取页面内的正文、标题、平台来源。
 - **全媒体资产沉淀**：自动嗅探并下载文章中的封面、配图以及视频，进行本地化持久存储（图片与视频资源均保存在服务端本地）。
 - **完善的知识重组与输出**：内置对接 Notion 和 Obsidian 的同步逻辑，助力个人构建强大的数字大脑与知识库。
@@ -26,12 +26,8 @@ everything-grabber/
 │   ├── schemas.py         # Pydantic 数据规范与校验模型
 │   ├── models.py          # SQLAlchemy 数据库 ORM (SQLite 默认)
 │   └── static/            # 前端页面以及本地持久化的图片/视频资源存储区
-└── ios/EverythingGrabber/ # Swift iOS 原生客户端
-    ├── Sources/
-    │   ├── WebViewExtractor.swift # 负责加载网页并执行 DOM 注入与提取逻辑
-    │   ├── QualityGate.swift      # 过滤无效内容、净化文本（如移除无关 Emoji）
-    │   └── ...                    # 其他视图和 iOS Extensions 组件
-    └── README.md                  # iOS 端的详细说明（如有）
+├── capture_service/       # 可选的云端收录队列服务，供手机 WebApp / Shortcut 转发
+└── md-docs/               # 项目交接文档、基线说明与实现备忘
 ```
 
 ---
@@ -59,11 +55,11 @@ uvicorn main:app --reload --host 0.0.0.0 --port 8000
 ```
 > 服务启动后，可以在浏览器中访问 `http://127.0.0.1:8000/docs` 来查看自动生成的 Swagger UI 接口文档。
 
-### 2. 运行 iOS 客户端
-1. 确保您的 Mac 安装了最新版本的 **Xcode**。
-2. 双击打开 `ios/EverythingGrabber.xcodeproj`（或 `.xcworkspace`）。
-3. 在 Xcode 的 `Signing & Capabilities` 中配置好您的 Apple 开发者账号。
-4. 选择 iOS 模拟器或真实设备，点击 `Run` (Cmd + R) 进行编译和运行。
+### 2. 打开手机端收录入口
+1. 启动后端后，在 iPhone Safari 中打开同一服务地址。
+2. 页面会自动切换到移动收录壳层，可直接粘贴链接或文字。
+3. 如需长期使用，可通过 Safari 的“添加到主屏幕”保存为 iOS WebApp。
+4. 如已配置 Shortcut 或 `capture_service/`，也可以继续走手机快捷收录链路。
 
 ---
 

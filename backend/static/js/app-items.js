@@ -1,3 +1,5 @@
+        let activeItemDragPreview = null;
+
         async function fetchItems() {
             const requestId = ++libraryRequestId;
             if (!ensureAuthenticated({ showOverlay: false })) {
@@ -155,6 +157,74 @@
             return '同步至 Obsidian';
         }
 
+        function clearItemDragPreview() {
+            if (!activeItemDragPreview) return;
+            activeItemDragPreview.remove();
+            activeItemDragPreview = null;
+        }
+
+        function buildItemDragPreview(item) {
+            clearItemDragPreview();
+
+            const preview = document.createElement('div');
+            preview.className = 'item-drag-preview';
+            if (item?.parse_status === 'processing') {
+                preview.classList.add('is-processing');
+            }
+
+            const thumb = document.createElement('div');
+            thumb.className = 'item-drag-preview-thumb';
+            const thumbnail = getItemThumbnail(item);
+            if (thumbnail?.url) {
+                const image = document.createElement('img');
+                image.src = thumbnail.url;
+                image.alt = '';
+                thumb.appendChild(image);
+            } else {
+                thumb.textContent = String(platformDisplayLabel(item) || '条').trim().slice(0, 1) || '条';
+            }
+
+            const body = document.createElement('div');
+            body.className = 'item-drag-preview-body';
+
+            const title = document.createElement('div');
+            title.className = 'item-drag-preview-title';
+            title.textContent = getDisplayItemTitle(item) || '未命名内容';
+
+            const meta = document.createElement('div');
+            meta.className = 'item-drag-preview-meta';
+
+            const platformPill = document.createElement('span');
+            platformPill.className = 'item-drag-preview-pill';
+            platformPill.textContent = platformDisplayLabel(item);
+            meta.appendChild(platformPill);
+
+            if (item?.parse_status === 'processing') {
+                const chip = document.createElement('span');
+                chip.className = 'item-drag-preview-chip is-processing';
+                chip.innerHTML = '<span class="item-drag-preview-chip-pulse" aria-hidden="true"></span>解析中';
+                meta.appendChild(chip);
+            } else {
+                const detail = document.createElement('span');
+                detail.className = 'item-drag-preview-detail';
+                if (Array.isArray(item?.folder_names) && item.folder_names.length) {
+                    const extraCount = Math.max(0, Number(item.folder_count || item.folder_names.length) - 1);
+                    detail.textContent = extraCount > 0
+                        ? `${item.folder_names[0]} +${extraCount}`
+                        : item.folder_names[0];
+                } else {
+                    detail.textContent = formatRelativeTime(item.created_at);
+                }
+                meta.appendChild(detail);
+            }
+
+            body.append(title, meta);
+            preview.append(thumb, body);
+            document.body.appendChild(preview);
+            activeItemDragPreview = preview;
+            return preview;
+        }
+
         function isItemSyncInFlight(itemId, target) {
             return Boolean(itemId && syncActionState?.[target]?.has(itemId));
         }
@@ -231,7 +301,7 @@
                 grid.className = currentView === 'gallery' ? 'grid' : 'list-view';
                 grid.innerHTML = filterInput.value.trim() || platformFilter.value !== 'all' || currentFolderScope !== 'all'
                     ? `<div class="empty-state">${currentFolderScope === 'folder' && !filterInput.value.trim() && platformFilter.value === 'all' ? '这个文件夹里还没有内容。' : '没有找到匹配内容，请换个关键词或平台试试。'}</div>`
-                    : '<div class="empty-state">暂无收录内容，请在 App 中添加。</div>';
+                    : '<div class="empty-state">暂无收录内容，请从网页入口粘贴链接开始收录。</div>';
                 return;
             }
 
@@ -671,12 +741,15 @@
             event.dataTransfer.effectAllowed = 'move';
             event.dataTransfer.setData(ITEM_DRAG_DATA_TYPE, itemId);
             event.dataTransfer.setData('text/plain', itemId);
+            const dragPreview = buildItemDragPreview(item);
+            event.dataTransfer.setDragImage(dragPreview, 26, 22);
         }
 
         function handleLibraryDragEnd() {
             draggedLibraryItemId = null;
             document.body.classList.remove('item-dragging');
             clearFolderDropIndicator();
+            clearItemDragPreview();
         }
 
         function closeModalDialog() {

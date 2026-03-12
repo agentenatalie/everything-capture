@@ -1,7 +1,7 @@
 # Current System Baseline
 
 本文档基于当前仓库真实结构整理，核心依据包括：
-`backend/main.py`、`backend/database.py`、`backend/models.py`、`backend/auth.py`、`backend/tenant.py`、`backend/routers/auth.py`、`backend/routers/ingest.py`、`backend/routers/items.py`、`backend/routers/folders.py`、`backend/routers/settings.py`、`backend/routers/connect.py`、`backend/services/extractor.py`、`backend/services/downloader.py`、`backend/security.py`、`backend/static/index.html`、`backend/static/js/*.js`、`ios/EverythingGrabber/Sources/*.swift`。
+`backend/main.py`、`backend/database.py`、`backend/models.py`、`backend/auth.py`、`backend/tenant.py`、`backend/routers/auth.py`、`backend/routers/ingest.py`、`backend/routers/items.py`、`backend/routers/folders.py`、`backend/routers/settings.py`、`backend/routers/connect.py`、`backend/routers/phone_webapp.py`、`backend/services/extractor.py`、`backend/services/downloader.py`、`backend/security.py`、`backend/static/index.html`、`backend/static/js/*.js`。
 
 ## 1. Product Overview
 
@@ -9,17 +9,16 @@
 - 当前实际形态是：
   - 一个带真实登录会话的 FastAPI + SQLite Web 应用。
   - 一个按 `user_id` 做主要数据隔离、按 `workspace_id` 做预留字段的后端。
-  - 一个原生 iOS 抓取端，但它仍然保留“本地匿名后端”假设，尚未跟上新的认证体系。
+  - 一个内置在同一前端里的手机 WebApp / Shortcut 收录入口，可直接走 `/api/phone-extract` 或转发到 capture queue。
 - 当前 Web 端主流程：
   - 用户先登录。
   - 在 Command Palette 输入链接或关键词。
   - 链接走 `/api/extract`，搜索走 `/api/items?q=...`。
   - 成功后进入 Library、Reader、同步、导出、文件夹归类。
-- 当前 iOS 端主流程：
-  - 监听剪贴板链接。
-  - 先请求服务端 `/api/extract`。
-  - 失败后回退 `WKWebView + Readability` 本地提取，再调用 `/api/ingest`。
-  - 但当前 iOS 请求没有携带认证信息，和现有后端鉴权模型不完全兼容。
+- 当前手机端主流程：
+  - 在同一首页打开移动收录壳层。
+  - 提交内容走 `/api/phone-extract`。
+  - 若配置了 `capture_service`，则先入队；否则直接复用本地提取链路。
 - 当前运行数据快照基于 `backend/items.db`：
   - `users = 2`
   - `workspaces = 1`
@@ -39,8 +38,8 @@
 | Google OAuth 登录 | 条件可用 | `/api/auth/google/start` |
 | 邮箱验证码登录 | 可用 | `/api/auth/email/*` |
 | 手机验证码登录 | 条件可用 | `/api/auth/phone/*` |
-| 服务端链接抓取 | 可用 | Web Command Palette；iOS 首选链路 |
-| iOS 本地回退提取 | 可用 | `WKWebView + Readability` |
+| 服务端链接抓取 | 可用 | Web Command Palette；手机 WebApp / Shortcut |
+| 手机 Web 收录 | 可用 | `#mobileCaptureShell` + `/api/phone-extract` |
 | 文本入库 | 可用 | `/api/extract`、`/api/ingest` |
 | 媒体下载到本地 | 可用 | `/api/extract` 后自动执行 |
 | Library 浏览 | 可用 | Web 首页 |
@@ -86,16 +85,16 @@
   - `Cmd/Ctrl + K` 打开 Command Palette。
   - 输入链接走 `/api/extract`。
   - 输入普通文本走 `/api/items?q=...` 搜索。
-- iOS 入口：
-  - `CaptureView` 检测剪贴板。
-  - 优先调用 `APIClient.extractViaServer()`。
-  - 回退 `WebViewExtractor.extract()` 后调用 `APIClient.ingest()`。
+- 手机入口：
+  - iPhone 打开同一前端首页时进入移动收录壳层。
+  - 提交后调用 `/api/phone-extract`。
+  - 可选地转发到 `capture_service` 队列。
 - 后端行为：
   - `/api/extract` 调用 `extract_content(url)`。
   - `/api/ingest` 直接落文本，不下载媒体，也不真正写入 `canonical_html`。
 - 当前限制：
-  - iOS `APIClient` base URL 仍写死为 `http://127.0.0.1:8000/api`。
-  - iOS 端没有现成的登录态传递逻辑。
+  - 手机 Web 入口与桌面共用同一前端页面，改 DOM / 样式时必须兼顾两端。
+  - 若启用 `capture_service`，本地 worker 与移动收录入口都依赖配置一致性。
 
 ### 3.3 Content Extraction
 
@@ -327,14 +326,11 @@
   - 静态媒体 URL 仍不是 tenant-aware public URL 方案。
 - 当前必须明确的事实：
   - 旧文档中的“所有 API 匿名可调”“没有用户表”“settings 全局唯一”“前端头像只是占位”都已不成立。
-  - 但“完整 workspace 多租户”“iOS 已适配登录态”“媒体路径按租户隔离”也仍未成立。
+  - 但“完整 workspace 多租户”“移动收录链路与登录态完全收敛”“媒体路径按租户隔离”也仍未成立。
 
 ## 10. Remaining Gaps / Risk Notes
 
-- iOS 客户端仍然假设：
-  - 本地后端地址固定为 `127.0.0.1:8000`
-  - API 可匿名调用
-  - 这和当前 Web 认证体系存在脱节
+- 当前所有移动收录说明都应统一以手机 WebApp / Shortcut 收录链路为准。
 - `workspace_id` 目前更多是结构预留，不是已完成的产品隔离边界。
 - 搜索仍然主要依赖 Python 打分，不是 FTS-first。
 - `/api/ingest` 和 `/api/extract` 在 `canonical_html` / `content_blocks_json` 的落库行为仍不对称。
@@ -345,4 +341,4 @@
 
 如果后续文档需要一句话描述当前系统，建议统一表述为：
 
-> 当前 Everything Grabber 是一个带 Web 登录会话、按用户隔离数据与集成配置的本地优先内容抓取系统；workspace、多租户媒体隔离、iOS 认证适配与异步任务化仍处于过渡阶段。
+> 当前 Everything Grabber 是一个带 Web 登录会话、按用户隔离数据与集成配置的本地优先内容抓取系统；workspace、多租户媒体隔离、移动收录认证收敛与异步任务化仍处于过渡阶段。

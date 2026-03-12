@@ -9,7 +9,7 @@
 
 ## 1. 核心需求与业务流程说明 (Business Logic)
 
-本项目是一个网页内容抓取工具（包含一个 Chrome 插件/iOS App 抓取，和一个本地运行的 Python/FastAPI 后端及 Vanilla JS 前端看板）。现在新增的知识库集成功能需求如下：
+本项目是一个网页内容抓取工具（包含 Chrome 插件、手机 WebApp / Shortcut 收录入口，以及一个本地运行的 Python/FastAPI 后端和 Vanilla JS 前端看板）。现在新增的知识库集成功能需求如下：
 1. **Notion OAuth 连接**：允许用户在网页端设置面板（Settings）中填写 Notion `Client ID`、`Client Secret` 和 `Redirect URI`。点击后通过 OAuth 2.0 拿到对应工作区的 `API Token` 并存入数据库。
 2. **Obsidian 局域网同步**：允许用户填写 Obsidian Local REST API 的 `URL`（如 `http://127.0.0.1:27123`）和 `API Key`，直接通过 HTTP 协议把文章和图片推送到 Obsidian 本地 Vault。
 3. **手动或按需触发 (手动/自动同步)**：

@@ -73,12 +73,14 @@
             const isProcessing = manualParseInFlightItemId === item.id || item?.parse_status === 'processing';
             return `
                 <button onclick="parseItemContent('${item.id}', event)" class="folder-action-btn${isProcessing ? ' is-processing' : ''}" title="${isProcessing ? '解析中' : '解析内容'}" ${isProcessing ? 'disabled' : ''}>
-                    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
-                        <path d="M7.5 4.75h6.9l2.85 2.85v11.65H7.5A2.25 2.25 0 0 1 5.25 17V7A2.25 2.25 0 0 1 7.5 4.75Z"></path>
-                        <path d="M14.25 4.75V8h3.25"></path>
-                        <path d="M9 11h6"></path>
-                        <path d="M9 14h6"></path>
-                    </svg>
+                    ${isProcessing
+                        ? '<span class="folder-action-spinner" aria-hidden="true"></span>'
+                        : `<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                            <path d="M7.5 4.75h6.9l2.85 2.85v11.65H7.5A2.25 2.25 0 0 1 5.25 17V7A2.25 2.25 0 0 1 7.5 4.75Z"></path>
+                            <path d="M14.25 4.75V8h3.25"></path>
+                            <path d="M9 11h6"></path>
+                            <path d="M9 14h6"></path>
+                        </svg>`}
                 </button>
             `;
         }

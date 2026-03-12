@@ -4,11 +4,12 @@
         const modalShell = modalOverlay.querySelector('.modal');
         const commandOverlay = document.getElementById('commandOverlay');
         const modalTitle = document.getElementById('modalTitle');
+        const readerNotePanel = document.getElementById('readerNotePanel');
         const modalContent = document.getElementById('modalContent');
         const modalFooter = document.getElementById('modalFooter');
         const readerStatusDots = document.getElementById('readerStatusDots');
         const closeModal = document.getElementById('closeModal');
-        const toggleFullscreenBtn = document.getElementById('toggleFullscreenBtn');
+        const toggleNoteBtn = document.getElementById('toggleNoteBtn');
         const urlInput = document.getElementById('urlInput');
         const extractBtnLabel = document.getElementById('extractBtnLabel');
         const extractBtnMeta = document.getElementById('extractBtnMeta');
@@ -98,7 +99,9 @@
         let filteredEntries = [];
         let commandSearchResults = [];
         let currentOpenItemId = null;
-        let isModalFullscreen = false;
+        let isNotePanelOpen = false;
+        let noteSaveInFlight = false;
+        let manualParseInFlightItemId = null;
         let latestVisibleCount = 0;
         let latestReturnedCount = 0;
         let latestTotalCount = 0;

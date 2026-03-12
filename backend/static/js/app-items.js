@@ -282,21 +282,169 @@
             }
         }
 
+        function getItemById(itemId) {
+            return itemsData.find((entry) => entry.id === itemId) || commandSearchResults.find((entry) => entry.id === itemId) || null;
+        }
+
+        function mergeUpdatedItem(updatedItem) {
+            itemsData = itemsData.map((entry) => entry.id === updatedItem.id ? updatedItem : entry);
+            filteredEntries = filteredEntries.map((entry) => entry.id === updatedItem.id ? updatedItem : entry);
+            commandSearchResults = commandSearchResults.map((entry) => entry.id === updatedItem.id ? updatedItem : entry);
+        }
+
+        function formatParseStatusSummary(item) {
+            const status = String(item?.parse_status || 'idle');
+            if (status === 'processing') return '解析中...';
+            if (status === 'failed') return item?.parse_error ? `解析失败 · ${item.parse_error}` : '解析失败';
+            if (status === 'completed') {
+                const parsedAt = item?.parsed_at ? ` · ${formatDate(item.parsed_at)}` : '';
+                return `已解析${parsedAt}`;
+            }
+            return '未解析';
+        }
+
+        function renderNotePanel(item) {
+            if (!readerNotePanel) return;
+
+            const summary = formatParseStatusSummary(item);
+            const extractedText = String(item?.extracted_text || '');
+            const placeholder = item?.parse_status === 'processing'
+                ? '正在解析图片 / 视频中的原始文字内容...'
+                : '解析后的原始文字会显示在这里，你也可以直接修改。';
+
+            readerNotePanel.innerHTML = `
+                <div class="reader-note-shell">
+                    <div class="reader-note-header">
+                        <div class="reader-note-title">解析笔记</div>
+                        <div class="reader-note-meta">${escapeHtml(summary)}</div>
+                    </div>
+                    <textarea id="readerNoteTextarea" class="reader-note-textarea" placeholder="${escapeAttribute(placeholder)}">${escapeHtml(extractedText)}</textarea>
+                    <div class="reader-note-actions">
+                        <button
+                            onclick="saveItemNote('${item.id}')"
+                            class="extract-btn modal-action-btn"
+                            ${noteSaveInFlight ? 'disabled' : ''}
+                        >
+                            ${noteSaveInFlight ? '保存中...' : '保存笔记'}
+                        </button>
+                    </div>
+                </div>
+            `;
+            setNotePanelOpen(isNotePanelOpen);
+        }
+
+        async function parseItemContent(itemId, event = null) {
+            event?.stopPropagation?.();
+            if (manualParseInFlightItemId === itemId) return;
+
+            const currentItem = getItemById(itemId);
+            if (!currentItem) return;
+
+            manualParseInFlightItemId = itemId;
+            mergeUpdatedItem({
+                ...currentItem,
+                parse_status: 'processing',
+                parse_error: null,
+            });
+            renderItems(filteredEntries);
+            if (currentOpenItemId === itemId) {
+                isNotePanelOpen = true;
+                openModalByItem(getItemById(itemId), { keepNotePanel: true });
+            }
+
+            try {
+                const response = await fetch(`/api/items/${itemId}/parse-content`, { method: 'POST' });
+                const data = await response.json().catch(() => ({}));
+                if (!response.ok) throw new Error(data.detail || '解析失败');
+
+                mergeUpdatedItem(data);
+                renderItems(filteredEntries);
+                if (currentOpenItemId === itemId) {
+                    isNotePanelOpen = true;
+                    openModalByItem(data, { keepNotePanel: true });
+                }
+                showToast('内容解析完成', 'success');
+            } catch (error) {
+                const failedItem = getItemById(itemId);
+                if (failedItem) {
+                    mergeUpdatedItem({
+                        ...failedItem,
+                        parse_status: 'failed',
+                        parse_error: error.message,
+                    });
+                    renderItems(filteredEntries);
+                    if (currentOpenItemId === itemId) {
+                        isNotePanelOpen = true;
+                        openModalByItem(getItemById(itemId), { keepNotePanel: true });
+                    }
+                }
+                showToast(`解析失败：${error.message}`, 'error');
+            } finally {
+                manualParseInFlightItemId = null;
+                renderItems(filteredEntries);
+                const nextItem = getItemById(itemId);
+                if (nextItem && currentOpenItemId === itemId) {
+                    openModalByItem(nextItem, { keepNotePanel: true });
+                }
+            }
+        }
+
+        async function saveItemNote(itemId) {
+            const textarea = document.getElementById('readerNoteTextarea');
+            if (!textarea || noteSaveInFlight) return;
+
+            noteSaveInFlight = true;
+            const draftText = textarea.value || '';
+            const currentItem = getItemById(itemId);
+            if (currentItem && currentOpenItemId === itemId) {
+                renderNotePanel({ ...currentItem, extracted_text: draftText });
+            }
+
+            try {
+                const response = await fetch(`/api/items/${itemId}/note`, {
+                    method: 'PATCH',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ extracted_text: draftText }),
+                });
+                const data = await response.json().catch(() => ({}));
+                if (!response.ok) throw new Error(data.detail || '保存失败');
+
+                mergeUpdatedItem(data);
+                renderItems(filteredEntries);
+                if (currentOpenItemId === itemId) {
+                    openModalByItem(data, { keepNotePanel: true });
+                }
+                showToast('解析笔记已保存', 'success');
+            } catch (error) {
+                showToast(`保存失败：${error.message}`, 'error');
+            } finally {
+                noteSaveInFlight = false;
+                const nextItem = getItemById(itemId);
+                if (nextItem && currentOpenItemId === itemId) {
+                    openModalByItem(nextItem, { keepNotePanel: true });
+                }
+            }
+        }
+
         function openModalById(itemId) {
             const item = itemsData.find((entry) => entry.id === itemId);
             if (!item) return;
             openModalByItem(item);
         }
 
-        function openModalByItem(item) {
+        function openModalByItem(item, options = {}) {
+            const keepNotePanel = Boolean(options.keepNotePanel);
             currentOpenItemId = item.id;
             renderItems(filteredEntries);
-            setModalFullscreen(false);
+            if (!keepNotePanel) {
+                isNotePanelOpen = false;
+            }
             modalTitle.innerText = getDisplayItemTitle(item);
             readerStatusDots.innerHTML = `
                 <span class="knowledge-dot notion ${item.notion_page_id ? 'is-ready' : 'is-idle'}" title="Notion${item.notion_page_id ? '已同步' : '未同步'}"></span>
                 <span class="knowledge-dot obsidian ${item.obsidian_path ? 'is-ready' : 'is-idle'}" title="Obsidian${item.obsidian_path ? '已同步' : '未同步'}"></span>
             `;
+            renderNotePanel(item);
             const platform = normalizePlatform(item.platform || '');
             const isCarouselPlatform = platform === 'xiaohongshu' || platform === 'douyin';
             const videos = (item.media || []).filter(m => m.type === 'video');
@@ -322,7 +470,7 @@
 
             modalFooter.innerHTML = `
                 <div class="modal-footer-actions">
-                    <button onclick="openFolderPickerForItem('${item.id}', '管理文件夹')" class="extract-btn modal-action-btn">管理文件夹</button>
+                    <button onclick="parseItemContent('${item.id}')" class="extract-btn modal-action-btn" ${manualParseInFlightItemId === item.id || item.parse_status === 'processing' ? 'disabled' : ''}>${manualParseInFlightItemId === item.id || item.parse_status === 'processing' ? '解析中...' : '解析内容'}</button>
                     <button onclick="syncItem('${item.id}', 'notion')" class="extract-btn modal-action-btn">${item.notion_page_id ? '再次检查 Notion 同步' : '同步至 Notion'}</button>
                     <button onclick="syncItem('${item.id}', 'obsidian')" class="extract-btn modal-action-btn">${item.obsidian_path ? '再次检查 Obsidian 同步' : '同步至 Obsidian'}</button>
                     <button onclick="downloadZip('${item.id}')" class="extract-btn modal-action-btn">下载 ZIP</button>
@@ -381,7 +529,12 @@
             modalOverlay.classList.remove('active');
             document.body.style.overflow = '';
             currentOpenItemId = null;
-            setModalFullscreen(false);
+            noteSaveInFlight = false;
+            isNotePanelOpen = false;
+            if (readerNotePanel) {
+                readerNotePanel.innerHTML = '';
+            }
+            setNotePanelOpen(false);
             readerStatusDots.innerHTML = '';
             modalFooter.innerHTML = '';
             renderItems(filteredEntries);
@@ -420,15 +573,17 @@
             }
         });
 
-        toggleFullscreenBtn.onclick = () => {
-            setModalFullscreen();
-        };
+        if (toggleNoteBtn) {
+            toggleNoteBtn.onclick = () => {
+                setNotePanelOpen();
+            };
 
-        toggleFullscreenBtn.addEventListener('keydown', (e) => {
-            if (e.key === 'Enter' || e.key === ' ') {
-                e.preventDefault();
-                setModalFullscreen();
-            }
-        });
+            toggleNoteBtn.addEventListener('keydown', (e) => {
+                if (e.key === 'Enter' || e.key === ' ') {
+                    e.preventDefault();
+                    setNotePanelOpen();
+                }
+            });
+        }
 
         bootstrapAuth();

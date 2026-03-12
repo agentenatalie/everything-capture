@@ -202,6 +202,17 @@ class HtmlFallbackFormattingTests(unittest.TestCase):
         self.assertIn("- Claude Code Plugin support\n- Custom agent (subagent) support", note)
         self.assertNotIn("- Claude Code Plugin support\n\n- Custom agent (subagent) support", note)
 
+    def test_obsidian_note_appends_parsed_text_at_the_end_inside_triple_quotes(self) -> None:
+        item = self.make_item()
+        item.extracted_text = "[ocr_text]\n图片里的原始文字"
+
+        note = _build_obsidian_note(
+            item,
+            {"/static/media/first.png": "EverythingCapture_Media/item-1234/first.png"},
+        )
+
+        self.assertTrue(note.rstrip().endswith("'''\n[ocr_text]\n图片里的原始文字\n'''"))
+
     def test_obsidian_note_skips_douyin_cover_when_video_exists(self) -> None:
         item = Item(
             id="item-douyin",
@@ -279,6 +290,23 @@ class HtmlFallbackFormattingTests(unittest.TestCase):
 
         self.assertEqual([child["type"] for child in children[:2]], ["paragraph", "bookmark"])
         self.assertEqual(children[1]["bookmark"]["url"], "https://cdn.example.com/douyin-video.mp4")
+
+    def test_notion_children_append_parsed_text_after_source(self) -> None:
+        item = self.make_item()
+        item.extracted_text = "[frame_texts]\n00:01\n视频里的原始文字"
+
+        children = asyncio.run(
+            _build_notion_children(
+                object(),
+                {"Authorization": "Bearer test", "Notion-Version": "2025-09-03"},
+                item,
+            )
+        )
+
+        self.assertEqual(children[-3]["paragraph"]["rich_text"][0]["text"]["content"], "'''")
+        self.assertEqual(children[-2]["type"], "code")
+        self.assertIn("视频里的原始文字", children[-2]["code"]["rich_text"][0]["text"]["content"])
+        self.assertEqual(children[-1]["paragraph"]["rich_text"][0]["text"]["content"], "'''")
 
     def test_xiaohongshu_sync_omits_trailing_topic_tags(self) -> None:
         item = Item(

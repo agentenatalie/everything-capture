@@ -8,7 +8,7 @@
     <link
         href="https://fonts.googleapis.com/css2?family=Manrope:wght@500;600;700&family=Noto+Sans+SC:wght@400;500;600;700&display=swap"
         rel="stylesheet">
-    <link rel="stylesheet" href="/static/css/index.css">
+    <link rel="stylesheet" href="/static/css/index.css?v=20260311b">
 </head>
 
 <body>
@@ -202,9 +202,12 @@
                     <div class="modal-status-dots" id="readerStatusDots" aria-label="知识库同步状态"></div>
                 </div>
                 <div class="reader-toolbar-right">
-                    <span class="reader-action" id="toggleFullscreenBtn" role="button" tabindex="0" aria-label="全屏阅读">
+                    <span class="reader-action" id="toggleNoteBtn" role="button" tabindex="0" aria-label="查看解析笔记">
                         <svg viewBox="0 0 24 24" fill="none" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                            <path d="M8 3H3v5M16 3h5v5M21 16v5h-5M8 21H3v-5"></path>
+                            <path d="M7.5 4.75h6.9l2.85 2.85v11.65H7.5A2.25 2.25 0 0 1 5.25 17V7A2.25 2.25 0 0 1 7.5 4.75Z"></path>
+                            <path d="M14.25 4.75V8h3.25"></path>
+                            <path d="M9 11h6"></path>
+                            <path d="M9 14h6"></path>
                         </svg>
                     </span>
                     <span class="reader-action" id="closeModal" role="button" tabindex="0" aria-label="关闭">
@@ -214,6 +217,7 @@
                     </span>
                 </div>
             </div>
+            <div class="reader-note-panel" id="readerNotePanel"></div>
             <div class="modal-body" id="modalContent">内容加载中...</div>
             <div class="modal-footer" id="modalFooter"></div>
         </div>
@@ -373,13 +377,13 @@
 
     <div class="folder-context-menu" id="folderContextMenu"></div>
 
-    <script src="/static/js/app-core.js"></script>
-    <script src="/static/js/app-auth.js"></script>
-    <script src="/static/js/app-settings.js"></script>
-    <script src="/static/js/app-command.js"></script>
-    <script src="/static/js/app-folders.js"></script>
-    <script src="/static/js/app-content.js"></script>
-    <script src="/static/js/app-items.js"></script>
+    <script src="/static/js/app-core.js?v=20260311b"></script>
+    <script src="/static/js/app-auth.js?v=20260311b"></script>
+    <script src="/static/js/app-settings.js?v=20260311b"></script>
+    <script src="/static/js/app-command.js?v=20260311b"></script>
+    <script src="/static/js/app-folders.js?v=20260311b"></script>
+    <script src="/static/js/app-content.js?v=20260311b"></script>
+    <script src="/static/js/app-items.js?v=20260311b"></script>
 </body>
 
 </html>

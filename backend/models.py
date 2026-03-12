@@ -69,6 +69,14 @@ class Item(Base):
     debug_json = Column(String, nullable=True)
     content_blocks_json = Column(String, nullable=True)  # JSON: [{type:text|image, content|url}]
     folder_id = Column(String, ForeignKey("folders.id"), nullable=True, index=True)
+    extracted_text = Column(String, nullable=True)
+    ocr_text = Column(String, nullable=True)
+    frame_texts_json = Column(String, nullable=True)
+    urls_json = Column(String, nullable=True)
+    qr_links_json = Column(String, nullable=True)
+    parse_status = Column(String, nullable=False, default="idle")
+    parse_error = Column(String, nullable=True)
+    parsed_at = Column(DateTime, nullable=True)
 
     user = relationship("User", back_populates="items", lazy="joined")
     workspace = relationship("Workspace", back_populates="items", lazy="joined")

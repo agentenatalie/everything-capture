@@ -10,6 +10,7 @@ from auth import extract_session_token, is_shortcut_bearer_token
 from database import get_db, SessionLocal
 from models import Item, Media, Settings
 from schemas import IngestRequest, IngestResponse, ExtractRequest, ExtractResponse
+from routers.items import background_parse_item_content
 from services.extractor import _SAFE_ATTRS, _SAFE_TAGS, extract_content
 from services.downloader import download_media_list, probe_video_duration_seconds
 from tenant import get_current_user_id
@@ -53,6 +54,14 @@ def background_auto_sync(item_id: str, user_id: str):
         asyncio.run(run_sync())
     finally:
         db.close()
+
+
+def _has_parseable_media(media_list: list[dict] | None) -> bool:
+    return any(
+        (entry.get("type") or "").lower() in {"image", "cover", "video"}
+        for entry in (media_list or [])
+        if isinstance(entry, dict)
+    )
 
 
 def _normalize_http_url(candidate: str | None) -> str | None:
@@ -254,6 +263,8 @@ def background_finalize_extracted_media(
         db.commit()
         logger.info("后台媒体处理完成 %d 个文件 (item: %s)", downloaded_count, item_id)
 
+        if _has_parseable_media(media_list):
+            background_parse_item_content(item_id, user_id)
         background_auto_sync(item_id, user_id)
     except Exception as exc:
         db.rollback()
@@ -460,6 +471,8 @@ async def execute_extract_request(
                 )
                 db.commit()
                 logger.info("同步媒体处理完成 %d 个文件 (item: %s)", media_count, new_item.id)
+                if _has_parseable_media(result.media_urls):
+                    background_tasks.add_task(background_parse_item_content, new_item.id, user_id)
                 background_tasks.add_task(background_auto_sync, new_item.id, user_id)
         else:
             background_tasks.add_task(background_auto_sync, new_item.id, user_id)

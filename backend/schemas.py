@@ -40,6 +40,14 @@ class ItemResponse(BaseModel):
     platform: str
     notion_page_id: Optional[str] = None
     obsidian_path: Optional[str] = None
+    extracted_text: Optional[str] = None
+    ocr_text: Optional[str] = None
+    frame_texts: list[dict] = Field(default_factory=list)
+    urls: list[str] = Field(default_factory=list)
+    qr_links: list[str] = Field(default_factory=list)
+    parse_status: str = "idle"
+    parse_error: Optional[str] = None
+    parsed_at: Optional[datetime] = None
     folder_id: Optional[str] = None
     folder_name: Optional[str] = None
     folder_ids: list[str] = Field(default_factory=list)
@@ -147,6 +155,10 @@ class FolderUpdateRequest(BaseModel):
 class ItemFolderUpdateRequest(BaseModel):
     folder_id: Optional[str] = None
     folder_ids: list[str] = Field(default_factory=list)
+
+
+class ItemNoteUpdateRequest(BaseModel):
+    extracted_text: str = ""
 
 
 class BulkFolderUpdateRequest(BaseModel):

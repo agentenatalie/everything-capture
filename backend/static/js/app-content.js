@@ -1018,13 +1018,15 @@
             `;
         }
 
-        function setModalFullscreen(nextValue) {
-            isModalFullscreen = typeof nextValue === 'boolean' ? nextValue : !isModalFullscreen;
-            modalShell.classList.toggle('is-fullscreen', isModalFullscreen);
-            toggleFullscreenBtn.setAttribute('aria-label', isModalFullscreen ? '退出全屏' : '全屏阅读');
-            toggleFullscreenBtn.innerHTML = isModalFullscreen
-                ? `<svg viewBox="0 0 24 24" fill="none" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 3H3v6M15 3h6v6M21 15v6h-6M3 15v6h6"></path></svg>`
-                : `<svg viewBox="0 0 24 24" fill="none" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 3H3v5M16 3h5v5M21 16v5h-5M8 21H3v-5"></path></svg>`;
+        function setNotePanelOpen(nextValue) {
+            isNotePanelOpen = typeof nextValue === 'boolean' ? nextValue : !isNotePanelOpen;
+            if (readerNotePanel) {
+                readerNotePanel.classList.toggle('active', isNotePanelOpen);
+            }
+            if (toggleNoteBtn) {
+                toggleNoteBtn.classList.toggle('is-active', isNotePanelOpen);
+                toggleNoteBtn.setAttribute('aria-label', isNotePanelOpen ? '收起解析笔记' : '查看解析笔记');
+            }
         }
 
         function getItemThumbnail(item) {

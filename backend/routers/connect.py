@@ -163,6 +163,13 @@ def _split_rich_text_chunks(text: str, limit: int = NOTION_RICH_TEXT_LIMIT) -> l
     return [normalized[i:i + limit] for i in range(0, len(normalized), limit)]
 
 
+def _parsed_text_appendix(item: Item) -> str:
+    text = (item.extracted_text or "").replace("\r\n", "\n").replace("\r", "\n").strip()
+    if not text:
+        return ""
+    return "'''\n" + text + "\n'''"
+
+
 def _safe_note_name(title: str | None, fallback: str) -> str:
     cleaned = re.sub(r'[\\/:*?"<>|]', "_", (title or fallback).strip())
     cleaned = re.sub(r"\s+", " ", cleaned).strip(" .")
@@ -917,6 +924,44 @@ async def _build_notion_children(
             }
         )
 
+    parsed_text_appendix = _parsed_text_appendix(item)
+    if parsed_text_appendix:
+        notion_children.append(
+            {
+                "object": "block",
+                "type": "paragraph",
+                "paragraph": {
+                    "rich_text": [
+                        {"type": "text", "text": {"content": "'''"}},
+                    ]
+                },
+            }
+        )
+        for chunk in _split_rich_text_chunks(item.extracted_text or ""):
+            notion_children.append(
+                {
+                    "object": "block",
+                    "type": "code",
+                    "code": {
+                        "rich_text": [
+                            {"type": "text", "text": {"content": chunk}},
+                        ],
+                        "language": "plain text",
+                    },
+                }
+            )
+        notion_children.append(
+            {
+                "object": "block",
+                "type": "paragraph",
+                "paragraph": {
+                    "rich_text": [
+                        {"type": "text", "text": {"content": "'''"}},
+                    ]
+                },
+            }
+        )
+
     return notion_children
 
 
@@ -1047,6 +1092,11 @@ def _build_obsidian_note(item: Item, media_references: dict[str, str]) -> str:
 
     if item.source_url:
         parts.append(f"[Source]({item.source_url})\n")
+
+    parsed_text_appendix = _parsed_text_appendix(item)
+    if parsed_text_appendix:
+        parts.append("\n" if not parts[-1].endswith("\n") else "")
+        parts.append(parsed_text_appendix + "\n")
 
     return "".join(parts)
 

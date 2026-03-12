@@ -156,6 +156,22 @@ def ensure_runtime_schema():
             )
         if "folder_id" not in item_columns:
             connection.exec_driver_sql("ALTER TABLE items ADD COLUMN folder_id VARCHAR REFERENCES folders(id)")
+        if "extracted_text" not in item_columns:
+            connection.exec_driver_sql("ALTER TABLE items ADD COLUMN extracted_text VARCHAR")
+        if "ocr_text" not in item_columns:
+            connection.exec_driver_sql("ALTER TABLE items ADD COLUMN ocr_text VARCHAR")
+        if "frame_texts_json" not in item_columns:
+            connection.exec_driver_sql("ALTER TABLE items ADD COLUMN frame_texts_json VARCHAR")
+        if "urls_json" not in item_columns:
+            connection.exec_driver_sql("ALTER TABLE items ADD COLUMN urls_json VARCHAR")
+        if "qr_links_json" not in item_columns:
+            connection.exec_driver_sql("ALTER TABLE items ADD COLUMN qr_links_json VARCHAR")
+        if "parse_status" not in item_columns:
+            connection.exec_driver_sql("ALTER TABLE items ADD COLUMN parse_status VARCHAR NOT NULL DEFAULT 'idle'")
+        if "parse_error" not in item_columns:
+            connection.exec_driver_sql("ALTER TABLE items ADD COLUMN parse_error VARCHAR")
+        if "parsed_at" not in item_columns:
+            connection.exec_driver_sql("ALTER TABLE items ADD COLUMN parsed_at DATETIME")
         connection.exec_driver_sql(
             "UPDATE items SET user_id = ? WHERE user_id IS NULL OR trim(user_id) = ''",
             (DEFAULT_USER_ID,),
@@ -164,9 +180,14 @@ def ensure_runtime_schema():
             "UPDATE items SET workspace_id = ? WHERE workspace_id IS NULL OR trim(workspace_id) = ''",
             (DEFAULT_WORKSPACE_ID,),
         )
+        connection.exec_driver_sql(
+            "UPDATE items SET parse_status = 'idle' WHERE parse_status IS NULL OR trim(parse_status) = ''"
+        )
         connection.exec_driver_sql("CREATE INDEX IF NOT EXISTS idx_items_user_id ON items(user_id)")
         connection.exec_driver_sql("CREATE INDEX IF NOT EXISTS idx_items_workspace_id ON items(workspace_id)")
         connection.exec_driver_sql("CREATE INDEX IF NOT EXISTS idx_items_folder_id ON items(folder_id)")
+        connection.exec_driver_sql("CREATE INDEX IF NOT EXISTS idx_items_parse_status ON items(parse_status)")
+        connection.exec_driver_sql("CREATE INDEX IF NOT EXISTS idx_items_parsed_at ON items(parsed_at)")
 
         connection.exec_driver_sql(
             """

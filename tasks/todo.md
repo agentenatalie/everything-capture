@@ -75,3 +75,9 @@
 - [x] Expose item folder assignment as a sync property when writing to Notion and Obsidian
 - [x] Keep synced folder names ordered the same way as item serialization and UI display
 - [x] Verify folder sync metadata with focused connect formatting tests
+- [x] Add an isolated content-internal extraction module for OCR, QR/link extraction, video frame text extraction, and plain-text structure extraction
+- [x] Persist parsed extraction results on items without changing the existing extraction core flow
+- [x] Auto-trigger content parsing after new uploads finish media download, while keeping existing extraction behavior intact
+- [x] Add a manual parse action plus editable note section UI, replacing the old folder-management entry points
+- [x] Append parsed text to Notion/Obsidian sync output only at the end inside triple quotes
+- [x] Verify the new parsing flow with focused backend and frontend-adjacent tests

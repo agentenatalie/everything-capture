@@ -1,5 +1,6 @@
 import os
 import io
+import json
 import re
 import zipfile
 from collections import OrderedDict
@@ -12,16 +13,18 @@ from fastapi import APIRouter, Depends, HTTPException, Response
 from fastapi.responses import StreamingResponse
 from sqlalchemy import func, or_
 from sqlalchemy.orm import Session
-from database import get_db
+from database import SessionLocal, get_db
 from models import Folder, Item, ItemFolderLink
 from schemas import (
     BulkFolderUpdateRequest,
     BulkFolderUpdateResponse,
     ItemFolderUpdateRequest,
+    ItemNoteUpdateRequest,
     ItemResponse,
     MediaResponse,
 )
 from paths import STATIC_DIR
+from services.content_extraction import ContentExtractionError, parse_item_content
 from tenant import get_current_user_id
 
 router = APIRouter(
@@ -250,6 +253,20 @@ def serialize_items(items: list[Item]) -> list[ItemResponse]:
         folder_names = [link.folder.name for link in ordered_folder_links if link.folder and link.folder.name]
         primary_folder_id = folder_ids[0] if folder_ids else None
         primary_folder_name = folder_names[0] if folder_names else None
+
+        try:
+            frame_texts = json.loads(item.frame_texts_json) if item.frame_texts_json else []
+        except json.JSONDecodeError:
+            frame_texts = []
+        try:
+            urls = json.loads(item.urls_json) if item.urls_json else []
+        except json.JSONDecodeError:
+            urls = []
+        try:
+            qr_links = json.loads(item.qr_links_json) if item.qr_links_json else []
+        except json.JSONDecodeError:
+            qr_links = []
+
         results.append(ItemResponse(
             id=item.id,
             created_at=item.created_at,
@@ -262,6 +279,14 @@ def serialize_items(items: list[Item]) -> list[ItemResponse]:
             platform=item.platform,
             notion_page_id=item.notion_page_id,
             obsidian_path=item.obsidian_path,
+            extracted_text=item.extracted_text,
+            ocr_text=item.ocr_text,
+            frame_texts=frame_texts if isinstance(frame_texts, list) else [],
+            urls=urls if isinstance(urls, list) else [],
+            qr_links=qr_links if isinstance(qr_links, list) else [],
+            parse_status=(item.parse_status or "idle"),
+            parse_error=item.parse_error,
+            parsed_at=item.parsed_at,
             folder_id=primary_folder_id,
             folder_name=primary_folder_name,
             folder_ids=folder_ids,
@@ -392,6 +417,50 @@ def _cleanup_item_media_files(local_paths: list[str]) -> None:
             except OSError:
                 break
             current_dir = current_dir.parent
+
+
+def _store_item_parse_result(item: Item, parse_result) -> None:
+    item.extracted_text = parse_result.extracted_text or None
+    item.ocr_text = parse_result.ocr_text or None
+    item.frame_texts_json = json.dumps(parse_result.frame_texts or [], ensure_ascii=False)
+    item.urls_json = json.dumps(parse_result.urls or [], ensure_ascii=False)
+    item.qr_links_json = json.dumps(parse_result.qr_links or [], ensure_ascii=False)
+    item.parse_status = parse_result.parse_status or "completed"
+    item.parse_error = parse_result.parse_error
+    item.parsed_at = parse_result.parsed_at
+
+
+def _store_item_parse_failure(item: Item, message: str) -> None:
+    item.parse_status = "failed"
+    item.parse_error = str(message or "Content parsing failed")
+
+
+def parse_item_content_for_item(item: Item) -> None:
+    parse_result = parse_item_content(item)
+    _store_item_parse_result(item, parse_result)
+
+
+def background_parse_item_content(item_id: str, user_id: str) -> None:
+    with SessionLocal() as db:
+        item = db.query(Item).filter(Item.id == item_id, Item.user_id == user_id).first()
+        if not item:
+            return
+
+        item.parse_status = "processing"
+        item.parse_error = None
+        db.commit()
+        db.refresh(item)
+
+        try:
+            parse_item_content_for_item(item)
+            db.commit()
+        except Exception as exc:
+            db.rollback()
+            item = db.query(Item).filter(Item.id == item_id, Item.user_id == user_id).first()
+            if not item:
+                return
+            _store_item_parse_failure(item, str(exc))
+            db.commit()
 
 
 def normalize_search_text(value: str) -> str:
@@ -715,6 +784,62 @@ def bulk_update_item_folder(
 
     db.commit()
     return BulkFolderUpdateResponse(updated_count=len(items))
+
+
+@router.post("/items/{item_id}/parse-content", response_model=ItemResponse)
+def parse_item_content_endpoint(item_id: str, db: Session = Depends(get_db)):
+    user_id = get_current_user_id()
+    item = db.query(Item).filter(Item.id == item_id, Item.user_id == user_id).first()
+    if not item:
+        raise HTTPException(status_code=404, detail="Item not found")
+
+    item.parse_status = "processing"
+    item.parse_error = None
+    db.commit()
+    db.refresh(item)
+
+    try:
+        parse_item_content_for_item(item)
+        db.commit()
+        db.refresh(item)
+        return serialize_items([item])[0]
+    except ContentExtractionError as exc:
+        db.rollback()
+        item = db.query(Item).filter(Item.id == item_id, Item.user_id == user_id).first()
+        if item:
+            _store_item_parse_failure(item, str(exc))
+            db.commit()
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+    except Exception as exc:
+        db.rollback()
+        item = db.query(Item).filter(Item.id == item_id, Item.user_id == user_id).first()
+        if item:
+            _store_item_parse_failure(item, "Content parsing failed")
+            db.commit()
+        raise HTTPException(status_code=500, detail="Content parsing failed") from exc
+
+
+@router.patch("/items/{item_id}/note", response_model=ItemResponse)
+def update_item_note(
+    item_id: str,
+    request: ItemNoteUpdateRequest,
+    db: Session = Depends(get_db),
+):
+    user_id = get_current_user_id()
+    item = db.query(Item).filter(Item.id == item_id, Item.user_id == user_id).first()
+    if not item:
+        raise HTTPException(status_code=404, detail="Item not found")
+
+    next_text = (request.extracted_text or "").strip()
+    item.extracted_text = next_text or None
+    if item.extracted_text and (item.parse_status or "idle") == "idle":
+        item.parse_status = "completed"
+    if item.extracted_text and item.parsed_at is None:
+        item.parsed_at = datetime.utcnow()
+
+    db.commit()
+    db.refresh(item)
+    return serialize_items([item])[0]
 
 @router.delete("/items/{item_id}", status_code=204)
 def delete_item(item_id: str, db: Session = Depends(get_db)):

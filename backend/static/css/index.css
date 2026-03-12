@@ -1880,10 +1880,74 @@
             color: #0f172a;
         }
 
+        .reader-action.is-active {
+            color: #0f172a;
+        }
+
         .reader-action svg {
             width: 16px;
             height: 16px;
             stroke: currentColor;
+        }
+
+        .reader-note-panel {
+            display: none;
+            padding: 0 1.5rem 1rem;
+            background: #ffffff;
+        }
+
+        .reader-note-panel.active {
+            display: block;
+        }
+
+        .reader-note-shell {
+            border: 1px solid rgba(226, 232, 240, 0.95);
+            border-radius: 18px;
+            background: #f8fafc;
+            padding: 1rem;
+        }
+
+        .reader-note-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 12px;
+            margin-bottom: 0.85rem;
+        }
+
+        .reader-note-title {
+            font-size: 0.94rem;
+            font-weight: 700;
+            color: #0f172a;
+        }
+
+        .reader-note-meta {
+            font-size: 0.82rem;
+            color: #64748b;
+        }
+
+        .reader-note-textarea {
+            width: 100%;
+            min-height: 180px;
+            border-radius: 14px;
+            border: 1px solid rgba(203, 213, 225, 0.95);
+            background: #ffffff;
+            padding: 0.9rem 1rem;
+            color: #334155;
+            font: inherit;
+            line-height: 1.6;
+            resize: vertical;
+            outline: none;
+        }
+
+        .reader-note-textarea:focus {
+            border-color: #94a3b8;
+        }
+
+        .reader-note-actions {
+            display: flex;
+            justify-content: flex-end;
+            margin-top: 0.85rem;
         }
 
         .modal-body {

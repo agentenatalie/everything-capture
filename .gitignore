@@ -35,6 +35,11 @@ pip-wheel-metadata/
 .python-version
 *.log
 
+# Local planning / notes
+plans/
+tasks/
+md-docs/
+
 # Temporary debug artifacts
 tmp-*
 tmp_*

@@ -1,67 +1,122 @@
 # Everything Capture
 
-一个本地优先的内容收录与知识库整理仓库，核心目标是：
+Everything Capture 是一个本地优先的内容采集和知识库整理系统。
 
+它把「采集入口」和「真正的抓取/下载/同步」拆开：
+
+- 本地 `backend/` 负责正文提取、媒体下载、知识库浏览、Notion / Obsidian 同步、AI 能力
+- 可选云端 `capture_service/` 只负责接收手机网页 / Shortcut / Share Sheet 的收录请求，并把任务放进队列
+- 本地 `processing_worker` 从云端队列拉任务，完成真正的 extraction
+
+这套结构适合你把手机端入口部署出去，同时把敏感或重型的 extraction 保留在自己的电脑上。
+
+## 功能概览
+
+- 从桌面、本地网页、手机网页、iPhone Shortcut 提交 URL 或文本
 - 抓取网页 / 社交平台内容
-- 下载并保存本地媒体
-- 在站内统一浏览、整理、搜索内容
-- 同步到 Notion / Obsidian
-- 基于同一套知识源提供 AI Chat / Agent 能力
+- 下载图片、封面、视频等媒体到本地
+- 把内容存入本地 SQLite 知识库并在 Web UI 中浏览、搜索、整理、归档到文件夹
+- 可选同步到 Notion / Obsidian
+- 可选接入 AI，对本地知识库做问答、分析和关联
+
+## 架构
+
+```text
+Desktop browser / local UI
+        -> local backend
+        -> backend/items.db + backend/static/media
+
+Phone / Share Sheet / Shortcut
+        -> optional cloud capture_service
+        -> pending queue
+        -> local processing_worker
+        -> local backend extraction pipeline
+        -> backend/items.db + backend/static/media
+```
+
+一句话版本：
+
+- 只想本地用：跑 `backend/` 就够了
+- 想让手机也能随时投递：再部署 `capture_service/`
 
 ## 仓库结构
 
 ```text
 everything-capture/
-├── backend/            FastAPI 主应用、前端静态资源、同步与 AI 能力
-├── capture_service/    可选的云端 capture 队列服务
-├── md-docs/            交接文档、架构说明、实现备忘
-├── scripts/            部署/打包辅助脚本
-├── tasks/              本地任务与经验记录
-└── run                 本地启动入口
+├── backend/            本地主应用、SQLite、静态前端、同步与 AI 能力
+├── capture_service/    可单独部署的手机收件箱 / 队列服务
+├── scripts/            部署辅助脚本
+├── run                 本地启动入口
+└── .gitignore          已忽略本地数据库、媒体、日志、私有笔记等
 ```
 
-## 主要目录
+关键文件：
 
-- [backend](backend)
-  站内主应用。包含 API 路由、SQLAlchemy 模型、同步服务、AI 服务，以及前端静态页面。
-- [capture_service](capture_service)
-  面向手机 WebApp / Shortcut 的可选 capture 队列服务。
-- [md-docs](md-docs)
-  历史设计说明和项目背景。适合补上下文，不适合作为运行入口。
+- `backend/main.py`
+  本地 FastAPI 应用入口，首页就是本地知识库 UI。
+- `backend/items.db`
+  本地主数据库。
+- `backend/static/media/`
+  下载到本地的媒体文件。
+- `backend/processing_worker.py`
+  本地队列消费者。只有配置了 `CAPTURE_SERVICE_URL` 时才需要。
+- `capture_service/api.py`
+  云端 capture API + 手机网页入口。
+- `scripts/prepare_capture_vercel_deploy.py`
+  生成一个只包含 `capture_service` 的 Vercel 部署包。
 
 ## 本地运行
 
-仓库自带一个 `run` 脚本，默认会：
+### 前提
 
-- 启动 `backend.main:app`
-- 监听 `0.0.0.0:8000`
-- 在配置了 `CAPTURE_SERVICE_URL` 时自动拉起本地 processing worker
+- Python 3.11
+- 一个可用的虚拟环境，路径为 `backend/venv`
+- 如果要处理视频，建议本机安装 `ffmpeg`
 
-示例：
+说明：
+
+- 这个仓库当前默认使用 `backend/venv` 这一路径
+- 项目里暂时没有公开发布用的锁定依赖清单；README 以下命令默认你已经准备好了这个虚拟环境
+
+### 启动主应用
 
 ```bash
+cd /path/to/everything-capture
 ./run
 ```
 
-如果你只想手动起后端，也可以直接用 `uvicorn`，但这个仓库当前默认工作流是走 [`run`](run)。
+默认行为：
 
-## 上传 GitHub 前的约定
+- 启动本地 Web UI：`http://127.0.0.1:8000`
+- 如果 `backend/.local/capture_service.env` 存在且配置了 `CAPTURE_SERVICE_URL`，自动同时启动本地 processing worker
 
-以下内容默认不应提交：
+本地数据默认写到：
 
-- 本地数据库，例如 `*.db`
-- 虚拟环境，例如 `backend/venv/`
-- 下载媒体与运行缓存，例如 `backend/static/media/`、`backend/.local/`
-- 临时截图、调试文件，例如 `tmp-*`
-- 本地 IDE / Claude 配置
+- 数据库：`backend/items.db`
+- 媒体：`backend/static/media/`
+- 本地运行状态：`backend/.local/`
 
-这些规则已经写进 [`.gitignore`](.gitignore)。
+### 不启用云端队列时
 
-## 文档入口
+如果你只在本机浏览器里使用这个项目，不需要部署任何云端服务：
 
-- 总体背景说明：[`md-docs/README.md`](md-docs/README.md)
-- 云端 capture 服务说明：[`capture_service/README.md`](capture_service/README.md)
+1. 运行 `./run`
+2. 打开 `http://127.0.0.1:8000`
+3. 直接在本地 UI 里导入 / 抓取内容
 
-## 备注
+## 手机端 / 云端收件箱
 
-这个仓库现在是“源码 + 本地运行状态”混在一起使用的形态。上传 GitHub 时，建议只保留源码、文档、脚本和测试，把所有本地运行产物留在忽略规则里。
+如果你想从手机、Shortcut、分享菜单把内容先丢到云上，再由自己电脑慢慢处理，就部署 `capture_service/`。
+
+- 云端 capture 组件说明：[capture_service/README.md](./capture_service/README.md)
+
+## 可选集成
+
+这些都不是项目运行的硬前提，但可以在本地模式里打开：
+
+- Notion 同步
+- Obsidian 同步
+- AI Base URL / Model / API Key
+- Google / Email / Phone 认证相关能力
+
+如果你只是把这个仓库作为单人、本地优先工具来使用，可以完全不配置这些。

@@ -107,7 +107,7 @@ CAPTURE_SERVICE_DB_PATH=/path/to/capture.db
 在服务器上拉取仓库后：
 
 ```bash
-cd everything-grabber
+cd everything-capture
 python3 -m venv .venv
 . .venv/bin/activate
 pip install fastapi==0.135.1 sqlalchemy==2.0.47 pydantic==2.12.5 uvicorn==0.41.0 httpx==0.28.1
@@ -116,7 +116,7 @@ pip install fastapi==0.135.1 sqlalchemy==2.0.47 pydantic==2.12.5 uvicorn==0.41.0
 配置环境变量：
 
 ```bash
-export CAPTURE_SERVICE_DB_PATH="/data/everything-grabber/capture.db"
+export CAPTURE_SERVICE_DB_PATH="/data/everything-capture/capture.db"
 export CAPTURE_SERVICE_TOKEN="replace-with-a-long-random-token"
 ```
 
@@ -137,8 +137,8 @@ uvicorn capture_service.api:app --host 0.0.0.0 --port "$PORT"
 如果你不想把整个仓库都部署到云端，可以先生成单独的 capture 包：
 
 ```bash
-cd everything-grabber
-python3 scripts/prepare_capture_vercel_deploy.py /tmp/everything-grabber-capture
+cd everything-capture
+python3 scripts/prepare_capture_vercel_deploy.py /tmp/everything-capture-vercel
 ```
 
 然后只部署这个生成目录。
@@ -155,7 +155,7 @@ python3 scripts/prepare_capture_vercel_deploy.py /tmp/everything-grabber-capture
 至少配置：
 
 ```bash
-CAPTURE_SERVICE_DB_PATH=/data/everything-grabber/capture.db
+CAPTURE_SERVICE_DB_PATH=/data/everything-capture/capture.db
 CAPTURE_SERVICE_TOKEN=replace-with-a-long-random-token
 ```
 
@@ -197,21 +197,21 @@ CAPTURE_SERVICE_TOKEN="replace-with-the-same-token"
 直接运行：
 
 ```bash
-cd everything-grabber
+cd everything-capture
 ./run
 ```
 
 如果你只想手动跑 worker：
 
 ```bash
-cd everything-grabber/backend
+cd everything-capture/backend
 ../backend/venv/bin/python processing_worker.py
 ```
 
 只处理一轮然后退出：
 
 ```bash
-cd everything-grabber/backend
+cd everything-capture/backend
 ../backend/venv/bin/python processing_worker.py --once
 ```
 
@@ -365,7 +365,7 @@ tail -f backend/.local/processing_worker.log
 先确认本地 worker 是否真的能访问云端：
 
 ```bash
-cd everything-grabber/backend
+cd everything-capture/backend
 ../backend/venv/bin/python processing_worker.py --once
 ```
 

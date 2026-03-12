@@ -1,6 +1,6 @@
-# Capture Service
+# Everything Capture Service
 
-完整部署说明见 [DEPLOYMENT.md](/Users/hbz/everything-grabber/DEPLOYMENT.md)。
+完整部署说明见 [../md-docs/DEPLOYMENT.md](../md-docs/DEPLOYMENT.md)。
 
 Deploy this service to the cloud and keep the existing `backend/` app local. The deployed root path serves the phone capture webapp UI, and `/api/*` serves the capture endpoints.
 
@@ -33,7 +33,7 @@ It does not do scraping, media downloading, AI analysis, or local file sync.
 ## Run
 
 ```bash
-cd /Users/hbz/everything-grabber
+cd /Users/hbz/everything-capture
 backend/venv/bin/uvicorn capture_service.api:app --host 0.0.0.0 --port 9000
 ```
 
@@ -67,8 +67,8 @@ The nested `item` payload is still returned for richer clients.
 To build a deploy-only package for the capture layer:
 
 ```bash
-cd /Users/hbz/everything-grabber
-backend/venv/bin/python scripts/prepare_capture_vercel_deploy.py /tmp/everything-grabber-capture-vercel
+cd /Users/hbz/everything-capture
+backend/venv/bin/python scripts/prepare_capture_vercel_deploy.py /tmp/everything-capture-vercel
 ```
 
 Then deploy that generated folder instead of the whole repo.
@@ -85,7 +85,7 @@ export CAPTURE_SERVICE_TOKEN=your-token
 Then run the local processing worker:
 
 ```bash
-cd /Users/hbz/everything-grabber/backend
+cd /Users/hbz/everything-capture/backend
 ../backend/venv/bin/python processing_worker.py --once
 ```
 

@@ -71,7 +71,7 @@
   - `POST /api/auth/logout`
 - 会话机制：
   - `backend/main.py` 注册全局 middleware。
-  - 优先从 `everything_grabber_session` cookie 取 token，也支持 `Authorization: Bearer ...`。
+  - 优先从 `everything_capture_session` cookie 取 token，也支持 `Authorization: Bearer ...`。
   - middleware 解析成功后，将 `request.state.auth_user` 写入请求上下文，并把 `user_id` 放进 `ContextVar`。
   - 业务路由通过 `tenant.get_current_user_id()` 读取当前用户。
 - 当前结论：
@@ -341,4 +341,4 @@
 
 如果后续文档需要一句话描述当前系统，建议统一表述为：
 
-> 当前 Everything Grabber 是一个带 Web 登录会话、按用户隔离数据与集成配置的本地优先内容抓取系统；workspace、多租户媒体隔离、移动收录认证收敛与异步任务化仍处于过渡阶段。
+> 当前 Everything Capture 是一个带 Web 登录会话、按用户隔离数据与集成配置的本地优先内容抓取系统；workspace、多租户媒体隔离、移动收录认证收敛与异步任务化仍处于过渡阶段。

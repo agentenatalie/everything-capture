@@ -438,8 +438,8 @@ def _find_ffmpeg() -> str:
 
 HTTP_URL_PATTERN = re.compile(r"https?://[^\s<>'\"`]+", re.IGNORECASE)
 SWIFT_SCRIPT_PATH = Path(__file__).with_name("media_text_extract.swift")
-SWIFT_MODULE_CACHE_PATH = "/tmp/everything-grabber-swift-module-cache"
-SWIFT_CLANG_CACHE_PATH = "/tmp/everything-grabber-swift-clang-cache"
+SWIFT_MODULE_CACHE_PATH = "/tmp/everything-capture-swift-module-cache"
+SWIFT_CLANG_CACHE_PATH = "/tmp/everything-capture-swift-clang-cache"
 DEFAULT_PARSE_STATUS = "idle"
 SOURCE_TYPE_TEXT = "text"
 SOURCE_TYPE_IMAGE = "image"

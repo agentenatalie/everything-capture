@@ -124,8 +124,8 @@
             notion: new Set(),
             obsidian: new Set(),
         };
-        const ITEM_DRAG_DATA_TYPE = 'application/x-everything-grabber-item';
-        const FOLDER_DRAG_DATA_TYPE = 'application/x-everything-grabber-folder';
+        const ITEM_DRAG_DATA_TYPE = 'application/x-everything-capture-item';
+        const FOLDER_DRAG_DATA_TYPE = 'application/x-everything-capture-folder';
         let librarySearchTimer = null;
         let commandSearchTimer = null;
         let libraryRequestId = 0;
@@ -164,7 +164,7 @@
         let commandExtractInFlight = false;
         let lastCommandExtractSignature = '';
         let lastCommandExtractAt = 0;
-        const MOBILE_CAPTURE_SELECTED_FOLDER_STORAGE_KEY = 'everything-grabber-mobile-folder-selection-v1';
+        const MOBILE_CAPTURE_SELECTED_FOLDER_STORAGE_KEY = 'everything-capture-mobile-folder-selection-v1';
         let mobileCaptureSelectedFolderIds = (() => {
             try {
                 const raw = window.localStorage.getItem(MOBILE_CAPTURE_SELECTED_FOLDER_STORAGE_KEY);

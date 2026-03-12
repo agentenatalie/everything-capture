@@ -12,7 +12,7 @@ Base.metadata.create_all(bind=engine)
 ensure_runtime_schema()
 init_search_index()
 
-app = FastAPI(title="Everything Grabber API", version="1.0.0")
+app = FastAPI(title="Everything Capture API", version="1.0.0")
 
 @app.middleware("http")
 async def auth_session_middleware(request: Request, call_next):

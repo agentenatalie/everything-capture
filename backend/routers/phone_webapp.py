@@ -70,7 +70,7 @@ async def phone_extract_page(
                     "url": request.url or request.source_url,
                     "title": request.title,
                     "source": "phone-webapp",
-                    "source_app": "everything-grabber-phone",
+                    "source_app": "everything-capture-phone",
                     "folder_names": _resolve_phone_folder_names(request, db, user_id),
                 },
             )

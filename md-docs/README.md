@@ -1,6 +1,6 @@
-# Everything Grabber (万物收藏夹)
+# Everything Capture
 
-**Everything Grabber** 是一个跨平台的高质量内容抓取与知识管理系统，旨在帮助用户从各个主流平台（如小红书、微信公众号、抖音、X/Twitter 等）一键无缝抓取网页内容、解析正文，并将内容与多媒体资源永久保存。当前系统由 **FastAPI 服务端**、**网页看板**，以及面向手机浏览器 / iOS WebApp / Shortcut 的移动收录入口组成。
+**Everything Capture** 是一个跨平台的高质量内容抓取与知识管理系统，旨在帮助用户从各个主流平台（如小红书、微信公众号、抖音、X/Twitter 等）一键无缝抓取网页内容、解析正文，并将内容与多媒体资源永久保存。当前系统由 **FastAPI 服务端**、**网页看板**，以及面向手机浏览器 / iOS WebApp / Shortcut 的移动收录入口组成。
 
 ## 🌟 核心特性
 
@@ -18,7 +18,7 @@
 项目主要分为两大部分：
 
 ```text
-everything-grabber/
+everything-capture/
 ├── backend/               # FastAPI Python 后端服务
 │   ├── main.py            # 应用入口与路由注册
 │   ├── routers/           # API 路由 (ingest, extract, items, connect 等)
@@ -72,7 +72,7 @@ uvicorn main:app --reload --host 0.0.0.0 --port 8000
 
 ## 🔗 数据集成及延申
 
-在 `backend/routers/connect.py` 中，Everything Grabber 原生支持系统数据的导出与同步：
+在 `backend/routers/connect.py` 中，Everything Capture 原生支持系统数据的导出与同步：
 - **Notion**: 通过 Integration Token 可将您的收藏夹内容推送到指定的 Notion Database 中。
 - **Obsidian**: 凭借 Obsidian Local REST API 插件，可实现将 Markdown 格式的正文与结构化信息无缝同步至本地 Vault 中。
 

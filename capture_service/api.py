@@ -33,7 +33,7 @@ Base.metadata.create_all(bind=engine)
 STATIC_DIR = Path(__file__).resolve().parent / "static"
 FOLDER_SEED_PATH = Path(__file__).resolve().parent / "folder_seed.json"
 
-app = FastAPI(title="Everything Grabber Capture Service", version="1.0.0")
+app = FastAPI(title="Everything Capture Service", version="1.0.0")
 app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 
 
@@ -228,7 +228,7 @@ def healthz():
 def app_config():
     return {
         "success": True,
-        "service": "everything-grabber-capture-service",
+        "service": "everything-capture-service",
         "capture_endpoint": "/api/capture",
         "folders_endpoint": "/api/folders",
         "items_endpoint": "/api/items",

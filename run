@@ -5,12 +5,21 @@ ROOT_DIR="$(cd "$(dirname "$0")" && pwd)"
 APP_HOST="0.0.0.0"
 APP_PORT="8000"
 PYTHONPATH_VALUE="$ROOT_DIR:$ROOT_DIR/backend"
+VENV_PYTHON="$ROOT_DIR/backend/venv/bin/python"
 WORKER_PID_FILE="$ROOT_DIR/backend/.local/processing_worker.pid"
 WORKER_LOG_FILE="$ROOT_DIR/backend/.local/processing_worker.log"
 CAPTURE_SERVICE_ENV_FILE="$ROOT_DIR/backend/.local/capture_service.env"
 
 APP_PID=""
 WORKER_PID=""
+
+ensure_runtime_python() {
+  if [[ ! -x "$VENV_PYTHON" ]]; then
+    echo "Missing runtime Python at $VENV_PYTHON"
+    echo "Create the backend virtualenv first, then rerun ./run"
+    exit 1
+  fi
+}
 
 load_capture_service_env() {
   if [[ -f "$CAPTURE_SERVICE_ENV_FILE" ]]; then
@@ -69,7 +78,7 @@ start_capture_worker() {
   cleanup_existing_worker
 
   echo "Starting capture processing worker for $CAPTURE_SERVICE_URL"
-  env PYTHONPATH="$PYTHONPATH_VALUE" "$ROOT_DIR/backend/venv/bin/python" "$ROOT_DIR/backend/processing_worker.py" \
+  env PYTHONPATH="$PYTHONPATH_VALUE" "$VENV_PYTHON" "$ROOT_DIR/backend/processing_worker.py" \
     --interval "${CAPTURE_WORKER_INTERVAL:-15}" \
     >>"$WORKER_LOG_FILE" 2>&1 &
   WORKER_PID="$!"
@@ -91,11 +100,12 @@ cleanup() {
 cleanup_existing_server
 cleanup_existing_worker
 load_capture_service_env
+ensure_runtime_python
 
 trap cleanup EXIT INT TERM
 
 if [[ "${RUN_RELOAD:-1}" == "1" ]]; then
-  env PYTHONPATH="$PYTHONPATH_VALUE" "$ROOT_DIR/backend/venv/bin/uvicorn" backend.main:app \
+  env PYTHONPATH="$PYTHONPATH_VALUE" "$VENV_PYTHON" -m uvicorn backend.main:app \
     --host "$APP_HOST" \
     --port "$APP_PORT" \
     --reload \
@@ -106,7 +116,7 @@ if [[ "${RUN_RELOAD:-1}" == "1" ]]; then
   exit $?
 fi
 
-env PYTHONPATH="$PYTHONPATH_VALUE" "$ROOT_DIR/backend/venv/bin/uvicorn" backend.main:app --host "$APP_HOST" --port "$APP_PORT" &
+env PYTHONPATH="$PYTHONPATH_VALUE" "$VENV_PYTHON" -m uvicorn backend.main:app --host "$APP_HOST" --port "$APP_PORT" &
 APP_PID="$!"
 start_capture_worker
 wait "$APP_PID"

@@ -26,8 +26,8 @@ const queuePendingCount = document.getElementById('queuePendingCount');
 const queueProcessingCount = document.getElementById('queueProcessingCount');
 const queueTotalCount = document.getElementById('queueTotalCount');
 
-const MOBILE_CAPTURE_SELECTED_FOLDER_STORAGE_KEY = 'everything-grabber-mobile-folder-selection-v1';
-const CAPTURE_HISTORY_STORAGE_KEY = 'everything-grabber-capture-history-v1';
+const MOBILE_CAPTURE_SELECTED_FOLDER_STORAGE_KEY = 'everything-capture-mobile-folder-selection-v1';
+const CAPTURE_HISTORY_STORAGE_KEY = 'everything-capture-history-v1';
 const CAPTURE_STATUS_POLL_INTERVAL_MS = 3000;
 const CAPTURE_STATUS_POLL_MAX_DURATION_MS = 10 * 60 * 1000;
 const BACKEND_STATUS_POLL_INTERVAL_MS = 15000;

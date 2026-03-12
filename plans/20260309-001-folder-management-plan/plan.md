@@ -83,7 +83,7 @@
 
 ## 2.1 顶层结构
 
-当前工具栏位于 [backend/static/index.html](/Users/hbz/everything-grabber/backend/static/index.html#L1600) 附近，建议只包一层外壳，不动内部信息层级：
+当前工具栏位于 [backend/static/index.html](/Users/hbz/everything-capture/backend/static/index.html#L1600) 附近，建议只包一层外壳，不动内部信息层级：
 
 ```html
 <main>
@@ -189,7 +189,7 @@
 
 ## 单条操作
 
-当前卡片 footer 在 [backend/static/index.html](/Users/hbz/everything-grabber/backend/static/index.html#L2976) 附近，列表 actions 在 [backend/static/index.html](/Users/hbz/everything-grabber/backend/static/index.html#L2937) 附近。
+当前卡片 footer 在 [backend/static/index.html](/Users/hbz/everything-capture/backend/static/index.html#L2976) 附近，列表 actions 在 [backend/static/index.html](/Users/hbz/everything-capture/backend/static/index.html#L2937) 附近。
 
 建议在现有删除按钮前新增一个轻量文件夹按钮：
 
@@ -219,7 +219,7 @@
 
 ## 阅读弹窗中的入口
 
-当前详情弹窗 footer 在 [backend/static/index.html](/Users/hbz/everything-grabber/backend/static/index.html#L3067) 附近。
+当前详情弹窗 footer 在 [backend/static/index.html](/Users/hbz/everything-capture/backend/static/index.html#L3067) 附近。
 
 建议再补一个按钮：
 
@@ -296,7 +296,7 @@ CREATE INDEX idx_items_folder_id ON items(folder_id);
 
 ### SQLAlchemy 模型
 
-在 [backend/models.py](/Users/hbz/everything-grabber/backend/models.py#L10) 增加：
+在 [backend/models.py](/Users/hbz/everything-capture/backend/models.py#L10) 增加：
 
 - `Folder` 模型
 - `Item.folder_id`
@@ -330,7 +330,7 @@ V1 不直接上多对多。
 
 ## 7.1 后端
 
-当前后端以 [backend/routers/items.py](/Users/hbz/everything-grabber/backend/routers/items.py#L476) 为核心，建议新增 `routers/folders.py`。
+当前后端以 [backend/routers/items.py](/Users/hbz/everything-capture/backend/routers/items.py#L476) 为核心，建议新增 `routers/folders.py`。
 
 ### 新接口
 
@@ -408,7 +408,7 @@ V1 不直接上多对多。
 
 ### 修改现有列表接口
 
-扩展 [backend/routers/items.py](/Users/hbz/everything-grabber/backend/routers/items.py#L476)：
+扩展 [backend/routers/items.py](/Users/hbz/everything-capture/backend/routers/items.py#L476)：
 
 - `folder_id: Optional[str] = None`
 - `folder_scope: str = "all"`
@@ -446,7 +446,7 @@ V1 不直接上多对多。
 
 ## 7.2 前端
 
-当前前端状态几乎都在 [backend/static/index.html](/Users/hbz/everything-grabber/backend/static/index.html#L1787) 之后的 script 中维护，建议继续沿用。
+当前前端状态几乎都在 [backend/static/index.html](/Users/hbz/everything-capture/backend/static/index.html#L1787) 之后的 script 中维护，建议继续沿用。
 
 ### 新状态
 
@@ -473,21 +473,21 @@ let selectedItemIds = new Set();
 
 #### `getActiveSearchParams()`
 
-在 [backend/static/index.html](/Users/hbz/everything-grabber/backend/static/index.html#L2312) 附近扩展：
+在 [backend/static/index.html](/Users/hbz/everything-capture/backend/static/index.html#L2312) 附近扩展：
 
 - 当前选中 `未分类` 时加 `folder_scope=unfiled`
 - 当前选中文件夹时加 `folder_id=<id>`
 
 #### `fetchItems()`
 
-在 [backend/static/index.html](/Users/hbz/everything-grabber/backend/static/index.html#L2803) 附近保留原逻辑，只增加：
+在 [backend/static/index.html](/Users/hbz/everything-capture/backend/static/index.html#L2803) 附近保留原逻辑，只增加：
 
 - 根据 folder filter 取数据
 - stats 文案增加当前文件夹语义
 
 #### `renderItems()`
 
-在 [backend/static/index.html](/Users/hbz/everything-grabber/backend/static/index.html#L2901) 附近增加：
+在 [backend/static/index.html](/Users/hbz/everything-capture/backend/static/index.html#L2901) 附近增加：
 
 - 卡片/列表的 folder tag
 - 单条“加入文件夹”按钮
@@ -495,7 +495,7 @@ let selectedItemIds = new Set();
 
 #### `openModalByItem()`
 
-在 [backend/static/index.html](/Users/hbz/everything-grabber/backend/static/index.html#L3035) 附近增加：
+在 [backend/static/index.html](/Users/hbz/everything-capture/backend/static/index.html#L3035) 附近增加：
 
 - `移动到文件夹` 按钮
 
@@ -505,7 +505,7 @@ let selectedItemIds = new Set();
 
 ## 推荐做法
 
-你当前项目已经有运行时补列逻辑，见 [backend/database.py](/Users/hbz/everything-grabber/backend/database.py#L16)。  
+你当前项目已经有运行时补列逻辑，见 [backend/database.py](/Users/hbz/everything-capture/backend/database.py#L16)。  
 这个项目没有正式 Alembic 迁移体系，因此 V1 可以继续沿用同样风格。
 
 ### 在 `ensure_runtime_schema()` 中增加

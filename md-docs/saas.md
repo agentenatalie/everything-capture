@@ -10,7 +10,7 @@
 
 主文件：
 
-- [backend/static/index.html](/Users/hbz/everything-grabber/backend/static/index.html)
+- [backend/static/index.html](/Users/hbz/everything-capture/backend/static/index.html)
 
 当前 sidebar 主容器：
 
@@ -38,7 +38,7 @@
 
 当前用户区域 DOM 位于：
 
-- [backend/static/index.html](/Users/hbz/everything-grabber/backend/static/index.html)
+- [backend/static/index.html](/Users/hbz/everything-capture/backend/static/index.html)
 
 位置说明：
 

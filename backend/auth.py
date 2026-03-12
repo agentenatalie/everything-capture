@@ -14,8 +14,8 @@ from sqlalchemy.orm import Session
 from models import AuthSession, User
 from tenant import DEFAULT_USER_EMAIL, DEFAULT_USER_ID, DEFAULT_USER_NAME
 
-AUTH_SESSION_COOKIE = "everything_grabber_session"
-AUTH_GOOGLE_STATE_COOKIE = "everything_grabber_google_state"
+AUTH_SESSION_COOKIE = "everything_capture_session"
+AUTH_GOOGLE_STATE_COOKIE = "everything_capture_google_state"
 AUTH_SESSION_DAYS = 30
 AUTH_CODE_TTL_MINUTES = 10
 SHORTCUT_BEARER_TOKEN_ENV = "SHORTCUT_BEARER_TOKEN"

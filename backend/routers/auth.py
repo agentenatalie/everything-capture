@@ -202,7 +202,7 @@ def _send_email_code(email: str, code: str) -> str:
     use_ssl = smtp_port == 465
 
     message = EmailMessage()
-    message["Subject"] = "Your Everything Grabber login code"
+    message["Subject"] = "Your Everything Capture login code"
     message["From"] = smtp_from
     message["To"] = email
     message.set_content(
@@ -244,7 +244,7 @@ async def _send_phone_code(phone_e164: str, code: str) -> str:
             data={
                 "To": phone_e164,
                 "From": from_number,
-                "Body": f"Your Everything Grabber login code is {code}. It expires in {AUTH_CODE_TTL_MINUTES} minutes.",
+                "Body": f"Your Everything Capture login code is {code}. It expires in {AUTH_CODE_TTL_MINUTES} minutes.",
             },
         )
     if response.status_code >= 300:

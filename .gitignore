@@ -1,18 +1,48 @@
-# Database
-backend/items.db
+# Runtime databases
+*.db
+*.sqlite
+*.sqlite3
 
 # Media uploads/downloads
 backend/static/media/
 
-# Python
+# Python environments and caches
 backend/venv/
+.venv/
+venv/
+ENV/
+env/
 backend/.local/
 **/__pycache__/
 *.py[cod]
 *$py.class
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+.coverage.*
+htmlcov/
 
-# OS
+# Build / packaging
+build/
+dist/
+*.egg-info/
+pip-wheel-metadata/
+
+# Local environment files
+.env
+.env.*
+.python-version
+*.log
+
+# Temporary debug artifacts
+tmp-*
+tmp_*
+
+# Editor / OS
 .DS_Store
+.idea/
+.vscode/
 
-# Claude
+# Local Codex / Claude config
 .claude/

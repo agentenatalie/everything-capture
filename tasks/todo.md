@@ -151,3 +151,15 @@
 - [x] Keep the original card/detail content intact and move per-item AI access back to a separate Ask AI surface
 - [x] Add a small AI SVG entry in the opened reader toolbar that opens Ask AI with the current item as context
 - [x] Tighten the reader toolbar action spacing so the note and close SVG buttons sit closer together
+
+## Repo Cleanup
+- [x] Audit the repository for tracked local-only files, temp artifacts, and missing ignore rules before GitHub upload
+- [x] Expand `.gitignore` for runtime databases, temp screenshots, caches, logs, and local IDE/Claude files
+- [x] Remove tracked local-only artifacts from Git while preserving useful local state where possible
+- [x] Add a root README so the repo is understandable when pushed to GitHub
+- [x] Verify the final git status and call out anything that still needs a deliberate keep/remove decision
+
+## Product Rename
+- [x] Audit the repository for legacy branding and path references
+- [x] Rename code, docs, storage identifiers, and tests to `Everything Capture`
+- [x] Rename the repository directory to `everything-capture` and verify the new path references

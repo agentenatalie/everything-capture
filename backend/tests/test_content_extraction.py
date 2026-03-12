@@ -242,7 +242,7 @@ class VideoTextFormattingTests(unittest.TestCase):
 class SwiftFailureSummaryTests(unittest.TestCase):
     def test_summarize_swift_failure_filters_warnings_and_keeps_runtime_error(self) -> None:
         stderr = """
-/Users/hbz/everything-grabber/backend/services/media_text_extract.swift:167:17: warning: 'init(url:)' was deprecated in macOS 15.0: Use AVURLAsset(url:) instead [#DeprecatedDeclaration]
+/Users/hbz/everything-capture/backend/services/media_text_extract.swift:167:17: warning: 'init(url:)' was deprecated in macOS 15.0: Use AVURLAsset(url:) instead [#DeprecatedDeclaration]
 165 |
 166 | func extractVideo(path: String) -> VideoResult {
 167 |     let asset = AVAsset(url: URL(fileURLWithPath: path))

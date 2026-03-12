@@ -26,7 +26,7 @@
 
             const replacements = [];
             const createToken = (html) => {
-                const token = `@@EGMD${replacements.length}@@`;
+                const token = `@@ECMD${replacements.length}@@`;
                 replacements.push({ token, html });
                 return token;
             };
@@ -119,7 +119,7 @@
             }
         }
 
-        const MOBILE_CAPTURE_QUEUE_STORAGE_KEY = 'everything-grabber-mobile-outbox-v1';
+        const MOBILE_CAPTURE_QUEUE_STORAGE_KEY = 'everything-capture-mobile-outbox-v1';
         const MOBILE_CAPTURE_DUPLICATE_WINDOW_MS = 4000;
         const COMMAND_EXTRACT_DUPLICATE_WINDOW_MS = 4000;
         let mobileCaptureQueue = loadMobileCaptureQueue();

@@ -2218,11 +2218,11 @@ async def test_obsidian_connection(
     if not obsidian_rest_api_url or not obsidian_api_key:
         raise HTTPException(status_code=400, detail="Obsidian settings are incomplete")
 
-    probe_name = f"__everything_grabber_probe_{os.urandom(4).hex()}.md"
+    probe_name = f"__everything_capture_probe_{os.urandom(4).hex()}.md"
     probe_path = f"{folder_path}/{probe_name}" if folder_path else probe_name
     probe_body = (
         "---\n"
-        "probe: everything-grabber\n"
+        "probe: everything-capture\n"
         f"path: {probe_path}\n"
         "---\n\n"
         "Obsidian connectivity probe.\n"
@@ -2246,7 +2246,7 @@ async def test_obsidian_connection(
                     headers=_obsidian_headers(obsidian_api_key, "text/markdown"),
                     timeout=60.0,
                 )
-                if get_response.status_code != 200 or "probe: everything-grabber" not in get_response.text:
+                if get_response.status_code != 200 or "probe: everything-capture" not in get_response.text:
                     raise HTTPException(status_code=500, detail="Obsidian probe read-back verification failed.")
 
                 delete_response = await client.delete(

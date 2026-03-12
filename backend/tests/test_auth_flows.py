@@ -121,7 +121,7 @@ class AuthFlowTests(unittest.TestCase):
             )
 
         attach_session_cookie(response, raw_token, auth_session.expires_at)
-        self.assertIn("everything_grabber_session=", response.headers.get("set-cookie", ""))
+        self.assertIn("everything_capture_session=", response.headers.get("set-cookie", ""))
 
     def test_verification_code_cannot_be_reused_after_consumption(self) -> None:
         with self.Session() as db:
@@ -189,7 +189,7 @@ class AuthFlowTests(unittest.TestCase):
         with self.Session() as db:
             response = auto_login_local_session(request, db)
             self.assertEqual(response.status_code, 200)
-            self.assertIn("everything_grabber_session=", response.headers.get("set-cookie", ""))
+            self.assertIn("everything_capture_session=", response.headers.get("set-cookie", ""))
 
             user = db.query(User).filter(User.id == DEFAULT_USER_ID).first()
             self.assertIsNotNone(user)

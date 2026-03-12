@@ -356,6 +356,64 @@ class HtmlFallbackFormattingTests(unittest.TestCase):
         self.assertNotIn("#我的理财日记", note)
         self.assertEqual(children[0]["paragraph"]["rich_text"][0]["text"]["content"], "港股和 AI 的一些观察。")
 
+    def test_douyin_sync_omits_trailing_hashtags(self) -> None:
+        item = Item(
+            id="item-douyin-tags",
+            title="Douyin Tags",
+            source_url="https://www.douyin.com/video/789",
+            final_url="https://www.douyin.com/video/789",
+            platform="douyin",
+            canonical_text="石油美元的底层逻辑\n\n#石油美元 #金融与舆论",
+            created_at=datetime.datetime(2026, 3, 6, 12, 0, 0),
+        )
+        item.content_blocks_json = json.dumps(
+            [
+                {
+                    "type": "paragraph",
+                    "content": "石油美元的底层逻辑 #石油美元 #金融与舆论",
+                    "markdown": "石油美元的底层逻辑 #石油美元 #金融与舆论",
+                }
+            ]
+        )
+
+        note = _build_obsidian_note(item, {})
+        children = asyncio.run(
+            _build_notion_children(
+                object(),
+                {"Authorization": "Bearer test", "Notion-Version": "2025-09-03"},
+                item,
+            )
+        )
+
+        self.assertIn("石油美元的底层逻辑", note)
+        self.assertNotIn("#石油美元", note)
+        self.assertEqual(children[0]["paragraph"]["rich_text"][0]["text"]["content"], "石油美元的底层逻辑")
+
+    def test_fallback_sync_omits_hashtag_only_paragraphs_for_other_platforms(self) -> None:
+        item = Item(
+            id="item-generic-tags",
+            title="Generic Tags",
+            source_url="https://example.com/article",
+            final_url="https://example.com/article",
+            platform="generic",
+            canonical_text="正文第一段\n\n#OpenAI #Agents",
+            created_at=datetime.datetime(2026, 3, 6, 12, 0, 0),
+        )
+
+        note = _build_obsidian_note(item, {})
+        children = asyncio.run(
+            _build_notion_children(
+                object(),
+                {"Authorization": "Bearer test", "Notion-Version": "2025-09-03"},
+                item,
+            )
+        )
+
+        self.assertIn("正文第一段", note)
+        self.assertNotIn("#OpenAI", note)
+        self.assertEqual(len([child for child in children if child["type"] == "paragraph"]), 2)
+        self.assertEqual(children[0]["paragraph"]["rich_text"][0]["text"]["content"], "正文第一段")
+
     def test_notion_page_properties_include_sync_fields(self) -> None:
         item = self.make_item()
         folder_a = Folder(id="folder-a", name="Alpha")

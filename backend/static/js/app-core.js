@@ -115,6 +115,17 @@
         let sidebarExpanded = true;
         let folderPickerTargetIds = [];
         let folderPickerSelectedIds = new Set();
+        let draggedLibraryItemId = null;
+        let draggedFolderId = null;
+        let currentFolderDropTargetId = null;
+        let currentFolderDropMode = '';
+        let folderReorderArmed = false;
+        let syncActionState = {
+            notion: new Set(),
+            obsidian: new Set(),
+        };
+        const ITEM_DRAG_DATA_TYPE = 'application/x-everything-grabber-item';
+        const FOLDER_DRAG_DATA_TYPE = 'application/x-everything-grabber-folder';
         let librarySearchTimer = null;
         let commandSearchTimer = null;
         let libraryRequestId = 0;

@@ -1,5 +1,6 @@
 import AVFoundation
 import CoreGraphics
+import Dispatch
 import Foundation
 import ImageIO
 import Vision
@@ -163,9 +164,26 @@ func sampleTimestamps(durationSeconds: Double) -> [Double] {
     return points.sorted()
 }
 
+func loadDurationSeconds(for asset: AVURLAsset) -> Double {
+    if #available(macOS 13.0, *) {
+        let semaphore = DispatchSemaphore(value: 0)
+        var loadedDuration: CMTime = .zero
+
+        Task {
+            loadedDuration = (try? await asset.load(.duration)) ?? .zero
+            semaphore.signal()
+        }
+
+        semaphore.wait()
+        return max(CMTimeGetSeconds(loadedDuration), 0)
+    }
+
+    return 0
+}
+
 func extractVideo(path: String) -> VideoResult {
-    let asset = AVAsset(url: URL(fileURLWithPath: path))
-    let durationSeconds = max(CMTimeGetSeconds(asset.duration), 0)
+    let asset = AVURLAsset(url: URL(fileURLWithPath: path))
+    let durationSeconds = loadDurationSeconds(for: asset)
     let imageGenerator = AVAssetImageGenerator(asset: asset)
     imageGenerator.appliesPreferredTrackTransform = true
     imageGenerator.requestedTimeToleranceBefore = .zero
@@ -226,8 +244,8 @@ func run() throws {
     let requestPath = CommandLine.arguments[1]
     let request = try loadRequest(from: requestPath)
 
-    let imageResults = try request.images.map { asset in
-        try extractImage(path: asset.path)
+    let imageResults = request.images.compactMap { asset in
+        try? extractImage(path: asset.path)
     }
     let videoResults = request.videos.map { asset in
         extractVideo(path: asset.path)

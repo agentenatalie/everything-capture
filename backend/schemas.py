@@ -40,6 +40,7 @@ class ItemResponse(BaseModel):
     platform: str
     notion_page_id: Optional[str] = None
     obsidian_path: Optional[str] = None
+    obsidian_sync_state: str = "idle"
     extracted_text: Optional[str] = None
     ocr_text: Optional[str] = None
     frame_texts: list[dict] = Field(default_factory=list)
@@ -130,6 +131,7 @@ class SettingsUpdateRequest(BaseModel):
 class FolderResponse(BaseModel):
     id: str
     name: str
+    sort_order: int = 0
     created_at: datetime
     updated_at: datetime
     item_count: int = 0
@@ -150,6 +152,10 @@ class FolderCreateRequest(BaseModel):
 
 class FolderUpdateRequest(BaseModel):
     name: str
+
+
+class FolderReorderRequest(BaseModel):
+    folder_ids: list[str] = Field(default_factory=list)
 
 
 class ItemFolderUpdateRequest(BaseModel):

@@ -172,6 +172,10 @@ def ensure_runtime_schema():
             connection.exec_driver_sql("ALTER TABLE items ADD COLUMN parse_error VARCHAR")
         if "parsed_at" not in item_columns:
             connection.exec_driver_sql("ALTER TABLE items ADD COLUMN parsed_at DATETIME")
+        if "obsidian_last_synced_hash" not in item_columns:
+            connection.exec_driver_sql("ALTER TABLE items ADD COLUMN obsidian_last_synced_hash VARCHAR")
+        if "obsidian_last_synced_at" not in item_columns:
+            connection.exec_driver_sql("ALTER TABLE items ADD COLUMN obsidian_last_synced_at DATETIME")
         connection.exec_driver_sql(
             "UPDATE items SET user_id = ? WHERE user_id IS NULL OR trim(user_id) = ''",
             (DEFAULT_USER_ID,),
@@ -253,6 +257,10 @@ def ensure_runtime_schema():
             connection.exec_driver_sql(
                 "ALTER TABLE folders ADD COLUMN workspace_id VARCHAR REFERENCES workspaces(id)"
             )
+        if "sort_order" not in folder_columns:
+            connection.exec_driver_sql(
+                "ALTER TABLE folders ADD COLUMN sort_order INTEGER NOT NULL DEFAULT 0"
+            )
         connection.exec_driver_sql(
             "UPDATE folders SET user_id = ? WHERE user_id IS NULL OR trim(user_id) = ''",
             (DEFAULT_USER_ID,),
@@ -261,9 +269,27 @@ def ensure_runtime_schema():
             "UPDATE folders SET workspace_id = ? WHERE workspace_id IS NULL OR trim(workspace_id) = ''",
             (DEFAULT_WORKSPACE_ID,),
         )
+        folder_sort_rows = connection.exec_driver_sql(
+            """
+            SELECT id
+            FROM folders
+            ORDER BY
+                COALESCE(sort_order, 2147483647) ASC,
+                updated_at DESC,
+                created_at DESC,
+                lower(name) ASC,
+                id ASC
+            """
+        ).fetchall()
+        for index, row in enumerate(folder_sort_rows):
+            connection.exec_driver_sql(
+                "UPDATE folders SET sort_order = ? WHERE id = ?",
+                (index, row[0]),
+            )
         connection.exec_driver_sql("DROP INDEX IF EXISTS idx_folders_workspace_name")
         connection.exec_driver_sql("CREATE INDEX IF NOT EXISTS idx_folders_user_id ON folders(user_id)")
         connection.exec_driver_sql("CREATE INDEX IF NOT EXISTS idx_folders_workspace_id ON folders(workspace_id)")
+        connection.exec_driver_sql("CREATE INDEX IF NOT EXISTS idx_folders_user_sort_order ON folders(user_id, sort_order)")
         connection.exec_driver_sql(
             "CREATE UNIQUE INDEX IF NOT EXISTS idx_folders_user_name ON folders(user_id, name)"
         )

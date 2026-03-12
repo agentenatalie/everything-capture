@@ -6,7 +6,7 @@ from sqlalchemy.orm import Session
 
 from database import get_db
 from models import Folder, Item, ItemFolderLink
-from schemas import FolderCreateRequest, FolderListResponse, FolderResponse, FolderUpdateRequest
+from schemas import FolderCreateRequest, FolderListResponse, FolderReorderRequest, FolderResponse, FolderUpdateRequest
 from tenant import get_current_user_id
 
 router = APIRouter(
@@ -40,12 +40,18 @@ def _serialize_folder_rows(rows: list[tuple[Folder, int]]) -> list[FolderRespons
         FolderResponse(
             id=folder.id,
             name=folder.name,
+            sort_order=folder.sort_order or 0,
             created_at=folder.created_at,
             updated_at=folder.updated_at,
             item_count=item_count,
         )
         for folder, item_count in rows
     ]
+
+
+def _next_folder_sort_order(db: Session, user_id: str) -> int:
+    current_max = db.query(func.max(Folder.sort_order)).filter(Folder.user_id == user_id).scalar()
+    return int(current_max if current_max is not None else -1) + 1
 
 
 @router.get("", response_model=FolderListResponse)
@@ -57,7 +63,7 @@ def get_folders(db: Session = Depends(get_db)):
         .outerjoin(Item, (Item.id == ItemFolderLink.item_id) & (Item.user_id == user_id))
         .filter(Folder.user_id == user_id)
         .group_by(Folder.id)
-        .order_by(Folder.updated_at.desc(), Folder.created_at.desc(), Folder.name.asc())
+        .order_by(Folder.sort_order.asc(), Folder.created_at.asc(), Folder.name.asc(), Folder.id.asc())
         .all()
     )
     total_count = db.query(func.count(Item.id)).filter(Item.user_id == user_id).scalar() or 0
@@ -85,13 +91,20 @@ def create_folder(request: FolderCreateRequest, db: Session = Depends(get_db)):
         raise HTTPException(status_code=409, detail="Folder name already exists")
 
     now = datetime.datetime.utcnow()
-    folder = Folder(user_id=user_id, name=name, created_at=now, updated_at=now)
+    folder = Folder(
+        user_id=user_id,
+        name=name,
+        sort_order=_next_folder_sort_order(db, user_id),
+        created_at=now,
+        updated_at=now,
+    )
     db.add(folder)
     db.commit()
     db.refresh(folder)
     return FolderResponse(
         id=folder.id,
         name=folder.name,
+        sort_order=folder.sort_order or 0,
         created_at=folder.created_at,
         updated_at=folder.updated_at,
         item_count=0,
@@ -125,10 +138,46 @@ def update_folder(folder_id: str, request: FolderUpdateRequest, db: Session = De
     return FolderResponse(
         id=folder.id,
         name=folder.name,
+        sort_order=folder.sort_order or 0,
         created_at=folder.created_at,
         updated_at=folder.updated_at,
         item_count=item_count,
     )
+
+
+@router.post("/reorder", status_code=status.HTTP_204_NO_CONTENT)
+def reorder_folders(request: FolderReorderRequest, db: Session = Depends(get_db)):
+    user_id = get_current_user_id()
+    folder_ids: list[str] = []
+    seen: set[str] = set()
+    for raw_value in request.folder_ids:
+        value = (raw_value or "").strip()
+        if not value or value in seen:
+            continue
+        folder_ids.append(value)
+        seen.add(value)
+
+    user_folders = (
+        db.query(Folder)
+        .filter(Folder.user_id == user_id)
+        .order_by(Folder.sort_order.asc(), Folder.created_at.asc(), Folder.name.asc(), Folder.id.asc())
+        .all()
+    )
+    current_folder_ids = [folder.id for folder in user_folders]
+    if not current_folder_ids:
+        return Response(status_code=status.HTTP_204_NO_CONTENT)
+    if len(folder_ids) != len(current_folder_ids) or set(folder_ids) != set(current_folder_ids):
+        raise HTTPException(status_code=400, detail="Folder order payload must include every folder exactly once")
+
+    folders_by_id = {folder.id: folder for folder in user_folders}
+    now = datetime.datetime.utcnow()
+    for index, folder_id in enumerate(folder_ids):
+        folder = folders_by_id[folder_id]
+        folder.sort_order = index
+        folder.updated_at = now
+
+    db.commit()
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
 @router.delete("/{folder_id}", status_code=status.HTTP_204_NO_CONTENT)

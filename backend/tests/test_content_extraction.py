@@ -7,7 +7,13 @@ from unittest.mock import patch
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
 from models import Item, Media  # noqa: E402
-from services.content_extraction import _format_video_text_block, parse_item_content, parse_subtitle_lines  # noqa: E402
+from services.content_extraction import (  # noqa: E402
+    ContentExtractionError,
+    _format_video_text_block,
+    _summarize_swift_failure,
+    parse_item_content,
+    parse_subtitle_lines,
+)
 
 
 class ContentExtractionTests(unittest.TestCase):
@@ -155,6 +161,26 @@ class ContentExtractionTests(unittest.TestCase):
         # Whisper should NOT be called when embedded subtitles are found
         mock_whisper.assert_not_called()
 
+    @patch("services.content_extraction._find_video_companion_text")
+    @patch("services.content_extraction._resolve_media_inputs")
+    @patch("services.content_extraction._run_swift_media_extractor")
+    def test_parse_item_content_continues_when_image_ocr_fails(self, mock_swift, mock_media_inputs, mock_companion) -> None:
+        item = self.make_item()
+        mock_media_inputs.return_value = {
+            "images": [{"path": "/tmp/cover.webp", "type": "cover", "relative_path": "cover.webp"}],
+            "videos": [{"path": "/tmp/video.mp4", "type": "video", "relative_path": "video.mp4"}],
+        }
+        mock_swift.side_effect = ContentExtractionError("unreadableImage")
+        mock_companion.return_value = ("这里是视频字幕", "subtitle")
+
+        result = parse_item_content(item)
+
+        self.assertEqual(result.parse_status, "completed")
+        self.assertEqual(result.ocr_text, "")
+        self.assertIn("[subtitle_text]", result.extracted_text)
+        self.assertIn("这里是视频字幕。", result.extracted_text)
+        mock_swift.assert_called_once_with(images=mock_media_inputs.return_value["images"], videos=[])
+
     @patch("services.content_extraction._resolve_media_inputs")
     def test_parse_item_content_handles_text_only_items(self, mock_media_inputs) -> None:
         item = Item(
@@ -211,6 +237,20 @@ class VideoTextFormattingTests(unittest.TestCase):
 
         self.assertIn("第一行。", formatted)
         self.assertIn("https://example.com/demo。", formatted)
+
+
+class SwiftFailureSummaryTests(unittest.TestCase):
+    def test_summarize_swift_failure_filters_warnings_and_keeps_runtime_error(self) -> None:
+        stderr = """
+/Users/hbz/everything-grabber/backend/services/media_text_extract.swift:167:17: warning: 'init(url:)' was deprecated in macOS 15.0: Use AVURLAsset(url:) instead [#DeprecatedDeclaration]
+165 |
+166 | func extractVideo(path: String) -> VideoResult {
+167 |     let asset = AVAsset(url: URL(fileURLWithPath: path))
+    |                 `- warning: 'init(url:)' was deprecated in macOS 15.0: Use AVURLAsset(url:) instead [#DeprecatedDeclaration]
+unreadableImage
+"""
+
+        self.assertEqual(_summarize_swift_failure(stderr, ""), "unreadableImage")
 
 
 if __name__ == "__main__":

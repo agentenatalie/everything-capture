@@ -66,6 +66,42 @@ class ItemFolderTests(unittest.TestCase):
         self.assertEqual(serialized.folder_name, "Alpha")
         self.assertEqual(serialized.folder_count, 2)
 
+    def test_serialize_items_prioritizes_primary_folder_before_older_links(self) -> None:
+        item = Item(
+            id="item-1",
+            title="Example",
+            source_url="https://example.com",
+            canonical_text="body",
+            platform="web",
+            status="ready",
+            folder_id="folder-b",
+            created_at=datetime.datetime(2026, 3, 9, 12, 0, 0),
+        )
+        folder_a = Folder(id="folder-a", name="Alpha")
+        folder_b = Folder(id="folder-b", name="Beta")
+        item.folder_links = [
+            ItemFolderLink(
+                item_id="item-1",
+                folder_id="folder-a",
+                folder=folder_a,
+                created_at=datetime.datetime(2026, 3, 9, 12, 1, 0),
+            ),
+            ItemFolderLink(
+                item_id="item-1",
+                folder_id="folder-b",
+                folder=folder_b,
+                created_at=datetime.datetime(2026, 3, 9, 12, 2, 0),
+            ),
+        ]
+        item.media = []
+
+        [serialized] = serialize_items([item])
+
+        self.assertEqual(serialized.folder_ids, ["folder-b", "folder-a"])
+        self.assertEqual(serialized.folder_names, ["Beta", "Alpha"])
+        self.assertEqual(serialized.folder_id, "folder-b")
+        self.assertEqual(serialized.folder_name, "Beta")
+
 
 if __name__ == "__main__":
     unittest.main()

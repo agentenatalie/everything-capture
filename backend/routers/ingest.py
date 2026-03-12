@@ -2,6 +2,7 @@ import html
 import json
 import logging
 import re
+import threading
 from typing import Callable
 
 from fastapi import APIRouter, Depends, HTTPException, status, BackgroundTasks, Request
@@ -54,6 +55,44 @@ def background_auto_sync(item_id: str, user_id: str):
         asyncio.run(run_sync())
     finally:
         db.close()
+
+
+def _run_capture_postprocess(item_id: str, user_id: str, *, should_parse: bool) -> None:
+    try:
+        if should_parse:
+            background_parse_item_content(item_id, user_id)
+        background_auto_sync(item_id, user_id)
+    except Exception as exc:
+        logger.error("后台后处理失败 %s: %s", item_id, exc)
+
+
+def _spawn_capture_postprocess(item_id: str, user_id: str, *, should_parse: bool) -> None:
+    thread = threading.Thread(
+        target=_run_capture_postprocess,
+        args=(item_id, user_id),
+        kwargs={"should_parse": should_parse},
+        daemon=True,
+        name=f"capture-postprocess-{item_id[:8]}",
+    )
+    thread.start()
+
+
+def _queue_capture_postprocess(
+    background_tasks: BackgroundTasks,
+    item: Item,
+    user_id: str,
+    *,
+    should_parse: bool,
+) -> None:
+    if should_parse:
+        item.parse_status = "processing"
+        item.parse_error = None
+    background_tasks.add_task(
+        _spawn_capture_postprocess,
+        item.id,
+        user_id,
+        should_parse=should_parse,
+    )
 
 
 def _has_parseable_media(media_list: list[dict] | None) -> bool:
@@ -211,10 +250,13 @@ async def _download_and_apply_media_updates(
 
 
 async def _should_background_media_processing(
-    http_request: Request,
+    http_request: Request | None,
     media_list: list[dict],
     referer: str,
 ) -> bool:
+    if http_request is None:
+        return False
+
     raw_token = extract_session_token(http_request)
     is_shortcut_request = is_shortcut_bearer_token(raw_token)
     user_agent = (http_request.headers.get("user-agent") or "").lower()
@@ -263,9 +305,13 @@ def background_finalize_extracted_media(
         db.commit()
         logger.info("后台媒体处理完成 %d 个文件 (item: %s)", downloaded_count, item_id)
 
-        if _has_parseable_media(media_list):
-            background_parse_item_content(item_id, user_id)
-        background_auto_sync(item_id, user_id)
+        should_parse = _has_parseable_media(media_list)
+        if should_parse:
+            item.parse_status = "processing"
+            item.parse_error = None
+            db.add(item)
+            db.commit()
+        _spawn_capture_postprocess(item_id, user_id, should_parse=should_parse)
     except Exception as exc:
         db.rollback()
         logger.error("后台媒体处理失败 %s: %s", item_id, exc)
@@ -313,7 +359,12 @@ def _store_shared_text_capture_record(
         db.rollback()
         raise
 
-    background_tasks.add_task(background_auto_sync, new_item.id, user_id)
+    _queue_capture_postprocess(
+        background_tasks,
+        new_item,
+        user_id,
+        should_parse=False,
+    )
 
     response = ExtractResponse(
         item_id=new_item.id,
@@ -471,11 +522,22 @@ async def execute_extract_request(
                 )
                 db.commit()
                 logger.info("同步媒体处理完成 %d 个文件 (item: %s)", media_count, new_item.id)
-                if _has_parseable_media(result.media_urls):
-                    background_tasks.add_task(background_parse_item_content, new_item.id, user_id)
-                background_tasks.add_task(background_auto_sync, new_item.id, user_id)
+                should_parse = _has_parseable_media(result.media_urls)
+                _queue_capture_postprocess(
+                    background_tasks,
+                    new_item,
+                    user_id,
+                    should_parse=should_parse,
+                )
+                db.commit()
+                db.refresh(new_item)
         else:
-            background_tasks.add_task(background_auto_sync, new_item.id, user_id)
+            _queue_capture_postprocess(
+                background_tasks,
+                new_item,
+                user_id,
+                should_parse=False,
+            )
 
         response = ExtractResponse(
             item_id=new_item.id,
@@ -514,7 +576,12 @@ def ingest_page(request: IngestRequest, background_tasks: BackgroundTasks, db: S
         db.commit()
         db.refresh(new_item)
 
-        background_tasks.add_task(background_auto_sync, new_item.id, user_id)
+        _queue_capture_postprocess(
+            background_tasks,
+            new_item,
+            user_id,
+            should_parse=False,
+        )
 
         return IngestResponse(item_id=new_item.id, status="ready")
     except Exception as e:

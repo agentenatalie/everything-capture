@@ -23,6 +23,7 @@
 - When a social video page still yields good text but no direct media URL, do not stop at the extractor fallback. Preserve the page URL as a video candidate so the downloader can hand it to yt-dlp and still recover media plus duration.
 - When a live media bug reproduces on one concrete social-video URL but not on similar links, record that exact URL and pause the work if the user reprioritizes. Do not keep broadening the downloader after the user has switched focus.
 - When the user corrects relative-time copy, confirm both the threshold and the exact label direction before changing the UI text.
+- When the user asks for motion on processing states, do not stop at a single spinner. Carry the feedback through every visible parsing/syncing surface so in-flight work feels intentional instead of static.
 - When tuning mobile modal spacing, scope the change to the mobile breakpoint and the specific state class instead of shifting the shared desktop footer layout.
 - When the user distinguishes capture from processing in a grabber architecture, do not describe the solution as “deploy web and mobile.” Keep the deployed surface strictly to the capture API, and keep scraping/downloading/AI/file-sync responsibilities local.
 - When a shortcut-facing capture API is meant to behave like an inbox drop, make the response contract explicitly state top-level acceptance success instead of forcing the client to infer success from nested queue metadata.
@@ -38,3 +39,8 @@
 - When a captured article contains code wrapped in many inline spans, never extract `<pre>` text with a separator argument. Preserve the raw text content first, or GitHub-style code samples will be destroyed token-by-token.
 - When the user narrows a content-format fix to sync/write behavior only, do not keep pushing on extraction. Preserve stored source data and implement the platform-specific rule in the export layer instead.
 - When sync metadata needs to reflect folders, do not read only `item.folder_id`. Reuse the same ordered multi-folder view the UI exposes, or Notion/Obsidian metadata will drift from the library state.
+- When rebinding Obsidian notes after a vault move, do not assume existing notes still live at the current flat target path. Recursively scan the configured folder subtree by `item_id` so notes already moved into nested subfolders can be recognized and updated in place.
+- When the UI needs to distinguish “already synced” from “has local updates pending sync,” do not key the state off `obsidian_path` alone. Persist a last-synced content fingerprint and compare it with the current export payload.
+- When media OCR is only an enhancement step, never let one unreadable local image or cover abort the entire parse flow. Treat OCR as best-effort and keep subtitle/transcript extraction running.
+- When a capture response should feel immediate, do not leave heavy parse/sync follow-up inside the same completion path. Persist the item, mark parse state up front if needed, and hand parsing/sync to a detached background postprocess.
+- When the user asks to remove tag boilerplate only from knowledge-base sync output, do not push that cleanup down into extractor/storage. Keep raw capture data intact and clean it at the export layer.

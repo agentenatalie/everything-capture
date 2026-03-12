@@ -43,8 +43,12 @@
             const user = authState.user || {};
             sidebarUserName.textContent = user.display_name || '本地收录库';
             sidebarUserSubtitle.textContent = '本地模式';
-            sidebarAvatarImage.src = user.avatar_url || defaultSidebarAvatar;
-            sidebarUserStatusDot.classList.remove('is-offline');
+            if (sidebarAvatarImage) {
+                sidebarAvatarImage.src = user.avatar_url || defaultSidebarAvatar;
+            }
+            if (sidebarUserStatusDot) {
+                sidebarUserStatusDot.classList.remove('is-offline');
+            }
             if (sidebarLogoutBtn) {
                 sidebarLogoutBtn.classList.add('is-hidden');
             }

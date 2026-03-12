@@ -1,16 +1,12 @@
 import os
-import io
 import json
 import re
-import zipfile
 from collections import OrderedDict
 from dataclasses import dataclass
 from datetime import datetime
 from typing import List, Optional
-from urllib.parse import quote
 
 from fastapi import APIRouter, Depends, HTTPException, Response
-from fastapi.responses import StreamingResponse
 from sqlalchemy import func, or_
 from sqlalchemy.orm import Session
 from database import SessionLocal, get_db
@@ -217,6 +213,8 @@ def normalize_platform_filter(platform: Optional[str]) -> str:
 
 def serialize_items(items: list[Item]) -> list[ItemResponse]:
     results = []
+    from routers.connect import _obsidian_sync_state
+
     for item in items:
         media_list = []
         if item.media:
@@ -228,6 +226,7 @@ def serialize_items(items: list[Item]) -> list[ItemResponse]:
                     display_order=m.display_order,
                     inline_position=m.inline_position if m.inline_position is not None else -1.0,
                 ))
+        primary_folder_id = getattr(item, "folder_id", None)
         ordered_folder_links = sorted(
             [
                 link
@@ -235,6 +234,7 @@ def serialize_items(items: list[Item]) -> list[ItemResponse]:
                 if getattr(link, "folder", None) is not None
             ],
             key=lambda link: (
+                0 if primary_folder_id and link.folder_id == primary_folder_id else 1,
                 getattr(link, "created_at", None) or datetime.min,
                 (link.folder.name or "").lower(),
                 link.folder_id,
@@ -279,6 +279,7 @@ def serialize_items(items: list[Item]) -> list[ItemResponse]:
             platform=item.platform,
             notion_page_id=item.notion_page_id,
             obsidian_path=item.obsidian_path,
+            obsidian_sync_state=_obsidian_sync_state(item),
             extracted_text=item.extracted_text,
             ocr_text=item.ocr_text,
             frame_texts=frame_texts if isinstance(frame_texts, list) else [],
@@ -853,50 +854,3 @@ def delete_item(item_id: str, db: Session = Depends(get_db)):
     db.commit()
     _cleanup_item_media_files(local_paths)
     return None
-
-@router.get("/items/{item_id}/export/zip")
-def export_item_zip(item_id: str, db: Session = Depends(get_db)):
-    user_id = get_current_user_id()
-    item = db.query(Item).filter(Item.id == item_id, Item.user_id == user_id).first()
-    if not item:
-        raise HTTPException(status_code=404, detail="Item not found")
-        
-    zip_buffer = io.BytesIO()
-    
-    with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zf:
-        safe_title = re.sub(r'[\\/:*?"<>|]', '_', item.title or f"Capture_{item.id}")[:100]
-        
-        # 1. Add all media files to a media/ folder in the zip
-        media_map = {} # original url -> relative zip path
-        for m in item.media:
-            if m.local_path:
-                local_file_path = STATIC_DIR / m.local_path
-                if os.path.exists(local_file_path):
-                    filename = os.path.basename(m.local_path)
-                    zip_media_path = f"media/{filename}"
-                    zf.write(local_file_path, arcname=zip_media_path)
-                    media_map[m.original_url] = zip_media_path
-                    
-        # 2. Build Markdown payload
-        from routers.connect import _build_obsidian_note
-
-        full_content = _build_obsidian_note(item, media_map)
-        
-        # Add markdown file
-        zf.writestr(f"{safe_title}.md", full_content.encode('utf-8'))
-        
-    zip_buffer.seek(0)
-
-    download_name = f"{safe_title}.zip"
-    ascii_fallback = re.sub(r"[^A-Za-z0-9._-]", "_", download_name) or f"capture_{item.id}.zip"
-    
-    return StreamingResponse(
-        iter([zip_buffer.getvalue()]), 
-        media_type="application/zip", 
-        headers={
-            "Content-Disposition": (
-                f"attachment; filename=\"{ascii_fallback}\"; "
-                f"filename*=UTF-8''{quote(download_name)}"
-            )
-        }
-    )

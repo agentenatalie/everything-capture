@@ -13,3 +13,6 @@ backend/.local/
 
 # OS
 .DS_Store
+
+# Claude
+.claude/

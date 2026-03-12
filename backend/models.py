@@ -66,6 +66,8 @@ class Item(Base):
     error_reason = Column(String, nullable=True)
     notion_page_id = Column(String, nullable=True)
     obsidian_path = Column(String, nullable=True)
+    obsidian_last_synced_hash = Column(String, nullable=True)
+    obsidian_last_synced_at = Column(DateTime, nullable=True)
     debug_json = Column(String, nullable=True)
     content_blocks_json = Column(String, nullable=True)  # JSON: [{type:text|image, content|url}]
     folder_id = Column(String, ForeignKey("folders.id"), nullable=True, index=True)
@@ -111,6 +113,7 @@ class Folder(Base):
     user_id = Column(String, ForeignKey("users.id"), nullable=False, index=True, default=DEFAULT_USER_ID)
     workspace_id = Column(String, ForeignKey("workspaces.id"), nullable=False, index=True, default=DEFAULT_WORKSPACE_ID)
     name = Column(String, nullable=False, index=True)
+    sort_order = Column(Integer, nullable=False, default=0, index=True)
     created_at = Column(DateTime, default=datetime.datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.datetime.utcnow)
 

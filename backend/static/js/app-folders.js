@@ -70,8 +70,9 @@
         }
 
         function renderFolderActionButton(item) {
+            const isProcessing = manualParseInFlightItemId === item.id || item?.parse_status === 'processing';
             return `
-                <button onclick="parseItemContent('${item.id}', event)" class="folder-action-btn" title="解析内容">
+                <button onclick="parseItemContent('${item.id}', event)" class="folder-action-btn${isProcessing ? ' is-processing' : ''}" title="${isProcessing ? '解析中' : '解析内容'}" ${isProcessing ? 'disabled' : ''}>
                     <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
                         <path d="M7.5 4.75h6.9l2.85 2.85v11.65H7.5A2.25 2.25 0 0 1 5.25 17V7A2.25 2.25 0 0 1 7.5 4.75Z"></path>
                         <path d="M14.25 4.75V8h3.25"></path>
@@ -95,8 +96,11 @@
                 ? `<button class="folder-item-menu" type="button" onclick="openFolderContextMenu('${folderId}', event)">···</button>`
                 : '';
             const glyph = getFolderGlyph(label, scope);
+            const dragAttrs = scope === 'folder'
+                ? ` draggable="true" data-folder-id="${folderId}" data-folder-scope="${scope}" ondragstart="handleFolderDragStart(event, '${folderId}')" ondragend="handleFolderDragEnd()" ondragover="handleFolderDragOver(event, '${folderId}')" ondragleave="handleFolderDragLeave(event, '${folderId}')" ondrop="handleFolderDrop(event, '${folderId}')"`
+                : ` data-folder-scope="${scope}"`;
             return `
-                <div class="folder-item${active ? ' active' : ''}" role="button" tabindex="0" title="${escapeAttribute(label)}" onclick="setActiveFolder('${scope}', ${folderId ? `'${folderId}'` : 'null'})" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();setActiveFolder('${scope}', ${folderId ? `'${folderId}'` : 'null'});}">
+                <div class="folder-item${active ? ' active' : ''}" role="button" tabindex="0" title="${escapeAttribute(label)}" onclick="setActiveFolder('${scope}', ${folderId ? `'${folderId}'` : 'null'})" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();setActiveFolder('${scope}', ${folderId ? `'${folderId}'` : 'null'});}"${dragAttrs}>
                     <span class="folder-item-glyph" aria-hidden="true">${escapeHtml(glyph)}</span>
                     <span class="folder-item-name">${escapeHtml(label)}</span>
                     <span class="folder-item-count">${count}</span>
@@ -148,6 +152,177 @@
                 const folderId = item.id ? `'${item.id}'` : 'null';
                 return `<button class="folder-chip${active ? ' active' : ''}" type="button" onclick="setActiveFolder('${item.scope}', ${folderId})">${escapeHtml(item.label)} · ${item.count}</button>`;
             }).join('') + '<button class="folder-chip" type="button" onclick="openCreateFolderPrompt()">+ 新建</button>';
+        }
+
+        function setFolderReorderArmed(isArmed) {
+            folderReorderArmed = Boolean(isArmed);
+            document.body.classList.toggle('folder-reorder-armed', folderReorderArmed);
+        }
+
+        function clearFolderDropIndicator() {
+            if (!currentFolderDropTargetId) {
+                currentFolderDropMode = '';
+                return;
+            }
+            const previousTarget = folderList.querySelector(`.folder-item[data-folder-id="${currentFolderDropTargetId}"]`);
+            previousTarget?.classList.remove('is-drop-target', 'is-drop-before', 'is-drop-after', 'is-drop-inside');
+            currentFolderDropTargetId = null;
+            currentFolderDropMode = '';
+        }
+
+        function updateFolderDropIndicator(folderId, mode, element) {
+            if (!folderId || !element) return;
+            if (currentFolderDropTargetId === folderId && currentFolderDropMode === mode) return;
+            clearFolderDropIndicator();
+            currentFolderDropTargetId = folderId;
+            currentFolderDropMode = mode;
+            element.classList.add('is-drop-target');
+            if (mode === 'before') {
+                element.classList.add('is-drop-before');
+            } else if (mode === 'after') {
+                element.classList.add('is-drop-after');
+            } else {
+                element.classList.add('is-drop-inside');
+            }
+        }
+
+        function hasDragDataType(event, dataType) {
+            const dragTypes = event?.dataTransfer?.types;
+            if (!dragTypes) return false;
+            if (typeof dragTypes.includes === 'function') return dragTypes.includes(dataType);
+            if (typeof dragTypes.contains === 'function') return dragTypes.contains(dataType);
+            return Array.from(dragTypes).includes(dataType);
+        }
+
+        async function moveItemToFolder(itemId, folderId) {
+            const item = getItemById(itemId);
+            const folder = foldersData.find((entry) => entry.id === folderId);
+            if (!item || !folder) return;
+
+            const existingFolderIds = Array.isArray(item.folder_ids) ? item.folder_ids.filter(Boolean) : [];
+            const nextFolderIds = [folderId, ...existingFolderIds.filter((entry) => entry !== folderId)];
+            if (item.folder_id === folderId && nextFolderIds.length === existingFolderIds.length) {
+                showToast(`已在文件夹「${folder.name}」中`, 'info');
+                return;
+            }
+
+            const response = await fetch(`/api/items/${itemId}/folder`, {
+                method: 'PATCH',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ folder_ids: nextFolderIds }),
+            });
+            const data = await response.json().catch(() => ({}));
+            if (!response.ok) {
+                throw new Error(data.detail || '拖入文件夹失败');
+            }
+
+            showToast(`已放入「${folder.name}」`, 'success');
+            await Promise.all([fetchFolders(), fetchItems()]);
+        }
+
+        function buildReorderedFolderIds(sourceFolderId, targetFolderId, dropMode) {
+            const orderedFolderIds = foldersData.map((folder) => folder.id);
+            const sourceIndex = orderedFolderIds.indexOf(sourceFolderId);
+            const targetIndex = orderedFolderIds.indexOf(targetFolderId);
+            if (sourceIndex === -1 || targetIndex === -1 || sourceFolderId === targetFolderId) {
+                return orderedFolderIds;
+            }
+
+            orderedFolderIds.splice(sourceIndex, 1);
+            const adjustedTargetIndex = orderedFolderIds.indexOf(targetFolderId);
+            const insertionIndex = dropMode === 'after' ? adjustedTargetIndex + 1 : adjustedTargetIndex;
+            orderedFolderIds.splice(Math.max(0, insertionIndex), 0, sourceFolderId);
+            return orderedFolderIds;
+        }
+
+        async function reorderFolderPosition(sourceFolderId, targetFolderId, dropMode) {
+            const nextFolderIds = buildReorderedFolderIds(sourceFolderId, targetFolderId, dropMode);
+            const currentFolderIds = foldersData.map((folder) => folder.id);
+            if (JSON.stringify(nextFolderIds) === JSON.stringify(currentFolderIds)) return;
+
+            const response = await fetch('/api/folders/reorder', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ folder_ids: nextFolderIds }),
+            });
+            if (!response.ok) {
+                const data = await response.json().catch(() => ({}));
+                throw new Error(data.detail || '文件夹排序失败');
+            }
+
+            showToast('文件夹顺序已更新', 'success');
+            await fetchFolders();
+        }
+
+        function handleFolderDragStart(event, folderId) {
+            if (!event.dataTransfer) return;
+            if (!(event.metaKey || folderReorderArmed)) {
+                event.preventDefault();
+                return;
+            }
+            draggedFolderId = folderId;
+            document.body.classList.add('folder-reordering');
+            event.dataTransfer.effectAllowed = 'move';
+            event.dataTransfer.setData(FOLDER_DRAG_DATA_TYPE, folderId);
+            event.dataTransfer.setData('text/plain', folderId);
+        }
+
+        function handleFolderDragEnd() {
+            draggedFolderId = null;
+            document.body.classList.remove('folder-reordering');
+            clearFolderDropIndicator();
+        }
+
+        function handleFolderDragOver(event, folderId) {
+            const hasItemDrag = Boolean(draggedLibraryItemId || hasDragDataType(event, ITEM_DRAG_DATA_TYPE));
+            const hasFolderDrag = Boolean(draggedFolderId || hasDragDataType(event, FOLDER_DRAG_DATA_TYPE));
+            if (!hasItemDrag && !hasFolderDrag) return;
+            if (hasFolderDrag && draggedFolderId === folderId) return;
+
+            event.preventDefault();
+            const targetElement = event.currentTarget;
+            if (hasFolderDrag) {
+                const targetRect = targetElement.getBoundingClientRect();
+                const dropMode = event.clientY > targetRect.top + targetRect.height / 2 ? 'after' : 'before';
+                updateFolderDropIndicator(folderId, dropMode, targetElement);
+                event.dataTransfer.dropEffect = 'move';
+                return;
+            }
+
+            updateFolderDropIndicator(folderId, 'inside', targetElement);
+            event.dataTransfer.dropEffect = 'move';
+        }
+
+        function handleFolderDragLeave(event, folderId) {
+            const nextTarget = event.relatedTarget;
+            if (nextTarget && event.currentTarget.contains(nextTarget)) return;
+            if (currentFolderDropTargetId === folderId) {
+                clearFolderDropIndicator();
+            }
+        }
+
+        async function handleFolderDrop(event, folderId) {
+            event.preventDefault();
+            const droppedItemId = event.dataTransfer?.getData(ITEM_DRAG_DATA_TYPE) || draggedLibraryItemId;
+            const droppedFolderId = event.dataTransfer?.getData(FOLDER_DRAG_DATA_TYPE) || draggedFolderId;
+            const dropMode = currentFolderDropMode || 'inside';
+            clearFolderDropIndicator();
+
+            try {
+                if (droppedItemId) {
+                    await moveItemToFolder(droppedItemId, folderId);
+                    return;
+                }
+                if (droppedFolderId && droppedFolderId !== folderId) {
+                    await reorderFolderPosition(droppedFolderId, folderId, dropMode === 'after' ? 'after' : 'before');
+                }
+            } catch (error) {
+                showToast(error.message, 'error');
+            } finally {
+                draggedLibraryItemId = null;
+                draggedFolderId = null;
+                document.body.classList.remove('item-dragging', 'folder-reordering');
+            }
         }
 
         async function fetchFolders() {

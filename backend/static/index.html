@@ -8,7 +8,7 @@
     <link
         href="https://fonts.googleapis.com/css2?family=Manrope:wght@500;600;700&family=Noto+Sans+SC:wght@400;500;600;700&display=swap"
         rel="stylesheet">
-    <link rel="stylesheet" href="/static/css/index.css?v=20260311b">
+    <link rel="stylesheet" href="/static/css/index.css?v=20260312d">
 </head>
 
 <body>
@@ -111,13 +111,7 @@
                         <div class="folder-loading">加载中...</div>
                     </div>
                     <div class="sidebar-user" id="sidebarUserArea">
-                        <div class="sidebar-user-profile">
-                            <div class="sidebar-avatar-container">
-                                <div class="sidebar-avatar">
-                                    <img id="sidebarAvatarImage" src="data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' fill='%23EBECEF'/><circle cx='50' cy='40' r='20' fill='%23A0A5AA'/><path d='M20 100 C20 70, 80 70, 80 100' fill='%23A0A5AA'/></svg>" alt="用户头像">
-                                </div>
-                                <div class="sidebar-status-dot is-offline" id="sidebarUserStatusDot"></div>
-                            </div>
+                        <div class="sidebar-user-copy">
                             <div class="sidebar-user-meta">
                                 <div class="sidebar-user-name" id="sidebarUserName">本地收录库</div>
                                 <div class="sidebar-user-subtitle" id="sidebarUserSubtitle">本地模式</div>
@@ -337,7 +331,7 @@
                     <button id="syncAllNotionBtn" class="extract-btn settings-secondary" type="button" disabled>同步全部笔记到 Notion</button>
                     <button id="syncAllObsidianBtn" class="extract-btn settings-secondary" type="button" disabled>同步全部笔记到 Obsidian</button>
                 </div>
-                <div class="settings-help settings-bulk-help">已同步过的笔记会自动跳过，只补同步缺失项。</div>
+                <div class="settings-help settings-bulk-help">会检查当前库里的现有笔记：缺失则创建，有更新则覆盖，未改动才跳过。</div>
             </div>
         </div>
     </div>
@@ -377,13 +371,13 @@
 
     <div class="folder-context-menu" id="folderContextMenu"></div>
 
-    <script src="/static/js/app-core.js?v=20260311b"></script>
-    <script src="/static/js/app-auth.js?v=20260311b"></script>
-    <script src="/static/js/app-settings.js?v=20260311b"></script>
-    <script src="/static/js/app-command.js?v=20260311b"></script>
-    <script src="/static/js/app-folders.js?v=20260311b"></script>
-    <script src="/static/js/app-content.js?v=20260311b"></script>
-    <script src="/static/js/app-items.js?v=20260311b"></script>
+    <script src="/static/js/app-core.js?v=20260312d"></script>
+    <script src="/static/js/app-auth.js?v=20260312d"></script>
+    <script src="/static/js/app-settings.js?v=20260312d"></script>
+    <script src="/static/js/app-command.js?v=20260312d"></script>
+    <script src="/static/js/app-folders.js?v=20260312d"></script>
+    <script src="/static/js/app-content.js?v=20260312d"></script>
+    <script src="/static/js/app-items.js?v=20260312d"></script>
 </body>
 
 </html>

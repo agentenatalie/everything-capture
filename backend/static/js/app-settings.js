@@ -439,7 +439,7 @@
                     ? ` 首个失败：${String(data.errors[0].message).slice(0, 120)}`
                     : '';
                 showToast(
-                    `${target === 'notion' ? 'Notion' : 'Obsidian'} 全量同步完成：新增 ${syncedCount} 条，跳过 ${skippedCount} 条${failedCount ? `，失败 ${failedCount} 条` : ''}${firstError}`,
+                    `${target === 'notion' ? 'Notion' : 'Obsidian'} 全量同步完成：写入或更新 ${syncedCount} 条，未改动 ${skippedCount} 条${failedCount ? `，失败 ${failedCount} 条` : ''}${firstError}`,
                     failedCount ? 'info' : 'success'
                 );
                 await fetchItems();

@@ -21,6 +21,7 @@ router = APIRouter(
 
 from fastapi.responses import RedirectResponse
 import base64
+import hashlib
 import urllib.parse
 import re
 import os
@@ -28,7 +29,7 @@ import json
 import mimetypes
 from pathlib import Path
 from urllib.parse import urlparse, urlunparse, quote
-from datetime import UTC
+from datetime import UTC, datetime
 from zoneinfo import ZoneInfo
 from bs4 import BeautifulSoup, NavigableString, Tag
 
@@ -47,9 +48,9 @@ NOTION_SYNC_PROPERTY_SPECS = {
 }
 
 _NOTION_ID_RE = re.compile(r"([0-9a-fA-F]{32}|[0-9a-fA-F]{8}(?:-[0-9a-fA-F]{4}){3}-[0-9a-fA-F]{12})")
-_XHS_TAG_TOKEN_PATTERN = r"#(?:[^\s#\[]+)(?:\[[^\]]+\])?#?"
-_XHS_TAG_ONLY_LINE_RE = re.compile(rf"^\s*(?:{_XHS_TAG_TOKEN_PATTERN}\s*)+$")
-_XHS_TRAILING_TAGS_RE = re.compile(rf"(?:\s+|^)(?:{_XHS_TAG_TOKEN_PATTERN}\s*)+$")
+_SYNC_TAG_TOKEN_PATTERN = r"#(?:[^\s#\[]+)(?:\[[^\]]+\])?#?"
+_SYNC_TAG_ONLY_LINE_RE = re.compile(rf"^\s*(?:{_SYNC_TAG_TOKEN_PATTERN}\s*)+$")
+_SYNC_TRAILING_TAGS_RE = re.compile(rf"(?:\s+|^)(?:{_SYNC_TAG_TOKEN_PATTERN}\s*)+$")
 _SYNC_TEXT_BLOCK_TYPES = {
     "text",
     "paragraph",
@@ -61,6 +62,7 @@ _SYNC_TEXT_BLOCK_TYPES = {
     "quote",
 }
 _SYNC_STATUS_CACHE: dict[str, dict[str, object]] = {}
+_OBSIDIAN_APP_CONFIG_PATH = Path.home() / "Library/Application Support/obsidian/obsidian.json"
 
 
 class SyncStatusRefreshRequest(BaseModel):
@@ -192,6 +194,59 @@ def _build_obsidian_note_path(item: Item, folder_path: str | None) -> str:
     if folder_path:
         return f"{folder_path}/{note_name}"
     return note_name
+
+
+def _open_obsidian_vault_roots() -> list[Path]:
+    try:
+        payload = json.loads(_OBSIDIAN_APP_CONFIG_PATH.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return []
+
+    roots: list[Path] = []
+    for meta in (payload.get("vaults") or {}).values():
+        if not isinstance(meta, dict) or not meta.get("open"):
+            continue
+        path = Path(str(meta.get("path") or "")).expanduser()
+        if path.is_dir():
+            roots.append(path)
+    return roots
+
+
+def _extract_obsidian_item_id_from_file(path: Path) -> str | None:
+    try:
+        with path.open("r", encoding="utf-8", errors="ignore") as handle:
+            for _ in range(20):
+                line = handle.readline()
+                if not line:
+                    break
+                if line.startswith("item_id:"):
+                    item_id = line.split(":", 1)[1].strip()
+                    return item_id or None
+    except OSError:
+        return None
+    return None
+
+
+def _find_obsidian_notes_by_item_ids(folder_path: str | None, item_ids: set[str]) -> dict[str, str]:
+    if not item_ids:
+        return {}
+
+    matches: dict[str, str] = {}
+    for vault_root in _open_obsidian_vault_roots():
+        base_path = vault_root / folder_path if folder_path else vault_root
+        if not base_path.is_dir():
+            continue
+        for note_path in base_path.rglob("*.md"):
+            item_id = _extract_obsidian_item_id_from_file(note_path)
+            if not item_id or item_id not in item_ids or item_id in matches:
+                continue
+            try:
+                matches[item_id] = note_path.relative_to(vault_root).as_posix()
+            except ValueError:
+                continue
+            if len(matches) == len(item_ids):
+                return matches
+    return matches
 
 
 def _persist_obsidian_url_base(settings: Settings | None, db: Session, url_base: str) -> None:
@@ -523,7 +578,7 @@ def _folder_property_text(item: Item) -> str:
     return ", ".join(_ordered_item_folder_names(item))
 
 
-def _strip_xiaohongshu_sync_tags(text: str | None) -> str:
+def _strip_sync_tags(text: str | None) -> str:
     normalized = (text or "").replace("\r\n", "\n").replace("\r", "\n")
     if not normalized.strip():
         return ""
@@ -535,9 +590,9 @@ def _strip_xiaohongshu_sync_tags(text: str | None) -> str:
             if cleaned_lines and cleaned_lines[-1] != "":
                 cleaned_lines.append("")
             continue
-        if _XHS_TAG_ONLY_LINE_RE.fullmatch(stripped_line):
+        if _SYNC_TAG_ONLY_LINE_RE.fullmatch(stripped_line):
             continue
-        cleaned_line = _XHS_TRAILING_TAGS_RE.sub("", raw_line).strip()
+        cleaned_line = _SYNC_TRAILING_TAGS_RE.sub("", raw_line).strip()
         if cleaned_line:
             cleaned_lines.append(cleaned_line)
 
@@ -561,11 +616,11 @@ def _sync_blocks(item: Item) -> list[dict]:
             continue
 
         updated_block = dict(block)
-        if item.platform == "xiaohongshu" and block_type in _SYNC_TEXT_BLOCK_TYPES:
+        if block_type in _SYNC_TEXT_BLOCK_TYPES:
             for field_name in ("content", "markdown"):
                 field_value = updated_block.get(field_name)
                 if isinstance(field_value, str):
-                    cleaned_value = _strip_xiaohongshu_sync_tags(field_value)
+                    cleaned_value = _strip_sync_tags(field_value)
                     if cleaned_value:
                         updated_block[field_name] = cleaned_value
                     else:
@@ -1005,12 +1060,50 @@ def _obsidian_note_matches_item(note_content: str, item: Item) -> bool:
     return False
 
 
+def _normalize_obsidian_note_content(value: str | None) -> str:
+    return (value or "").replace("\r\n", "\n").replace("\r", "\n").strip()
+
+
+async def _resolve_obsidian_target_note(
+    client: httpx.AsyncClient,
+    url_base: str,
+    api_key: str,
+    item: Item,
+    note_path: str,
+    discovered_note_path: str | None = None,
+) -> tuple[str, str | None, bool]:
+    candidate_paths = list(
+        dict.fromkeys(path for path in [item.obsidian_path or "", discovered_note_path or "", note_path] if path)
+    )
+    unknown_detected = False
+
+    for candidate_path in candidate_paths:
+        if not candidate_path:
+            continue
+        note_state, note_content = await _obsidian_note_exists(
+            client,
+            url_base,
+            api_key,
+            candidate_path,
+        )
+        if note_state == "unknown":
+            unknown_detected = True
+            continue
+        if note_state == "exists" and note_content and _obsidian_note_matches_item(note_content, item):
+            return candidate_path, note_content, False
+
+    if unknown_detected:
+        return item.obsidian_path or note_path, None, True
+    return note_path, None, False
+
+
 def _sync_status_cache_key(item: Item) -> str:
     return "|".join(
         [
             item.id or "",
             item.notion_page_id or "",
             item.obsidian_path or "",
+            item.obsidian_last_synced_hash or "",
         ]
     )
 
@@ -1034,6 +1127,7 @@ def _get_cached_sync_status(item: Item) -> dict[str, str | None] | None:
         "id": item.id,
         "notion_page_id": cached.get("notion_page_id"),
         "obsidian_path": cached.get("obsidian_path"),
+        "obsidian_sync_state": cached.get("obsidian_sync_state") or _obsidian_sync_state(item),
     }
 
 
@@ -1042,7 +1136,46 @@ def _store_sync_status_cache(item: Item) -> None:
         "checked_at": monotonic(),
         "notion_page_id": item.notion_page_id,
         "obsidian_path": item.obsidian_path,
+        "obsidian_sync_state": _obsidian_sync_state(item),
     }
+
+
+def _obsidian_media_references(item: Item) -> dict[str, str]:
+    references: dict[str, str] = {}
+    media_folder = f"{OBSIDIAN_MEDIA_FOLDER}/{item.id}"
+    for media in item.media or []:
+        if not media.local_path:
+            continue
+        filename = os.path.basename(media.local_path)
+        vault_path = f"{media_folder}/{filename}"
+        if media.original_url:
+            references[media.original_url] = vault_path
+        references[f"/static/{media.local_path}"] = vault_path
+    return references
+
+
+def _obsidian_note_hash(note_content: str) -> str:
+    normalized = _normalize_obsidian_note_content(note_content)
+    return hashlib.sha256(normalized.encode("utf-8")).hexdigest()
+
+
+def _current_obsidian_note_content(item: Item) -> str:
+    return _build_obsidian_note(item, _obsidian_media_references(item))
+
+
+def _current_obsidian_note_hash(item: Item) -> str:
+    return _obsidian_note_hash(_current_obsidian_note_content(item))
+
+
+def _obsidian_sync_state(item: Item) -> str:
+    if not item.obsidian_path:
+        return "idle"
+
+    last_synced_hash = item.obsidian_last_synced_hash
+    if last_synced_hash is None:
+        return "ready"
+
+    return "ready" if last_synced_hash == _current_obsidian_note_hash(item) else "partial"
 
 
 def _build_obsidian_note(item: Item, media_references: dict[str, str]) -> str:
@@ -1698,7 +1831,13 @@ async def sync_to_notion(item_id: str, db: Session = Depends(get_db)):
     return await _sync_item_to_notion(item, db)
 
 
-async def _sync_item_to_obsidian(item: Item, db: Session, *, settings: Settings | None = None):
+async def _sync_item_to_obsidian(
+    item: Item,
+    db: Session,
+    *,
+    settings: Settings | None = None,
+    discovered_note_path: str | None = None,
+):
     settings = settings or _get_user_settings(db, item.user_id)
     obsidian_rest_api_url = _clean_optional_string(settings.obsidian_rest_api_url if settings else None)
     obsidian_api_key = _get_setting_secret(settings, "obsidian_api_key")
@@ -1708,25 +1847,30 @@ async def _sync_item_to_obsidian(item: Item, db: Session, *, settings: Settings 
     url_bases = _obsidian_candidate_bases(obsidian_rest_api_url)
     folder_path = _normalize_obsidian_folder_path(settings.obsidian_folder_path)
     note_path = _build_obsidian_note_path(item, folder_path)
+    discovered_note_path = discovered_note_path or _find_obsidian_notes_by_item_ids(folder_path, {item.id}).get(item.id)
     last_error = None
     for url_base in url_bases:
         async with httpx.AsyncClient(**_obsidian_client_kwargs(url_base)) as client:
             try:
-                target_note_path = note_path
-                if item.obsidian_path:
-                    note_state, note_content = await _obsidian_note_exists(client, url_base, obsidian_api_key, item.obsidian_path)
-                    if note_state == "exists" and note_content and _obsidian_note_matches_item(note_content, item):
-                        target_note_path = item.obsidian_path
-                    if note_state == "unknown":
-                        return {"status": "ok", "message": "Unable to verify existing note", "obsidian_path": item.obsidian_path}
-                    if note_state in {"missing", "exists"}:
-                        if note_state == "missing" or (note_content and not _obsidian_note_matches_item(note_content, item)):
-                            item.obsidian_path = None
-                            db.commit()
                 structured_blocks = _sync_blocks(item)
                 media_references: dict[str, str] = {}
                 media_folder = f"{OBSIDIAN_MEDIA_FOLDER}/{item.id}"
                 referenced_media = _collect_referenced_media(item, structured_blocks)
+                target_note_path, existing_note_content, verification_unknown = await _resolve_obsidian_target_note(
+                    client,
+                    url_base,
+                    obsidian_api_key,
+                    item,
+                    note_path,
+                    discovered_note_path=discovered_note_path,
+                )
+                if verification_unknown:
+                    return {
+                        "status": "ok",
+                        "message": "Unable to verify existing note",
+                        "obsidian_path": item.obsidian_path or target_note_path,
+                        "obsidian_sync_state": _obsidian_sync_state(item),
+                    }
 
                 for media in referenced_media:
                     if not media.local_path:
@@ -1753,20 +1897,34 @@ async def _sync_item_to_obsidian(item: Item, db: Session, *, settings: Settings 
                     media_references[f"/static/{media.local_path}"] = vault_path
 
                 full_content = _build_obsidian_note(item, media_references)
-                note_response = await client.put(
-                    f"{url_base}/vault/{_encode_obsidian_vault_path(target_note_path)}",
-                    headers=_obsidian_headers(obsidian_api_key, "text/markdown; charset=utf-8"),
-                    content=full_content.encode("utf-8"),
-                    timeout=120.0,
-                )
-                if note_response.status_code not in [200, 201, 204]:
-                    raise HTTPException(status_code=500, detail=f"Obsidian API error: {note_response.text}")
+                current_note_hash = _obsidian_note_hash(full_content)
+
+                note_updated = True
+                if _normalize_obsidian_note_content(existing_note_content) != _normalize_obsidian_note_content(full_content):
+                    note_response = await client.put(
+                        f"{url_base}/vault/{_encode_obsidian_vault_path(target_note_path)}",
+                        headers=_obsidian_headers(obsidian_api_key, "text/markdown; charset=utf-8"),
+                        content=full_content.encode("utf-8"),
+                        timeout=120.0,
+                    )
+                    if note_response.status_code not in [200, 201, 204]:
+                        raise HTTPException(status_code=500, detail=f"Obsidian API error: {note_response.text}")
+                else:
+                    note_updated = False
 
                 item.obsidian_path = target_note_path
+                item.obsidian_last_synced_hash = current_note_hash
+                item.obsidian_last_synced_at = datetime.utcnow()
                 _persist_obsidian_url_base(settings, db, url_base)
                 db.commit()
 
-                return {"status": "ok", "obsidian_path": target_note_path}
+                return {
+                    "status": "ok",
+                    "obsidian_path": target_note_path,
+                    "obsidian_sync_state": "ready",
+                    "updated": note_updated,
+                    "unchanged": not note_updated,
+                }
             except httpx.RequestError as e:
                 last_error = e
                 logger.error("Network error to Obsidian API via %s: %s", url_base, str(e))
@@ -1843,19 +2001,31 @@ async def sync_all_to_obsidian(db: Session = Depends(get_db)):
         .all()
     )
 
-    pending_items = [item for item in items if not item.obsidian_path]
-    skipped_count = len(items) - len(pending_items)
+    folder_path = _normalize_obsidian_folder_path(settings.obsidian_folder_path if settings else None)
+    discovered_note_paths = _find_obsidian_notes_by_item_ids(folder_path, {item.id for item in items})
+    pending_items = items
+    skipped_count = 0
     synced_items: list[dict[str, str]] = []
     failed_items: list[dict[str, str]] = []
 
     for item in pending_items:
         try:
-            result = await _sync_item_to_obsidian(item, db, settings=settings)
+            result = await _sync_item_to_obsidian(
+                item,
+                db,
+                settings=settings,
+                discovered_note_path=discovered_note_paths.get(item.id),
+            )
         except HTTPException as exc:
             detail = str(exc.detail)
             if "Network error connecting to Obsidian" in detail:
                 try:
-                    result = await _sync_item_to_obsidian(item, db, settings=settings)
+                    result = await _sync_item_to_obsidian(
+                        item,
+                        db,
+                        settings=settings,
+                        discovered_note_path=discovered_note_paths.get(item.id),
+                    )
                 except HTTPException as retry_exc:
                     failed_items.append(
                         {
@@ -1874,12 +2044,15 @@ async def sync_all_to_obsidian(db: Session = Depends(get_db)):
                 continue
 
         try:
-            synced_items.append(
-                {
-                    "id": item.id,
-                    "obsidian_path": result.get("obsidian_path") or "",
-                }
-            )
+            if result.get("unchanged"):
+                skipped_count += 1
+            else:
+                synced_items.append(
+                    {
+                        "id": item.id,
+                        "obsidian_path": result.get("obsidian_path") or "",
+                    }
+                )
         except Exception as exc:
             failed_items.append(
                 {
@@ -1920,16 +2093,13 @@ async def refresh_sync_status(request: SyncStatusRefreshRequest, db: Session = D
     notion_headers = _notion_headers(notion_token) if notion_token else None
     status_payload = []
     dirty = False
-    uncached_items: list[Item] = []
+    folder_path = _normalize_obsidian_folder_path(settings.obsidian_folder_path if settings else None)
     for item in items:
-        cached = _get_cached_sync_status(item)
-        if cached:
-            status_payload.append(cached)
-            continue
-        uncached_items.append(item)
+        _SYNC_STATUS_CACHE.pop(_sync_status_cache_key(item), None)
 
-    if uncached_items:
+    if items:
         obsidian_bases = _obsidian_candidate_bases(obsidian_url) if obsidian_url and obsidian_api_key else []
+        discovered_note_paths = _find_obsidian_notes_by_item_ids(folder_path, {item.id for item in items})
 
         async with AsyncExitStack() as stack:
             notion_client = await stack.enter_async_context(httpx.AsyncClient()) if notion_headers else None
@@ -1938,7 +2108,7 @@ async def refresh_sync_status(request: SyncStatusRefreshRequest, db: Session = D
                 for url_base in obsidian_bases
             }
 
-            for item in uncached_items:
+            for item in items:
                 if item.notion_page_id and notion_headers and notion_client is not None:
                     try:
                         page_exists = await _notion_page_exists(
@@ -1953,29 +2123,51 @@ async def refresh_sync_status(request: SyncStatusRefreshRequest, db: Session = D
                     except httpx.RequestError as exc:
                         logger.warning("Failed to refresh Notion sync status for %s: %s", item.id, exc)
 
-                if item.obsidian_path and obsidian_api_key and obsidian_clients:
-                    note_state = "unknown"
-                    note_content = None
+                if obsidian_api_key and obsidian_clients:
+                    note_path = _build_obsidian_note_path(item, folder_path)
+                    resolved_obsidian_path = item.obsidian_path
+                    matched_note_content = None
+                    verification_unknown = False
                     for url_base, obsidian_client in obsidian_clients.items():
                         try:
-                            note_state, note_content = await _obsidian_note_exists(
+                            resolved_obsidian_path, matched_note_content, verification_unknown = await _resolve_obsidian_target_note(
                                 obsidian_client,
                                 url_base,
                                 obsidian_api_key,
-                                item.obsidian_path,
-                                timeout=SYNC_STATUS_CHECK_TIMEOUT_SECONDS,
+                                item,
+                                note_path,
+                                discovered_note_path=discovered_note_paths.get(item.id),
                             )
                         except httpx.RequestError as exc:
                             logger.warning("Failed to refresh Obsidian sync status for %s via %s: %s", item.id, url_base, exc)
                             continue
 
-                        if note_state != "unknown":
+                        if verification_unknown or matched_note_content is not None:
                             break
 
-                    if note_state == "missing" or (
-                        note_state == "exists" and note_content and not _obsidian_note_matches_item(note_content, item)
-                    ):
+                    if verification_unknown:
+                        pass
+                    elif matched_note_content is not None:
+                        if item.obsidian_path != resolved_obsidian_path:
+                            item.obsidian_path = resolved_obsidian_path
+                            dirty = True
+                        current_note_hash = _current_obsidian_note_hash(item)
+                        remote_note_hash = _obsidian_note_hash(matched_note_content)
+                        if remote_note_hash == current_note_hash:
+                            if item.obsidian_last_synced_hash != current_note_hash:
+                                item.obsidian_last_synced_hash = current_note_hash
+                                dirty = True
+                            if item.obsidian_last_synced_at is None:
+                                item.obsidian_last_synced_at = datetime.utcnow()
+                                dirty = True
+                        elif item.obsidian_last_synced_hash != "":
+                            item.obsidian_last_synced_hash = ""
+                            item.obsidian_last_synced_at = None
+                            dirty = True
+                    elif item.obsidian_path:
                         item.obsidian_path = None
+                        item.obsidian_last_synced_hash = None
+                        item.obsidian_last_synced_at = None
                         dirty = True
 
                 _store_sync_status_cache(item)
@@ -1984,6 +2176,7 @@ async def refresh_sync_status(request: SyncStatusRefreshRequest, db: Session = D
                         "id": item.id,
                         "notion_page_id": item.notion_page_id,
                         "obsidian_path": item.obsidian_path,
+                        "obsidian_sync_state": _obsidian_sync_state(item),
                     }
                 )
 

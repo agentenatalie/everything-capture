@@ -2,6 +2,8 @@ import os
 import sys
 import unittest
 import asyncio
+from types import SimpleNamespace
+from unittest.mock import AsyncMock, patch
 
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
@@ -15,6 +17,7 @@ from models import Folder, Item, User  # noqa: E402
 from routers.ingest import _resolve_extract_url, _store_shared_text_capture, execute_extract_request, ingest_page  # noqa: E402
 from routers.phone_webapp import build_phone_extract_item_finalizer  # noqa: E402
 from schemas import ClientInfo, ExtractRequest, IngestRequest, PhoneExtractRequest  # noqa: E402
+from services.extractor import ExtractResult  # noqa: E402
 from tenant import DEFAULT_USER_EMAIL, DEFAULT_USER_ID, DEFAULT_USER_NAME  # noqa: E402
 
 
@@ -144,6 +147,57 @@ class ShortcutCompatibilityTests(unittest.TestCase):
                 self.assertIn("<strong>bold</strong>", item.canonical_html)
                 self.assertIn('href="https://example.com/ref"', item.canonical_html)
                 self.assertNotIn("<script>", item.canonical_html)
+        finally:
+            reset_request_user_id(request_token)
+
+    def test_execute_extract_request_marks_parse_processing_and_schedules_postprocess_after_media_download(self) -> None:
+        background_tasks = _BackgroundTasksStub()
+        request = ExtractRequest(url="https://example.com/article")
+        http_request = SimpleNamespace(headers={"user-agent": "Mozilla/5.0"}, cookies={})
+        extract_result = ExtractResult(
+            title="带视频的文章",
+            text="正文内容足够长，可以入库。",
+            platform="web",
+            final_url="https://example.com/article",
+            media_urls=[
+                {"type": "video", "url": "https://cdn.example.com/video.mp4", "order": 0},
+                {"type": "cover", "url": "https://cdn.example.com/cover.jpg", "order": 1},
+            ],
+            content_blocks=[{"type": "text", "content": "正文内容足够长，可以入库。"}],
+            content_html="<p>正文内容足够长，可以入库。</p>",
+        )
+
+        request_token = set_request_user_id(DEFAULT_USER_ID)
+        try:
+            with self.Session() as db, patch(
+                "routers.ingest.extract_content",
+                new=AsyncMock(return_value=extract_result),
+            ), patch(
+                "routers.ingest._should_background_media_processing",
+                new=AsyncMock(return_value=False),
+            ), patch(
+                "routers.ingest._download_and_apply_media_updates",
+                new=AsyncMock(return_value=2),
+            ):
+                response, item = asyncio.run(
+                    execute_extract_request(
+                        request,
+                        http_request,
+                        background_tasks,
+                        db,
+                        DEFAULT_USER_ID,
+                    )
+                )
+
+                self.assertEqual(response.status, "ready")
+                self.assertEqual(response.media_count, 2)
+                self.assertEqual(item.parse_status, "processing")
+                self.assertEqual(len(background_tasks.calls), 1)
+                self.assertEqual(background_tasks.calls[0][0].__name__, "_spawn_capture_postprocess")
+
+                saved_item = db.query(Item).filter(Item.id == response.item_id).first()
+                self.assertIsNotNone(saved_item)
+                self.assertEqual(saved_item.parse_status, "processing")
         finally:
             reset_request_user_id(request_token)
 

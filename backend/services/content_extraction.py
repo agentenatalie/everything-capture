@@ -790,6 +790,30 @@ def _swift_available() -> bool:
     return bool(SWIFT_SCRIPT_PATH.exists() and Path("/usr/bin/swift").exists())
 
 
+def _summarize_swift_failure(stderr: str | None, stdout: str | None) -> str:
+    lines = []
+    for raw_line in (stderr or "").splitlines():
+        line = raw_line.strip()
+        if not line:
+            continue
+        if "warning:" in line:
+            continue
+        if re.match(r"^\d+\s+\|", line):
+            continue
+        if re.match(r"^[|`-]+\s*", line) and "error:" not in line:
+            continue
+        lines.append(line)
+
+    if lines:
+        for line in reversed(lines):
+            if "error:" in line or not line.startswith("/"):
+                return line
+        return lines[-1]
+
+    fallback = (stdout or stderr or "Swift extractor failed").strip()
+    return fallback or "Swift extractor failed"
+
+
 def _run_swift_media_extractor(*, images: list[dict[str, str]], videos: list[dict[str, str]]) -> dict[str, Any]:
     if not _swift_available():
         raise ContentExtractionError("No local media text extractor is available.")
@@ -813,14 +837,14 @@ def _run_swift_media_extractor(*, images: list[dict[str, str]], videos: list[dic
         env["CLANG_MODULE_CACHE_PATH"] = SWIFT_CLANG_CACHE_PATH
 
         completed = subprocess.run(
-            ["/usr/bin/swift", str(SWIFT_SCRIPT_PATH), request_path],
+            ["/usr/bin/swift", "-suppress-warnings", str(SWIFT_SCRIPT_PATH), request_path],
             capture_output=True,
             text=True,
             check=False,
             env=env,
         )
         if completed.returncode != 0:
-            raise ContentExtractionError((completed.stderr or completed.stdout or "Swift extractor failed").strip())
+            raise ContentExtractionError(_summarize_swift_failure(completed.stderr, completed.stdout))
 
         output = (completed.stdout or "").strip()
         if not output:
@@ -863,10 +887,16 @@ def parse_item_content(item) -> ContentParseResult:
 
     # Images: Swift OCR (unchanged)
     if has_images:
-        extractor_output = _run_swift_media_extractor(
-            images=media_inputs["images"],
-            videos=[],
-        )
+        try:
+            extractor_output = _run_swift_media_extractor(
+                images=media_inputs["images"],
+                videos=[],
+            )
+        except ContentExtractionError as exc:
+            if not has_videos and not canonical_text:
+                raise
+            logger.warning("图片 OCR 已跳过，Swift 提取器失败: %s", exc)
+            extractor_output = {"images": []}
         image_results = extractor_output.get("images", []) if isinstance(extractor_output, dict) else []
         for image_result in image_results:
             ocr_text = _normalize_text_block(image_result.get("ocr_text"))

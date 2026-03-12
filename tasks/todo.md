@@ -1,3 +1,25 @@
+- [x] Rebind Obsidian status checks against nested note paths under the configured folder subtree
+- [x] Backfill existing iCloud-vault Obsidian note paths into the local item records
+- [x] Track Obsidian note sync freshness separately from mere note existence
+- [x] Surface distinct Obsidian dot states for synced vs pending-note-updates in the UI
+- [x] Make parsed-note toolbar icon visually distinct once content has already been parsed
+- [x] Update Obsidian bulk-sync copy so it reflects create-or-update behavior instead of missing-only sync
+- [x] Stop unreadable local cover/image OCR from aborting the entire content parse flow
+- [x] Filter Swift deprecation warnings out of user-facing parse failures
+- [x] Remove the extra outer glow from fully synced Obsidian dots so they match the other status-dot sizes
+- [x] Return new captures as soon as media download finishes and keep content parsing in detached background postprocess
+- [x] Strip platform hashtag/tag boilerplate only during Notion/Obsidian sync output, without mutating extractor/storage data
+- [x] Tighten the parsed-note panel width and spacing so it fits the reader UI better
+- [x] Remove the ZIP export action and backend endpoint
+- [x] Launch background parsing for the currently unparsed library items
+
+- [x] Make Obsidian sync-status refresh bypass stale cache entries
+- [x] Let Obsidian sync-status refresh rebind current-vault note paths
+
+- [x] Stop treating non-empty obsidian_path as a bulk-sync skip condition
+- [x] Reuse existing Obsidian note paths when the current vault already has the matching file
+- [x] Update existing Obsidian notes in place when generated content changes
+
 - [x] Add lightweight video text post-processing for simplified Chinese conversion and readability
 - [x] Apply transcript/subtitle formatting before caching and extracted_text rendering
 - [x] Verify video text formatting with focused content extraction tests
@@ -85,3 +107,8 @@
 - [x] Add a manual parse action plus editable note section UI, replacing the old folder-management entry points
 - [x] Append parsed text to Notion/Obsidian sync output only at the end inside triple quotes
 - [x] Verify the new parsing flow with focused backend and frontend-adjacent tests
+- [x] Allow content cards/list rows to be dragged directly onto folders
+- [x] Support persistent folder reordering with Command-drag in the desktop sidebar
+- [x] Remove the sidebar avatar block, keep the local-mode label left-aligned, and anchor settings in the collapsed footer slot
+- [x] Flatten the list view into a plain white surface instead of card-style framing
+- [x] Add motion to parse/sync/in-flight UI states so processing feedback is visible across the app

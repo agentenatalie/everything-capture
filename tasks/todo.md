@@ -12,6 +12,7 @@
 - [x] Tighten the parsed-note panel width and spacing so it fits the reader UI better
 - [x] Remove the ZIP export action and backend endpoint
 - [x] Launch background parsing for the currently unparsed library items
+- [x] Restore Obsidian refresh so it rechecks all loaded items instead of only ones that already have sync paths
 
 - [x] Make Obsidian sync-status refresh bypass stale cache entries
 - [x] Let Obsidian sync-status refresh rebind current-vault note paths
@@ -116,3 +117,17 @@
 - [x] Shift parse-state visuals to a lighter purple treatment and replace the small parse action glyph with a real spinner
 - [x] Enlarge the reader note and close icons slightly so the toolbar actions read more clearly
 - [x] Remove the native mobile client directory and stale native-client documentation while preserving the iOS webapp and shortcut flow
+- [x] Diagnose the current scroll jank in the main page and identify the dominant paint/layout causes
+- [x] Reduce main-page scroll cost by culling offscreen card/list rendering and isolating repaint boundaries
+- [x] Pause non-essential hover/processing animations while the page is actively scrolling
+- [x] Verify the app still imports and the focused folder tests still pass after the scroll-performance changes
+- [x] Restore the card footer folder-management action with its folder SVG icon
+- [x] Move the card parsing status chip onto the cover image top-left so processing cards keep their height
+- [x] Remove the heavy active-state left stripe that shows behind the modal popup
+- [x] Verify the card hover and modal states visually after the UI adjustments
+- [x] Replace the text-based platform corner badges with platform SVG icons
+- [x] Keep the clicked gallery card in the same visual state as hover while its popup is open
+- [x] Verify the refreshed corner icons and active-card hover state in the browser
+- [x] Swap the GitHub and Xiaohongshu corner badges to the user-provided SVG assets
+- [x] Increase the corner-icon visual footprint, especially for the WeChat badge
+- [x] Verify the updated corner-icon sizing and asset swap in the browser

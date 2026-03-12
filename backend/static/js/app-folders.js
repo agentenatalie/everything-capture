@@ -70,17 +70,11 @@
         }
 
         function renderFolderActionButton(item) {
-            const isProcessing = manualParseInFlightItemId === item.id || item?.parse_status === 'processing';
             return `
-                <button onclick="parseItemContent('${item.id}', event)" class="folder-action-btn${isProcessing ? ' is-processing' : ''}" title="${isProcessing ? '解析中' : '解析内容'}" ${isProcessing ? 'disabled' : ''}>
-                    ${isProcessing
-                        ? '<span class="folder-action-spinner" aria-hidden="true"></span>'
-                        : `<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                            <path d="M7.5 4.75h6.9l2.85 2.85v11.65H7.5A2.25 2.25 0 0 1 5.25 17V7A2.25 2.25 0 0 1 7.5 4.75Z"></path>
-                            <path d="M14.25 4.75V8h3.25"></path>
-                            <path d="M9 11h6"></path>
-                            <path d="M9 14h6"></path>
-                        </svg>`}
+                <button onclick="openFolderPickerForItem('${item.id}', '管理文件夹'); event.stopPropagation();" class="folder-action-btn" title="管理文件夹">
+                    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                        <path d="M3.75 6.75A2.25 2.25 0 0 1 6 4.5h3.2a2.25 2.25 0 0 1 1.59.66l1.05 1.05c.28.28.66.44 1.06.44H18A2.25 2.25 0 0 1 20.25 8.9v7.6A2.25 2.25 0 0 1 18 18.75H6A2.25 2.25 0 0 1 3.75 16.5v-9.75Z"></path>
+                    </svg>
                 </button>
             `;
         }

@@ -3103,6 +3103,7 @@
             display: flex;
             flex-direction: column;
             background: #f9fafb;
+            contain: inline-size;
         }
 
         .board-toolbar {
@@ -3365,6 +3366,7 @@
             align-content: start;
             overflow: visible;
             grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+            contain: layout paint;
         }
 
         .list-view {
@@ -3380,6 +3382,7 @@
             border: none;
             border-radius: 0;
             box-shadow: none;
+            contain: layout paint;
         }
 
         .list-row {
@@ -3389,21 +3392,21 @@
             background: #ffffff;
             box-shadow: none;
             transition: background 0.18s ease, border-color 0.18s ease, box-shadow 0.18s ease;
+            contain: layout paint;
         }
 
         .list-row:last-child {
             border-bottom: none;
         }
 
-        .list-row:hover {
+        .list-row:hover,
+        .list-row.is-active {
             background: #f8fafc;
             box-shadow: inset 2px 0 0 rgba(15, 23, 42, 0.08);
         }
 
-        .list-row.is-active,
         .card.is-active {
             background: #ffffff;
-            box-shadow: inset 3px 0 0 #0f172a;
         }
 
         .card {
@@ -3416,9 +3419,11 @@
             overflow: hidden;
             height: 100%;
             transition: transform 0.24s cubic-bezier(0.22, 1, 0.36, 1), box-shadow 0.24s ease, border-color 0.24s ease;
+            contain: layout paint;
         }
 
-        .card:hover {
+        .card:hover,
+        .card.is-active {
             background: #ffffff;
             border-color: #d1d5db;
             box-shadow: 0 18px 32px -24px rgba(15, 23, 42, 0.24);
@@ -3564,7 +3569,8 @@
             transition: transform 0.34s cubic-bezier(0.22, 1, 0.36, 1), filter 0.24s ease;
         }
 
-        .card:hover .card-preview img {
+        .card:hover .card-preview img,
+        .card.is-active .card-preview img {
             transform: scale(1.035);
             filter: saturate(1.04);
         }
@@ -3587,10 +3593,10 @@
             position: absolute;
             top: 12px;
             right: 12px;
-            min-width: 22px;
-            height: 22px;
-            padding: 4px;
-            border-radius: 4px;
+            min-width: 24px;
+            height: 24px;
+            padding: 1px;
+            border-radius: 6px;
             background: #ffffff;
             box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
             display: inline-flex;
@@ -3600,10 +3606,40 @@
             z-index: 2;
         }
 
-        .platform-glyph {
-            font-size: 10px;
-            font-weight: 700;
-            line-height: 1;
+        .platform-icon {
+            width: 20px;
+            height: 20px;
+            display: block;
+            flex-shrink: 0;
+        }
+
+        .platform-icon.is-wechat {
+            width: 21px;
+            height: 21px;
+        }
+
+        .platform-icon.is-filled {
+            width: 18px;
+            height: 18px;
+        }
+
+        .card-preview-status {
+            position: absolute;
+            top: 12px;
+            left: 12px;
+            z-index: 2;
+            max-width: calc(100% - 72px);
+            pointer-events: none;
+        }
+
+        .card-preview-status .activity-chip {
+            padding: 5px 11px;
+            font-size: 10.5px;
+            background: rgba(255, 255, 255, 0.88);
+            color: var(--parse-accent);
+            box-shadow: 0 10px 18px -14px rgba(15, 23, 42, 0.28);
+            backdrop-filter: blur(8px);
+            -webkit-backdrop-filter: blur(8px);
         }
 
         .card-media-badge {
@@ -3805,7 +3841,8 @@
             flex-shrink: 0;
         }
 
-        .card:hover .card-footer-actions {
+        .card:hover .card-footer-actions,
+        .card.is-active .card-footer-actions {
             opacity: 1;
         }
 

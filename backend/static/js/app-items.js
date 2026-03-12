@@ -58,7 +58,7 @@
                 if (requestId !== libraryRequestId || !data || !Array.isArray(data.items)) return;
 
                 const statusMap = new Map(data.items.map((item) => [item.id, item]));
-                let changed = false;
+                const changedItemIds = [];
 
                 itemsData = itemsData.map((item) => {
                     const nextStatus = statusMap.get(item.id);
@@ -70,7 +70,7 @@
                     ) {
                         return item;
                     }
-                    changed = true;
+                    changedItemIds.push(item.id);
                     return {
                         ...item,
                         notion_page_id: nextStatus.notion_page_id || null,
@@ -92,8 +92,8 @@
 
                 filteredEntries = itemsData;
 
-                if (changed) {
-                    renderItems(filteredEntries);
+                if (changedItemIds.length) {
+                    patchRenderedItemsById(changedItemIds);
                     const refreshedItem = currentOpenItemId
                         ? itemsData.find((item) => item.id === currentOpenItemId) || commandSearchResults.find((item) => item.id === currentOpenItemId)
                         : null;
@@ -109,9 +109,13 @@
         }
 
         function getTrackedRemoteSyncItemIds(entries = itemsData) {
-            return (entries || [])
-                .filter((item) => item.notion_page_id || item.obsidian_path)
-                .map((item) => item.id);
+            return Array.from(
+                new Set(
+                    (entries || [])
+                        .map((item) => String(item?.id || '').trim())
+                        .filter(Boolean)
+                )
+            );
         }
 
         function hasParsedContent(item) {
@@ -236,16 +240,17 @@
             } else {
                 syncActionState[target].delete(itemId);
             }
-            renderItems(filteredEntries);
+            patchRenderedItemsById(itemId);
             const refreshedItem = getItemById(itemId);
             if (refreshedItem && currentOpenItemId === itemId) {
                 openModalByItem(refreshedItem, { keepNotePanel: isNotePanelOpen });
             }
         }
 
-        function renderItemActivityBadges(item) {
+        function renderItemActivityBadges(item, options = {}) {
+            const { includeParseStatus = true } = options;
             const chips = [];
-            if (item?.parse_status === 'processing') {
+            if (includeParseStatus && item?.parse_status === 'processing') {
                 chips.push('<span class="activity-chip is-processing"><span class="activity-chip-pulse" aria-hidden="true"></span>解析中</span>');
             }
             if (isItemSyncInFlight(item?.id, 'notion')) {
@@ -267,6 +272,132 @@
                     <span class="knowledge-dot obsidian ${obsidianBusy ? 'is-processing' : (getObsidianSyncState(item) === 'ready' ? 'is-ready' : (getObsidianSyncState(item) === 'partial' ? 'is-partial' : 'is-idle'))}" title="${obsidianBusy ? 'Obsidian同步中' : getObsidianSyncTitle(item)}"></span>
                 </div>
             `;
+        }
+
+        function renderListRowMarkup(item) {
+            const textPreview = getDisplayItemPreview(item, 120);
+            const length = item.canonical_text ? item.canonical_text.length : 0;
+            const thumb = getItemThumbnail(item);
+            const activeClass = currentOpenItemId === item.id ? ' is-active' : '';
+            const processingClass = item.parse_status === 'processing' ? ' is-processing' : '';
+            const displayTitle = getDisplayItemTitle(item);
+            const fullTitle = String(item.title || displayTitle || '无标题').trim();
+            const activityBadges = renderItemActivityBadges(item);
+            const safeSourceUrl = escapeAttribute(item.source_url || '');
+            const thumbHtml = thumb
+                ? `<div class="list-thumb"><img src="${escapeAttribute(thumb.url)}" loading="lazy" decoding="async" fetchpriority="low" alt=""></div>`
+                : `<div class="list-thumb"></div>`;
+            return `
+                <div class="list-row${activeClass}${processingClass}" data-item-id="${escapeAttribute(item.id || '')}" draggable="true" ondragstart="handleItemDragStart(event, '${item.id}')" ondragend="handleLibraryDragEnd(event)" onclick="handleItemPrimaryAction('${item.id}')">
+                    <div class="list-main">
+                        ${thumbHtml}
+                        <div class="list-content">
+                            <div class="list-title-row">
+                                <div class="list-title" title="${escapeAttribute(fullTitle)}">${escapeHtml(displayTitle)}</div>
+                            </div>
+                            <div class="list-preview">${escapeHtml(textPreview)}</div>
+                        </div>
+                    </div>
+                    <div class="list-side">
+                        <div class="list-meta">
+                            <span class="list-stat">${platformDisplayLabel(item)}</span>
+                            <span class="list-stat">${formatDate(item.created_at)}</span>
+                            <span class="list-stat">${length} 字</span>
+                            ${renderFolderTags(item)}
+                        </div>
+                        <div class="list-actions">
+                            ${activityBadges}
+                            ${renderSyncBadges(item)}
+                            ${renderFolderActionButton(item)}
+                            <button onclick="deleteItem('${item.id}', event)" class="delete-btn" title="删除">
+                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2M10 11v6M14 11v6"/></svg>
+                            </button>
+                            <a href="${safeSourceUrl}" target="_blank" rel="noopener noreferrer" class="source-link" onclick="event.stopPropagation()">原文 ↗</a>
+                        </div>
+                    </div>
+                </div>
+            `;
+        }
+
+        function renderCardMarkup(item) {
+            const activeClass = currentOpenItemId === item.id ? ' is-active' : '';
+            const processingClass = item.parse_status === 'processing' ? ' is-processing' : '';
+            const displayTitle = getDisplayItemTitle(item);
+            const title = escapeHtml(displayTitle);
+            const fullTitle = escapeAttribute(String(item.title || displayTitle || '无标题').trim());
+            const sourceLabel = escapeHtml(`来自 ${platformDisplayLabel(item)}`);
+            const relativeTime = escapeHtml(formatRelativeTime(item.created_at));
+            const tagsHtml = renderCardTags(item);
+            const activityBadges = renderItemActivityBadges(item, { includeParseStatus: false });
+            const safeSourceUrl = escapeAttribute(item.source_url || '');
+
+            return `
+                <div class="card${activeClass}${processingClass}" data-item-id="${escapeAttribute(item.id || '')}" draggable="true" ondragstart="handleItemDragStart(event, '${item.id}')" ondragend="handleLibraryDragEnd(event)" onclick="handleItemPrimaryAction('${item.id}')">
+                    ${renderCardPreview(item)}
+                    <div class="card-content">
+                        <div class="card-meta-row">
+                            <div class="card-meta">
+                                <span>${sourceLabel}</span>
+                                <span>•</span>
+                                <span>${relativeTime}</span>
+                            </div>
+                            ${renderSyncBadges(item)}
+                        </div>
+                        ${activityBadges}
+                        <h3 class="card-title" title="${fullTitle}">${title}</h3>
+                        <div class="card-bottom-row">
+                            <div class="tags">
+                                ${tagsHtml}
+                            </div>
+                            <div class="card-footer-actions">
+                                ${renderFolderActionButton(item)}
+                                <button onclick="deleteItem('${item.id}', event)" class="delete-btn" title="删除">
+                                    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2M10 11v6M14 11v6"/></svg>
+                                </button>
+                                <a href="${safeSourceUrl}" target="_blank" rel="noopener noreferrer" class="source-link" onclick="event.stopPropagation()">
+                                    原文 ↗
+                                </a>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            `;
+        }
+
+        function renderItemMarkup(item) {
+            return currentView === 'list' ? renderListRowMarkup(item) : renderCardMarkup(item);
+        }
+
+        function buildRenderedItemNode(markup) {
+            const template = document.createElement('template');
+            template.innerHTML = markup.trim();
+            return template.content.firstElementChild;
+        }
+
+        function findRenderedItemNode(itemId) {
+            const normalizedId = String(itemId || '');
+            if (!normalizedId || !grid) return null;
+            return Array.from(grid.children).find((node) => node?.dataset?.itemId === normalizedId) || null;
+        }
+
+        function patchRenderedItemById(itemId) {
+            const currentNode = findRenderedItemNode(itemId);
+            if (!currentNode) return false;
+            const nextItem = filteredEntries.find((entry) => entry.id === itemId);
+            if (!nextItem) {
+                currentNode.remove();
+                return true;
+            }
+            const nextNode = buildRenderedItemNode(renderItemMarkup(nextItem));
+            if (!nextNode) return false;
+            currentNode.replaceWith(nextNode);
+            return true;
+        }
+
+        function patchRenderedItemsById(itemIds) {
+            const ids = Array.isArray(itemIds) ? itemIds : [itemIds];
+            Array.from(new Set(ids.map((value) => String(value || '').trim()).filter(Boolean)))
+                .forEach((itemId) => patchRenderedItemById(itemId));
         }
 
         function scheduleRemoteSyncRefresh(options = {}) {
@@ -307,95 +438,12 @@
 
             if (currentView === 'list') {
                 grid.className = 'list-view';
-                grid.innerHTML = entries.map((item) => {
-                    const textPreview = getDisplayItemPreview(item, 120);
-                    const length = item.canonical_text ? item.canonical_text.length : 0;
-                    const thumb = getItemThumbnail(item);
-                    const activeClass = currentOpenItemId === item.id ? ' is-active' : '';
-                    const processingClass = item.parse_status === 'processing' ? ' is-processing' : '';
-                    const displayTitle = getDisplayItemTitle(item);
-                    const fullTitle = String(item.title || displayTitle || '无标题').trim();
-                    const activityBadges = renderItemActivityBadges(item);
-                    const thumbHtml = thumb
-                        ? `<div class="list-thumb"><img src="${thumb.url}" loading="lazy" alt=""></div>`
-                        : `<div class="list-thumb"></div>`;
-                    return `
-                        <div class="list-row${activeClass}${processingClass}" draggable="true" ondragstart="handleItemDragStart(event, '${item.id}')" ondragend="handleLibraryDragEnd(event)" onclick="handleItemPrimaryAction('${item.id}')">
-                            <div class="list-main">
-                                ${thumbHtml}
-                                <div class="list-content">
-                                    <div class="list-title-row">
-                                        <div class="list-title" title="${escapeAttribute(fullTitle)}">${escapeHtml(displayTitle)}</div>
-                                    </div>
-                                    <div class="list-preview">${escapeHtml(textPreview)}</div>
-                                </div>
-                            </div>
-                            <div class="list-side">
-                                <div class="list-meta">
-                                    <span class="list-stat">${platformDisplayLabel(item)}</span>
-                                    <span class="list-stat">${formatDate(item.created_at)}</span>
-                                    <span class="list-stat">${length} 字</span>
-                                    ${renderFolderTags(item)}
-                                </div>
-                                <div class="list-actions">
-                                    ${activityBadges}
-                                    ${renderSyncBadges(item)}
-                                    ${renderFolderActionButton(item)}
-                                    <button onclick="deleteItem('${item.id}', event)" class="delete-btn" title="删除">
-                                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2M10 11v6M14 11v6"/></svg>
-                                    </button>
-                                    <a href="${item.source_url}" target="_blank" class="source-link" onclick="event.stopPropagation()">原文 ↗</a>
-                                </div>
-                            </div>
-                        </div>
-                    `;
-                }).join('');
+                grid.innerHTML = entries.map((item) => renderListRowMarkup(item)).join('');
                 return;
             }
 
             grid.className = 'grid';
-            grid.innerHTML = entries.map((item) => {
-                const activeClass = currentOpenItemId === item.id ? ' is-active' : '';
-                const processingClass = item.parse_status === 'processing' ? ' is-processing' : '';
-                const displayTitle = getDisplayItemTitle(item);
-                const title = escapeHtml(displayTitle);
-                const fullTitle = escapeAttribute(String(item.title || displayTitle || '无标题').trim());
-                const sourceLabel = escapeHtml(`来自 ${platformDisplayLabel(item)}`);
-                const relativeTime = escapeHtml(formatRelativeTime(item.created_at));
-                const tagsHtml = renderCardTags(item);
-                const activityBadges = renderItemActivityBadges(item);
-
-                return `
-                    <div class="card${activeClass}${processingClass}" draggable="true" ondragstart="handleItemDragStart(event, '${item.id}')" ondragend="handleLibraryDragEnd(event)" onclick="handleItemPrimaryAction('${item.id}')">
-                        ${renderCardPreview(item)}
-                        <div class="card-content">
-                            <div class="card-meta-row">
-                                <div class="card-meta">
-                                    <span>${sourceLabel}</span>
-                                    <span>•</span>
-                                    <span>${relativeTime}</span>
-                                </div>
-                                ${renderSyncBadges(item)}
-                            </div>
-                            ${activityBadges}
-                            <h3 class="card-title" title="${fullTitle}">${title}</h3>
-                            <div class="card-bottom-row">
-                                <div class="tags">
-                                    ${tagsHtml}
-                                </div>
-                                <div class="card-footer-actions">
-                                    <button onclick="deleteItem('${item.id}', event)" class="delete-btn" title="删除">
-                                        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2M10 11v6M14 11v6"/></svg>
-                                    </button>
-                                    <a href="${item.source_url}" target="_blank" class="source-link" onclick="event.stopPropagation()">
-                                        原文 ↗
-                                </a>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-                `;
-            }).join('');
+            grid.innerHTML = entries.map((item) => renderCardMarkup(item)).join('');
         }
 
         function setView(view) {
@@ -533,7 +581,7 @@
                 parse_status: 'processing',
                 parse_error: null,
             });
-            renderItems(filteredEntries);
+            patchRenderedItemsById(itemId);
             if (currentOpenItemId === itemId) {
                 isNotePanelOpen = true;
                 openModalByItem(getItemById(itemId), { keepNotePanel: true });
@@ -545,7 +593,7 @@
                 if (!response.ok) throw new Error(data.detail || '解析失败');
 
                 mergeUpdatedItem(data);
-                renderItems(filteredEntries);
+                patchRenderedItemsById(itemId);
                 if (currentOpenItemId === itemId) {
                     isNotePanelOpen = true;
                     openModalByItem(data, { keepNotePanel: true });
@@ -559,7 +607,7 @@
                         parse_status: 'failed',
                         parse_error: error.message,
                     });
-                    renderItems(filteredEntries);
+                    patchRenderedItemsById(itemId);
                     if (currentOpenItemId === itemId) {
                         isNotePanelOpen = true;
                         openModalByItem(getItemById(itemId), { keepNotePanel: true });
@@ -568,7 +616,6 @@
                 showToast(`解析失败：${error.message}`, 'error');
             } finally {
                 manualParseInFlightItemId = null;
-                renderItems(filteredEntries);
                 const nextItem = getItemById(itemId);
                 if (nextItem && currentOpenItemId === itemId) {
                     openModalByItem(nextItem, { keepNotePanel: true });
@@ -597,7 +644,7 @@
                 if (!response.ok) throw new Error(data.detail || '保存失败');
 
                 mergeUpdatedItem(data);
-                renderItems(filteredEntries);
+                patchRenderedItemsById(itemId);
                 if (currentOpenItemId === itemId) {
                     openModalByItem(data, { keepNotePanel: true });
                 }
@@ -621,8 +668,11 @@
 
         function openModalByItem(item, options = {}) {
             const keepNotePanel = Boolean(options.keepNotePanel);
+            const previousOpenItemId = currentOpenItemId;
             currentOpenItemId = item.id;
-            renderItems(filteredEntries);
+            if (previousOpenItemId !== currentOpenItemId) {
+                patchRenderedItemsById([previousOpenItemId, currentOpenItemId]);
+            }
             if (!keepNotePanel) {
                 isNotePanelOpen = false;
             }
@@ -644,10 +694,10 @@
                 let html = '';
                 if (videos.length > 0) {
                     const cover = (item.media || []).find(m => m.type === 'cover');
-                    html += `<div class="modal-media"><video controls preload="metadata" poster="${cover ? cover.url : ''}"><source src="${videos[0].url}" type="video/mp4"></video></div>`;
+                    html += `<div class="modal-media"><video controls preload="metadata" poster="${escapeAttribute(cover ? cover.url : '')}"><source src="${escapeAttribute(videos[0].url || '')}" type="video/mp4"></video></div>`;
                 }
                 if (images.length > 0) {
-                    html += `<div class="modal-media"><div class="media-gallery">${images.map(img => `<img src="${img.url}" alt="">`).join('')}</div>${images.length > 1 ? '<div class="gallery-hint">← 左右滑动查看更多图片 →</div>' : ''}</div>`;
+                    html += `<div class="modal-media"><div class="media-gallery">${images.map((img) => `<img src="${escapeAttribute(img.url || '')}" alt="">`).join('')}</div>${images.length > 1 ? '<div class="gallery-hint">← 左右滑动查看更多图片 →</div>' : ''}</div>`;
                 }
                 html += `<div style="white-space:pre-wrap">${item.canonical_text || '暂无内容'}</div>`;
                 modalContent.innerHTML = html;
@@ -695,7 +745,7 @@
                             commandItem.obsidian_sync_state = data.obsidian_sync_state || 'ready';
                         }
                     }
-                    renderItems(filteredEntries);
+                    patchRenderedItemsById(id);
                     const refreshedItem = itemsData.find(item => item.id === id) || commandSearchResults.find(item => item.id === id);
                     if (currentOpenItemId === id && refreshedItem) {
                         openModalByItem(refreshedItem);
@@ -753,6 +803,7 @@
         }
 
         function closeModalDialog() {
+            const previousOpenItemId = currentOpenItemId;
             modalOverlay.classList.remove('active');
             document.body.style.overflow = '';
             currentOpenItemId = null;
@@ -766,7 +817,7 @@
             toggleNoteBtn?.setAttribute('title', '查看解析笔记');
             readerStatusDots.innerHTML = '';
             modalFooter.innerHTML = '';
-            renderItems(filteredEntries);
+            patchRenderedItemsById(previousOpenItemId);
         }
 
         closeModal.onclick = () => {

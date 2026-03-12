@@ -24,6 +24,7 @@
 - When a live media bug reproduces on one concrete social-video URL but not on similar links, record that exact URL and pause the work if the user reprioritizes. Do not keep broadening the downloader after the user has switched focus.
 - When the user corrects relative-time copy, confirm both the threshold and the exact label direction before changing the UI text.
 - When the user asks for motion on processing states, do not stop at a single spinner. Carry the feedback through every visible parsing/syncing surface so in-flight work feels intentional instead of static.
+- When a card-heavy library feels janky during vertical scroll, check compositing and offscreen rendering before chasing JavaScript. Lazy images help, but the bigger wins usually come from `content-visibility`, paint/layout containment, and pausing non-essential hover/processing animations while scroll is active.
 - When tuning mobile modal spacing, scope the change to the mobile breakpoint and the specific state class instead of shifting the shared desktop footer layout.
 - When the user distinguishes capture from processing in a grabber architecture, do not describe the solution as “deploy web and mobile.” Keep the deployed surface strictly to the capture API, and keep scraping/downloading/AI/file-sync responsibilities local.
 - When a shortcut-facing capture API is meant to behave like an inbox drop, make the response contract explicitly state top-level acceptance success instead of forcing the client to infer success from nested queue metadata.
@@ -44,4 +45,8 @@
 - When media OCR is only an enhancement step, never let one unreadable local image or cover abort the entire parse flow. Treat OCR as best-effort and keep subtitle/transcript extraction running.
 - When a capture response should feel immediate, do not leave heavy parse/sync follow-up inside the same completion path. Persist the item, mark parse state up front if needed, and hand parsing/sync to a detached background postprocess.
 - When the user asks to remove tag boilerplate only from knowledge-base sync output, do not push that cleanup down into extractor/storage. Keep raw capture data intact and clean it at the export layer.
+- When a sync-status refresh is supposed to recover lost Obsidian bindings, do not filter the frontend refresh candidates down to items that already have `obsidian_path`. Recheck all loaded items so moved or unbound notes can be rediscovered.
 - When the user drops the native mobile client but keeps the iOS webapp, remove the `ios/` client and native-client docs together, but leave `phone_webapp`, mobile capture UI, and Shortcut-compatible routes intact.
+- When the user points to a specific card action like the folder SVG, verify the exact control in the rendered card before changing adjacent icons. Do not guess between platform badges, parse actions, and folder-management buttons.
+- When a popup opens from a hovered card, do not automatically reset the card to its base styling. Preserve the intended hover affordance unless the user explicitly asks for a separate active-state look.
+- When the user asks to make an icon feel bigger inside a badge, adjust the glyph's occupancy before enlarging the badge container. Bigger chrome with the same tiny glyph reads as the wrong fix.

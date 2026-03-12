@@ -3,7 +3,7 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from auth import clear_session_cookie, extract_session_token, get_or_create_default_local_user, is_shortcut_bearer_token, reset_request_user_id, resolve_auth_session, set_request_user_id, touch_auth_session
 from database import engine, Base, SessionLocal, ensure_runtime_schema, init_search_index
-from routers import auth, connect, folders, ingest, items, phone_webapp, settings
+from routers import ai, auth, connect, folders, ingest, items, phone_webapp, settings
 import os
 from paths import STATIC_DIR
 
@@ -49,6 +49,7 @@ app.include_router(items.router)
 app.include_router(connect.router)
 app.include_router(folders.router)
 app.include_router(settings.router)
+app.include_router(ai.router)
 
 os.makedirs(STATIC_DIR, exist_ok=True)
 app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")

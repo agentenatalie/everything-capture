@@ -104,11 +104,25 @@ class SettingsResponse(BaseModel):
     obsidian_api_key: Optional[str] = None
     obsidian_api_key_saved: bool = False
     obsidian_folder_path: Optional[str] = None
+    ai_api_key: Optional[str] = None
+    ai_api_key_saved: bool = False
+    ai_base_url: Optional[str] = None
+    ai_model: Optional[str] = None
+    ai_base_url_suggestion: Optional[str] = None
+    ai_model_options: list[str] = Field(default_factory=list)
+    ai_agent_can_manage_folders: bool = True
+    ai_agent_can_parse_content: bool = True
+    ai_agent_can_sync_obsidian: bool = False
+    ai_agent_can_sync_notion: bool = False
     auto_sync_target: str = "none"
     notion_ready: bool = False
     notion_missing_fields: list[str] = Field(default_factory=list)
     obsidian_ready: bool = False
     obsidian_missing_fields: list[str] = Field(default_factory=list)
+    ai_ready: bool = False
+    ai_missing_fields: list[str] = Field(default_factory=list)
+    ai_knowledge_base_path: Optional[str] = None
+    ai_knowledge_base_available: bool = False
 
     class Config:
         from_attributes = True
@@ -125,7 +139,90 @@ class SettingsUpdateRequest(BaseModel):
     obsidian_rest_api_url: Optional[str] = None
     obsidian_api_key: Optional[str] = None
     obsidian_folder_path: Optional[str] = None
+    ai_api_key: Optional[str] = None
+    ai_base_url: Optional[str] = None
+    ai_model: Optional[str] = None
+    ai_agent_can_manage_folders: Optional[bool] = None
+    ai_agent_can_parse_content: Optional[bool] = None
+    ai_agent_can_sync_obsidian: Optional[bool] = None
+    ai_agent_can_sync_notion: Optional[bool] = None
     auto_sync_target: Optional[str] = None
+
+
+class AiCitationResponse(BaseModel):
+    note_id: str
+    library_item_id: Optional[str] = None
+    title: str
+    summary: Optional[str] = None
+    folder: Optional[str] = None
+    tags: list[str] = Field(default_factory=list)
+    source: Optional[str] = None
+    relative_path: str
+    created_at: Optional[datetime] = None
+    score: float = 0.0
+    excerpt: Optional[str] = None
+
+
+class AiAskRequest(BaseModel):
+    question: str
+    top_k: int = 6
+
+
+class AiAskResponse(BaseModel):
+    question: str
+    answer: str
+    citations: list[AiCitationResponse] = Field(default_factory=list)
+    knowledge_base_path: Optional[str] = None
+    note_count: int = 0
+    insufficient_context: bool = False
+
+
+class AiItemAnalysisResponse(BaseModel):
+    item_id: str
+    note_title: str
+    summary_used: Optional[str] = None
+    one_liner: str
+    core_points: list[str] = Field(default_factory=list)
+    why_saved: str
+    themes: list[str] = Field(default_factory=list)
+    thinking_questions: list[str] = Field(default_factory=list)
+    citations: list[AiCitationResponse] = Field(default_factory=list)
+    knowledge_base_path: Optional[str] = None
+
+
+class AiRelatedNotesResponse(BaseModel):
+    item_id: str
+    related: list[AiCitationResponse] = Field(default_factory=list)
+    knowledge_base_path: Optional[str] = None
+    note_count: int = 0
+
+
+class AiConversationMessage(BaseModel):
+    role: str
+    content: str
+
+
+class AiAssistantRequest(BaseModel):
+    mode: str = "chat"
+    messages: list[AiConversationMessage] = Field(default_factory=list)
+    top_k: int = 6
+
+
+class AiToolEventResponse(BaseModel):
+    name: str
+    status: str = "completed"
+    summary: str
+
+
+class AiAssistantResponse(BaseModel):
+    mode: str
+    message: str
+    citations: list[AiCitationResponse] = Field(default_factory=list)
+    tool_events: list[AiToolEventResponse] = Field(default_factory=list)
+    knowledge_base_path: Optional[str] = None
+    note_count: int = 0
+    insufficient_context: bool = False
+    agent_permissions: list[str] = Field(default_factory=list)
 
 
 class FolderResponse(BaseModel):

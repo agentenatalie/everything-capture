@@ -50,3 +50,5 @@
 - When the user points to a specific card action like the folder SVG, verify the exact control in the rendered card before changing adjacent icons. Do not guess between platform badges, parse actions, and folder-management buttons.
 - When a popup opens from a hovered card, do not automatically reset the card to its base styling. Preserve the intended hover affordance unless the user explicitly asks for a separate active-state look.
 - When the user asks to make an icon feel bigger inside a badge, adjust the glyph's occupancy before enlarging the badge container. Bigger chrome with the same tiny glyph reads as the wrong fix.
+- When the user wants AI available from a card but also insists the original reader stay untouched, add a small trigger that opens the existing AI surface. Do not inject AI content into the reader itself.
+- When the user points to “that block” in the opened card view, verify the exact toolbar region before placing a new icon. Do not assume they mean the card cover corner.

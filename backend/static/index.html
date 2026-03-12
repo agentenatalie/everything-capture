@@ -8,7 +8,7 @@
     <link
         href="https://fonts.googleapis.com/css2?family=Manrope:wght@500;600;700&family=Noto+Sans+SC:wght@400;500;600;700&display=swap"
         rel="stylesheet">
-    <link rel="stylesheet" href="/static/css/index.css?v=20260312n">
+    <link rel="stylesheet" href="/static/css/index.css?v=20260312readerai">
 </head>
 
 <body>
@@ -154,6 +154,7 @@
                                 <option value="web">网页</option>
                             </select>
                         </div>
+                        <button id="askAiBtn" class="view-btn ai-entry-btn" type="button">Ask AI</button>
                         <button id="settingsBtn" class="toolbar-icon-btn" type="button" title="集成设置">
                             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
                                 stroke-linecap="round" stroke-linejoin="round">
@@ -202,6 +203,12 @@
                             <path d="M14.25 4.75V8h3.25"></path>
                             <path d="M9 11h6"></path>
                             <path d="M9 14h6"></path>
+                        </svg>
+                    </span>
+                    <span class="reader-action" id="openReaderAiBtn" role="button" tabindex="0" aria-label="用 AI 分析这条笔记" title="用 AI 分析这条笔记">
+                        <svg viewBox="0 0 24 24" fill="none" stroke-width="1.85" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                            <path d="M12 3.75 13.93 8.07 18.25 10 13.93 11.93 12 16.25 10.07 11.93 5.75 10 10.07 8.07 12 3.75Z"></path>
+                            <path d="M18.35 14.85 19.15 16.65 20.95 17.45 19.15 18.25 18.35 20.05 17.55 18.25 15.75 17.45 17.55 16.65 18.35 14.85Z"></path>
                         </svg>
                     </span>
                     <span class="reader-action" id="closeModal" role="button" tabindex="0" aria-label="关闭">
@@ -325,6 +332,67 @@
                     </div>
                 </div>
 
+                <hr class="settings-divider">
+
+                <div class="settings-group">
+                    <div class="settings-section">
+                        <h3>AI 设置</h3>
+                        <div class="settings-field">
+                            <label class="settings-label">API Base URL</label>
+                            <input type="text" id="aiBaseUrl" class="filter-input" style="width: 100%;"
+                                placeholder="https://api.openai.com/v1" />
+                            <div class="settings-help">当前默认使用你的 OpenAI 兼容接口：https://cloud.infini-ai.com/maas/coding/v1</div>
+                        </div>
+                        <div class="settings-field">
+                            <label class="settings-label">模型</label>
+                            <select id="aiModelSelect" class="platform-select" style="width: 100%; display: none;"></select>
+                            <input type="text" id="aiModel" class="filter-input" style="width: 100%;"
+                                list="aiModelOptions"
+                                placeholder="gpt-4.1-mini / 兼容 OpenAI 的模型名" />
+                            <datalist id="aiModelOptions">
+                                <option value="deepseek-v3.2"></option>
+                                <option value="deepseek-v3.2-thinking"></option>
+                                <option value="glm-4.7"></option>
+                                <option value="minimax-m2.1"></option>
+                                <option value="kimi-k2.5"></option>
+                                <option value="glm-5"></option>
+                                <option value="minimax-m2.5"></option>
+                            </datalist>
+                            <div id="aiModelModeHint" class="settings-help">识别到常见 Base URL 时会切换成下拉选择；其他接口继续手动输入模型名。</div>
+                        </div>
+                        <div class="settings-field">
+                            <label class="settings-label">API Key</label>
+                            <input type="password" id="aiApiKey" class="filter-input" style="width: 100%;"
+                                placeholder="sk-..." />
+                            <div class="settings-help">出于安全原因不会回显已保存的 API Key。留空时保留当前值。</div>
+                        </div>
+                        <div class="settings-field">
+                            <label class="settings-label">Agent 权限</label>
+                            <div class="settings-checkbox-list">
+                                <label class="settings-checkbox-row">
+                                    <input type="checkbox" id="aiAgentCanManageFolders" />
+                                    <span>允许 AI 调整笔记文件夹</span>
+                                </label>
+                                <label class="settings-checkbox-row">
+                                    <input type="checkbox" id="aiAgentCanParseContent" />
+                                    <span>允许 AI 触发内容解析</span>
+                                </label>
+                                <label class="settings-checkbox-row">
+                                    <input type="checkbox" id="aiAgentCanSyncObsidian" />
+                                    <span>允许 AI 触发同步到 Obsidian</span>
+                                </label>
+                                <label class="settings-checkbox-row">
+                                    <input type="checkbox" id="aiAgentCanSyncNotion" />
+                                    <span>允许 AI 触发同步到 Notion</span>
+                                </label>
+                            </div>
+                            <div class="settings-help">Chat 模式只负责回答。Agent 模式会在你开放的权限范围内直接操作站内内容。</div>
+                        </div>
+                        <div id="aiKnowledgeBaseHint" class="settings-help" style="color: #6b7280;">当前尚未检测到可读取的 Obsidian 知识库目录。</div>
+                        <div id="aiStatusText" class="settings-status" style="color: #6b7280;">状态：未配置</div>
+                    </div>
+                </div>
+
                 <button id="saveSettingsBtn" class="extract-btn settings-primary"
                     style="margin-top: 10px; width: 100%;">保存设置</button>
                 <div class="settings-bulk-actions">
@@ -371,13 +439,48 @@
 
     <div class="folder-context-menu" id="folderContextMenu"></div>
 
+    <div class="modal-overlay" id="askAiOverlay">
+        <div class="modal ai-modal" role="dialog" aria-modal="true" aria-label="Ask AI">
+            <div class="modal-header">
+                <div class="folder-picker-headline">
+                    <h2 class="modal-title">Ask AI</h2>
+                    <div class="folder-picker-hint">直接对你的 Obsidian 知识库提问，AI 会优先使用已有 summary / 摘要。</div>
+                </div>
+                <div class="modal-header-actions">
+                    <button class="close-btn" id="closeAskAiModal" type="button" aria-label="关闭 Ask AI">×</button>
+                </div>
+            </div>
+            <div class="modal-body ai-modal-body">
+                <div class="ai-assistant-toolbar">
+                    <div class="ai-mode-toggle" id="aiModeToggle">
+                        <button id="aiModeChatBtn" class="ai-mode-btn is-active" type="button">Chat</button>
+                        <button id="aiModeAgentBtn" class="ai-mode-btn" type="button">Agent</button>
+                    </div>
+                    <button id="clearAiChatBtn" class="ai-clear-btn" type="button">清空对话</button>
+                </div>
+                <div class="ai-agent-permissions" id="aiAgentPermissions"></div>
+                <div class="ai-ask-form">
+                    <textarea id="askAiInput" class="reader-note-textarea ai-ask-textarea" placeholder="例如：我之前保存过哪些关于 AI 产品的内容？或在 Agent 模式下让我帮你整理文件夹。"></textarea>
+                    <div class="ai-ask-actions">
+                        <div class="ai-ask-hint" id="askAiMeta">会引用知识库中的相关笔记；如果资料不足会直接说明。</div>
+                        <button id="submitAskAiBtn" class="extract-btn" type="button">提问</button>
+                    </div>
+                </div>
+                <div class="ai-ask-result" id="askAiResult">
+                    <div class="ai-empty-copy">还没有开始对话。</div>
+                </div>
+            </div>
+        </div>
+    </div>
+
     <script src="/static/js/app-core.js?v=20260312n"></script>
     <script src="/static/js/app-auth.js?v=20260312n"></script>
-    <script src="/static/js/app-settings.js?v=20260312n"></script>
+    <script src="/static/js/app-settings.js?v=20260312models"></script>
     <script src="/static/js/app-command.js?v=20260312n"></script>
     <script src="/static/js/app-folders.js?v=20260312n"></script>
-    <script src="/static/js/app-content.js?v=20260312n"></script>
-    <script src="/static/js/app-items.js?v=20260312n"></script>
+    <script src="/static/js/app-content.js?v=20260312readerai"></script>
+    <script src="/static/js/app-items.js?v=20260312restore"></script>
+    <script src="/static/js/app-ai.js?v=20260312readerai"></script>
 </body>
 
 </html>

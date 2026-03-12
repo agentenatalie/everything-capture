@@ -4,6 +4,17 @@ from app_settings import build_google_oauth_settings_payload, clean_optional_str
 from database import get_db
 from models import Settings
 from security import encrypt_secret, has_secret_value
+from services.ai_defaults import (
+    AI_AGENT_DEFAULT_CAN_MANAGE_FOLDERS,
+    AI_AGENT_DEFAULT_CAN_PARSE_CONTENT,
+    AI_AGENT_DEFAULT_CAN_SYNC_NOTION,
+    AI_AGENT_DEFAULT_CAN_SYNC_OBSIDIAN,
+    AI_DEFAULT_BASE_URL,
+    AI_DEFAULT_MODEL,
+    AI_MODEL_OPTIONS,
+    coerce_bool,
+)
+from services.knowledge_base import detect_knowledge_base_path
 from schemas import SettingsResponse, SettingsUpdateRequest
 from tenant import get_current_user_id
 from typing import Optional
@@ -21,9 +32,26 @@ def _has_configured_value(value: Optional[str]) -> bool:
     return has_secret_value(value)
 
 
+def _settings_bool(value: Optional[bool], default: bool) -> bool:
+    return coerce_bool(value, default)
+
+
 def _build_settings_response(settings_obj: Optional[Settings], db: Session) -> SettingsResponse:
+    ai_knowledge_base_path = detect_knowledge_base_path()
     if not settings_obj:
-        return SettingsResponse(**build_google_oauth_settings_payload(db))
+        return SettingsResponse(
+            **build_google_oauth_settings_payload(db),
+            ai_base_url=AI_DEFAULT_BASE_URL,
+            ai_model=AI_DEFAULT_MODEL,
+            ai_base_url_suggestion=AI_DEFAULT_BASE_URL,
+            ai_model_options=AI_MODEL_OPTIONS,
+            ai_agent_can_manage_folders=AI_AGENT_DEFAULT_CAN_MANAGE_FOLDERS,
+            ai_agent_can_parse_content=AI_AGENT_DEFAULT_CAN_PARSE_CONTENT,
+            ai_agent_can_sync_obsidian=AI_AGENT_DEFAULT_CAN_SYNC_OBSIDIAN,
+            ai_agent_can_sync_notion=AI_AGENT_DEFAULT_CAN_SYNC_NOTION,
+            ai_knowledge_base_path=ai_knowledge_base_path,
+            ai_knowledge_base_available=bool(ai_knowledge_base_path),
+        )
 
     notion_api_token_saved = _has_configured_value(settings_obj.notion_api_token)
     notion_database_id = clean_optional_string(settings_obj.notion_database_id)
@@ -42,6 +70,13 @@ def _build_settings_response(settings_obj: Optional[Settings], db: Session) -> S
     if not obsidian_api_key_saved:
         obsidian_missing_fields.append("obsidian_api_key")
 
+    ai_base_url = clean_optional_string(settings_obj.ai_base_url) or AI_DEFAULT_BASE_URL
+    ai_model = clean_optional_string(settings_obj.ai_model) or AI_DEFAULT_MODEL
+    ai_api_key_saved = _has_configured_value(settings_obj.ai_api_key)
+    ai_missing_fields = []
+    if not ai_api_key_saved:
+        ai_missing_fields.append("ai_api_key")
+
     return SettingsResponse(
         **build_google_oauth_settings_payload(db),
         notion_api_token=None,
@@ -55,11 +90,37 @@ def _build_settings_response(settings_obj: Optional[Settings], db: Session) -> S
         obsidian_api_key=None,
         obsidian_api_key_saved=obsidian_api_key_saved,
         obsidian_folder_path=obsidian_folder_path,
+        ai_api_key=None,
+        ai_api_key_saved=ai_api_key_saved,
+        ai_base_url=ai_base_url,
+        ai_model=ai_model,
+        ai_base_url_suggestion=AI_DEFAULT_BASE_URL,
+        ai_model_options=AI_MODEL_OPTIONS,
+        ai_agent_can_manage_folders=_settings_bool(
+            settings_obj.ai_agent_can_manage_folders,
+            AI_AGENT_DEFAULT_CAN_MANAGE_FOLDERS,
+        ),
+        ai_agent_can_parse_content=_settings_bool(
+            settings_obj.ai_agent_can_parse_content,
+            AI_AGENT_DEFAULT_CAN_PARSE_CONTENT,
+        ),
+        ai_agent_can_sync_obsidian=_settings_bool(
+            settings_obj.ai_agent_can_sync_obsidian,
+            AI_AGENT_DEFAULT_CAN_SYNC_OBSIDIAN,
+        ),
+        ai_agent_can_sync_notion=_settings_bool(
+            settings_obj.ai_agent_can_sync_notion,
+            AI_AGENT_DEFAULT_CAN_SYNC_NOTION,
+        ),
         auto_sync_target=settings_obj.auto_sync_target or "none",
         notion_ready=len(notion_missing_fields) == 0,
         notion_missing_fields=notion_missing_fields,
         obsidian_ready=len(obsidian_missing_fields) == 0,
         obsidian_missing_fields=obsidian_missing_fields,
+        ai_ready=len(ai_missing_fields) == 0,
+        ai_missing_fields=ai_missing_fields,
+        ai_knowledge_base_path=ai_knowledge_base_path,
+        ai_knowledge_base_available=bool(ai_knowledge_base_path),
     )
 
 @router.get("", response_model=SettingsResponse)
@@ -100,6 +161,20 @@ def update_settings(request: SettingsUpdateRequest, db: Session = Depends(get_db
         settings_obj.obsidian_api_key = encrypt_secret(request.obsidian_api_key)
     if request.obsidian_folder_path is not None:
         settings_obj.obsidian_folder_path = clean_optional_string(request.obsidian_folder_path)
+    if request.ai_api_key is not None:
+        settings_obj.ai_api_key = encrypt_secret(request.ai_api_key)
+    if request.ai_base_url is not None:
+        settings_obj.ai_base_url = clean_optional_string(request.ai_base_url)
+    if request.ai_model is not None:
+        settings_obj.ai_model = clean_optional_string(request.ai_model)
+    if request.ai_agent_can_manage_folders is not None:
+        settings_obj.ai_agent_can_manage_folders = request.ai_agent_can_manage_folders
+    if request.ai_agent_can_parse_content is not None:
+        settings_obj.ai_agent_can_parse_content = request.ai_agent_can_parse_content
+    if request.ai_agent_can_sync_obsidian is not None:
+        settings_obj.ai_agent_can_sync_obsidian = request.ai_agent_can_sync_obsidian
+    if request.ai_agent_can_sync_notion is not None:
+        settings_obj.ai_agent_can_sync_notion = request.ai_agent_can_sync_notion
     if request.auto_sync_target is not None:
         settings_obj.auto_sync_target = request.auto_sync_target
 

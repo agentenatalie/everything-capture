@@ -34,6 +34,7 @@ def _encrypt_existing_settings(connection) -> None:
         "notion_api_token",
         "notion_client_secret",
         "obsidian_api_key",
+        "ai_api_key",
     ]
     settings_columns = _table_columns(connection, "settings")
     available_columns = [column for column in secret_columns if column in settings_columns]
@@ -305,6 +306,28 @@ def ensure_runtime_schema():
             )
         if "obsidian_folder_path" not in settings_columns:
             connection.exec_driver_sql("ALTER TABLE settings ADD COLUMN obsidian_folder_path VARCHAR")
+        if "ai_api_key" not in settings_columns:
+            connection.exec_driver_sql("ALTER TABLE settings ADD COLUMN ai_api_key VARCHAR")
+        if "ai_base_url" not in settings_columns:
+            connection.exec_driver_sql("ALTER TABLE settings ADD COLUMN ai_base_url VARCHAR")
+        if "ai_model" not in settings_columns:
+            connection.exec_driver_sql("ALTER TABLE settings ADD COLUMN ai_model VARCHAR")
+        if "ai_agent_can_manage_folders" not in settings_columns:
+            connection.exec_driver_sql(
+                "ALTER TABLE settings ADD COLUMN ai_agent_can_manage_folders BOOLEAN NOT NULL DEFAULT 1"
+            )
+        if "ai_agent_can_parse_content" not in settings_columns:
+            connection.exec_driver_sql(
+                "ALTER TABLE settings ADD COLUMN ai_agent_can_parse_content BOOLEAN NOT NULL DEFAULT 1"
+            )
+        if "ai_agent_can_sync_obsidian" not in settings_columns:
+            connection.exec_driver_sql(
+                "ALTER TABLE settings ADD COLUMN ai_agent_can_sync_obsidian BOOLEAN NOT NULL DEFAULT 0"
+            )
+        if "ai_agent_can_sync_notion" not in settings_columns:
+            connection.exec_driver_sql(
+                "ALTER TABLE settings ADD COLUMN ai_agent_can_sync_notion BOOLEAN NOT NULL DEFAULT 0"
+            )
         connection.exec_driver_sql(
             "UPDATE settings SET user_id = ? WHERE user_id IS NULL OR trim(user_id) = ''",
             (DEFAULT_USER_ID,),
@@ -312,6 +335,18 @@ def ensure_runtime_schema():
         connection.exec_driver_sql(
             "UPDATE settings SET workspace_id = ? WHERE workspace_id IS NULL OR trim(workspace_id) = ''",
             (DEFAULT_WORKSPACE_ID,),
+        )
+        connection.exec_driver_sql(
+            "UPDATE settings SET ai_agent_can_manage_folders = 1 WHERE ai_agent_can_manage_folders IS NULL"
+        )
+        connection.exec_driver_sql(
+            "UPDATE settings SET ai_agent_can_parse_content = 1 WHERE ai_agent_can_parse_content IS NULL"
+        )
+        connection.exec_driver_sql(
+            "UPDATE settings SET ai_agent_can_sync_obsidian = 0 WHERE ai_agent_can_sync_obsidian IS NULL"
+        )
+        connection.exec_driver_sql(
+            "UPDATE settings SET ai_agent_can_sync_notion = 0 WHERE ai_agent_can_sync_notion IS NULL"
         )
         connection.exec_driver_sql("DROP INDEX IF EXISTS idx_settings_workspace_id")
         connection.exec_driver_sql("CREATE UNIQUE INDEX IF NOT EXISTS idx_settings_user_id ON settings(user_id)")

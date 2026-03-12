@@ -148,6 +148,13 @@ class Settings(Base):
     obsidian_rest_api_url = Column(String, nullable=True)
     obsidian_api_key = Column(String, nullable=True)
     obsidian_folder_path = Column(String, nullable=True)
+    ai_api_key = Column(String, nullable=True)
+    ai_base_url = Column(String, nullable=True)
+    ai_model = Column(String, nullable=True)
+    ai_agent_can_manage_folders = Column(Boolean, nullable=False, default=True)
+    ai_agent_can_parse_content = Column(Boolean, nullable=False, default=True)
+    ai_agent_can_sync_obsidian = Column(Boolean, nullable=False, default=False)
+    ai_agent_can_sync_notion = Column(Boolean, nullable=False, default=False)
     auto_sync_target = Column(String, default="none") # "none", "notion", "obsidian", "both"
 
     user = relationship("User", back_populates="settings", lazy="joined")

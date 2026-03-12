@@ -131,3 +131,23 @@
 - [x] Swap the GitHub and Xiaohongshu corner badges to the user-provided SVG assets
 - [x] Increase the corner-icon visual footprint, especially for the WeChat badge
 - [x] Verify the updated corner-icon sizing and asset swap in the browser
+
+## AI Knowledge Base Layer
+- [x] Add AI provider settings fields for API key, base URL, and model without changing the existing settings flow style
+- [x] Read Obsidian knowledge-base notes from the local vault/root directory and prioritize existing `summary` content instead of regenerating it
+- [x] Build retrieval and related-note ranking over local notes so Ask AI and note detail analysis share the same knowledge source
+- [x] Add backend AI endpoints for Ask AI, single-note analysis, related notes, and cross-note analysis with source citations and insufficient-context handling
+- [x] Add minimal UI surfaces that match the current design: Ask AI entry, note-detail AI analysis, related notes, and AI settings
+- [x] Verify the new AI flows with focused backend tests and a local app smoke check
+
+## AI Chat + Agent Layer
+- [x] Add AI assistant conversation endpoint that supports both chat mode and agent mode without replacing the existing knowledge-base analysis endpoints
+- [x] Add permission-gated agent tools for safe in-app actions: search/read notes, list folders, move notes, trigger parsing, and trigger Notion/Obsidian syncs
+- [x] Extend settings storage/UI with agent permission toggles plus the user's Infini-AI compatible base URL and model presets
+- [x] Upgrade the Ask AI modal into a minimal chat/agent conversation surface that still matches the current UI language
+- [x] Verify the new assistant/agent flows with focused backend tests and regression checks
+
+## AI Entry Polish
+- [x] Keep the original card/detail content intact and move per-item AI access back to a separate Ask AI surface
+- [x] Add a small AI SVG entry in the opened reader toolbar that opens Ask AI with the current item as context
+- [x] Tighten the reader toolbar action spacing so the note and close SVG buttons sit closer together

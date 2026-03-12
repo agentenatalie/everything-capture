@@ -33,7 +33,127 @@
 
         const syncAllNotionBtn = document.getElementById('syncAllNotionBtn');
         const syncAllObsidianBtn = document.getElementById('syncAllObsidianBtn');
+        const aiBaseUrlInput = document.getElementById('aiBaseUrl');
+        const aiModelInput = document.getElementById('aiModel');
+        const aiModelSelect = document.getElementById('aiModelSelect');
+        const aiModelModeHint = document.getElementById('aiModelModeHint');
         let bulkSyncInFlightTarget = null;
+
+        const AI_PROVIDER_MODEL_PRESETS = [
+            {
+                key: 'infini-ai-coding',
+                label: 'Infini AI Coding',
+                matches: (baseUrl) => baseUrl.includes('cloud.infini-ai.com/maas/coding/v1'),
+                models: [
+                    'deepseek-v3.2',
+                    'deepseek-v3.2-thinking',
+                    'glm-4.7',
+                    'minimax-m2.1',
+                    'kimi-k2.5',
+                    'glm-5',
+                    'minimax-m2.5',
+                ],
+            },
+            {
+                key: 'openai',
+                label: 'OpenAI',
+                matches: (baseUrl) => baseUrl.includes('api.openai.com'),
+                models: [
+                    'gpt-5',
+                    'gpt-5-mini',
+                    'gpt-5-nano',
+                    'gpt-4.1',
+                    'gpt-4.1-mini',
+                    'gpt-4.1-nano',
+                    'gpt-4o',
+                    'gpt-4o-mini',
+                ],
+            },
+            {
+                key: 'anthropic-compatible',
+                label: 'Claude Compatible',
+                matches: (baseUrl) => baseUrl.includes('anthropic') || baseUrl.includes('claude'),
+                models: [
+                    'claude-opus-4-1',
+                    'claude-sonnet-4',
+                    'claude-3-7-sonnet',
+                    'claude-3-5-haiku',
+                ],
+            },
+            {
+                key: 'minimax',
+                label: 'MiniMax',
+                matches: (baseUrl) => baseUrl.includes('minimax'),
+                models: [
+                    'minimax-m2.5',
+                    'minimax-m2.1',
+                    'MiniMax-M1',
+                    'abab6.5s-chat',
+                ],
+            },
+        ];
+
+        function normalizeAiBaseUrlForPreset(value) {
+            return String(value || '').trim().toLowerCase().replace(/\/+$/, '');
+        }
+
+        function detectAiProviderPreset(baseUrl) {
+            const normalized = normalizeAiBaseUrlForPreset(baseUrl);
+            if (!normalized) return null;
+            return AI_PROVIDER_MODEL_PRESETS.find((preset) => {
+                try {
+                    return preset.matches(normalized);
+                } catch (error) {
+                    return false;
+                }
+            }) || null;
+        }
+
+        function setAiModelFieldMode(baseUrl, currentModel = '') {
+            if (!aiModelInput || !aiModelSelect) return;
+
+            const preset = detectAiProviderPreset(baseUrl);
+            const normalizedCurrentModel = String(currentModel || aiModelInput.value || '').trim();
+
+            if (!preset) {
+                aiModelSelect.style.display = 'none';
+                aiModelInput.style.display = '';
+                if (normalizedCurrentModel) {
+                    aiModelInput.value = normalizedCurrentModel;
+                }
+                if (aiModelModeHint) {
+                    aiModelModeHint.textContent = '当前 Base URL 未命中预设模型列表，继续手动输入模型名。';
+                }
+                return;
+            }
+
+            const options = [...preset.models];
+            if (normalizedCurrentModel && !options.includes(normalizedCurrentModel)) {
+                options.unshift(normalizedCurrentModel);
+            }
+
+            aiModelSelect.innerHTML = options
+                .map((model) => `<option value="${escapeAttribute(model)}">${escapeHtml(model)}</option>`)
+                .join('');
+            aiModelSelect.value = normalizedCurrentModel && options.includes(normalizedCurrentModel)
+                ? normalizedCurrentModel
+                : options[0];
+            aiModelInput.value = aiModelSelect.value;
+            aiModelSelect.style.display = '';
+            aiModelInput.style.display = 'none';
+            if (aiModelModeHint) {
+                aiModelModeHint.textContent = `已识别为 ${preset.label}，模型改为下拉选择。`;
+            }
+        }
+
+        function getAiModelValue() {
+            if (!aiModelInput || !aiModelSelect) return '';
+            const preset = detectAiProviderPreset(aiBaseUrlInput?.value || '');
+            if (preset) {
+                aiModelInput.value = aiModelSelect.value || aiModelInput.value || '';
+            }
+            return String(aiModelInput.value || '').trim();
+        }
 
         function refreshBulkSyncButtons() {
             if (syncAllNotionBtn) {
@@ -93,6 +213,63 @@
             obsidianStatusText.textContent = '状态：未配置';
             obsidianStatusText.style.color = '#6b7280';
             setObsidianTargetHint(data);
+        }
+
+        function setAiKnowledgeBaseHint(data) {
+            const hint = document.getElementById('aiKnowledgeBaseHint');
+            if (!hint) return;
+            const knowledgeBasePath = String(data?.ai_knowledge_base_path || '').trim();
+            if (knowledgeBasePath) {
+                hint.textContent = `当前读取知识库：${knowledgeBasePath}`;
+                hint.style.color = '#6b7280';
+                return;
+            }
+            hint.textContent = '当前尚未检测到可读取的 Obsidian 知识库目录。';
+            hint.style.color = '#b7791f';
+        }
+
+        function setAiStatus(data) {
+            const status = document.getElementById('aiStatusText');
+            if (!status) return;
+
+            setAiKnowledgeBaseHint(data);
+
+            if (data?.ai_ready && data?.ai_knowledge_base_available) {
+                status.textContent = '状态：已配置，可用于 Chat / Agent / 笔记分析。';
+                status.style.color = '#1f7a4d';
+                return;
+            }
+
+            const missing = data?.ai_missing_fields || [];
+            if (missing.length) {
+                const labels = [];
+                if (missing.includes('ai_base_url')) labels.push('API Base URL');
+                if (missing.includes('ai_model')) labels.push('模型');
+                if (missing.includes('ai_api_key')) labels.push('API Key');
+                status.textContent = `状态：未完成配置，缺少 ${labels.join(' / ')}。`;
+                status.style.color = '#b7791f';
+                return;
+            }
+
+            if (!data?.ai_knowledge_base_available) {
+                status.textContent = '状态：AI API 已配置，但还没有检测到可读取的知识库目录。';
+                status.style.color = '#b7791f';
+                return;
+            }
+
+            status.textContent = '状态：未配置';
+            status.style.color = '#6b7280';
+        }
+
+        function applyAiAgentPermissionInputs(data) {
+            const manageFolders = document.getElementById('aiAgentCanManageFolders');
+            const parseContent = document.getElementById('aiAgentCanParseContent');
+            const syncObsidian = document.getElementById('aiAgentCanSyncObsidian');
+            const syncNotion = document.getElementById('aiAgentCanSyncNotion');
+            if (manageFolders) manageFolders.checked = data?.ai_agent_can_manage_folders !== false;
+            if (parseContent) parseContent.checked = data?.ai_agent_can_parse_content !== false;
+            if (syncObsidian) syncObsidian.checked = Boolean(data?.ai_agent_can_sync_obsidian);
+            if (syncNotion) syncNotion.checked = Boolean(data?.ai_agent_can_sync_notion);
         }
 
         function setObsidianTargetHint(data) {
@@ -241,10 +418,21 @@
                         '已保存，留空则保留当前 API Key'
                     );
                     document.getElementById('obsidianFolderPath').value = data.obsidian_folder_path || '';
+                    aiBaseUrlInput.value = data.ai_base_url || data.ai_base_url_suggestion || '';
+                    aiModelInput.value = data.ai_model || (Array.isArray(data.ai_model_options) ? (data.ai_model_options[0] || '') : '');
+                    setAiModelFieldMode(aiBaseUrlInput.value, aiModelInput.value);
+                    applySecretInputState(
+                        document.getElementById('aiApiKey'),
+                        Boolean(data.ai_api_key_saved),
+                        'sk-...',
+                        '已保存，留空则保留当前 API Key'
+                    );
+                    applyAiAgentPermissionInputs(data);
                     document.getElementById('autoSyncTarget').value = data.auto_sync_target || 'none';
                     setGoogleOAuthStatus(data);
                     setNotionStatus(data);
                     setObsidianStatus(data);
+                    setAiStatus(data);
                     refreshBulkSyncButtons();
                     await loadNotionDatabases(data.notion_database_id || '');
                     return data;
@@ -270,6 +458,12 @@
                 notion_database_id: notionDbIdInput.value.trim() || null,
                 obsidian_rest_api_url: document.getElementById('obsidianApiUrl').value.trim() || null,
                 obsidian_folder_path: document.getElementById('obsidianFolderPath').value.trim() || null,
+                ai_base_url: aiBaseUrlInput.value.trim() || null,
+                ai_model: getAiModelValue() || null,
+                ai_agent_can_manage_folders: document.getElementById('aiAgentCanManageFolders').checked,
+                ai_agent_can_parse_content: document.getElementById('aiAgentCanParseContent').checked,
+                ai_agent_can_sync_obsidian: document.getElementById('aiAgentCanSyncObsidian').checked,
+                ai_agent_can_sync_notion: document.getElementById('aiAgentCanSyncNotion').checked,
                 auto_sync_target: document.getElementById('autoSyncTarget').value
             };
             if (googleOauthClientIdInput) {
@@ -281,9 +475,11 @@
             const googleOauthClientSecret = googleOauthClientSecretInput?.value.trim() || '';
             const notionClientSecret = document.getElementById('notionClientSecret').value.trim();
             const obsidianApiKey = document.getElementById('obsidianApiKey').value.trim();
+            const aiApiKey = document.getElementById('aiApiKey').value.trim();
             if (googleOauthClientSecret) payload.google_oauth_client_secret = googleOauthClientSecret;
             if (notionClientSecret) payload.notion_client_secret = notionClientSecret;
             if (obsidianApiKey) payload.obsidian_api_key = obsidianApiKey;
+            if (aiApiKey) payload.ai_api_key = aiApiKey;
             btnSaveSettings.disabled = true;
             btnSaveSettings.innerText = "保存中...";
             try {
@@ -298,10 +494,16 @@
                     setGoogleOAuthStatus(data);
                     setNotionStatus(data);
                     setObsidianStatus(data);
+                    setAiStatus(data);
+                    setAiModelFieldMode(data.ai_base_url || data.ai_base_url_suggestion || '', data.ai_model || '');
+                    applyAiAgentPermissionInputs(data);
                     refreshBulkSyncButtons();
                     await loadNotionDatabases(data.notion_database_id || '');
+                    if (typeof refreshAiAssistantUi === 'function') {
+                        refreshAiAssistantUi();
+                    }
                     await refreshAuthSession({ silent: true });
-                    if (data.notion_ready || data.obsidian_ready) {
+                    if (data.notion_ready || data.obsidian_ready || data.ai_ready) {
                         showToast('设置已保存，集成已更新。', 'success');
                     } else {
                         showToast('设置已保存，但仍有未完成的集成配置。', 'info');
@@ -459,6 +661,20 @@
 
         syncAllNotionBtn?.addEventListener('click', () => runBulkSync('notion'));
         syncAllObsidianBtn?.addEventListener('click', () => runBulkSync('obsidian'));
+        aiBaseUrlInput?.addEventListener('input', () => {
+            setAiModelFieldMode(aiBaseUrlInput.value, getAiModelValue());
+        });
+        aiBaseUrlInput?.addEventListener('change', () => {
+            setAiModelFieldMode(aiBaseUrlInput.value, getAiModelValue());
+        });
+        aiModelSelect?.addEventListener('change', () => {
+            aiModelInput.value = aiModelSelect.value || '';
+        });
+        aiModelInput?.addEventListener('input', () => {
+            if (aiModelSelect && aiModelSelect.style.display !== 'none') {
+                aiModelSelect.value = aiModelInput.value || aiModelSelect.value;
+            }
+        });
 
         window.addEventListener('focus', () => {
             if (!hasWindowFocusedOnce) {

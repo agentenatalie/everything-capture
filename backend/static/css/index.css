@@ -1871,7 +1871,7 @@
         .reader-toolbar-right {
             display: inline-flex;
             align-items: center;
-            gap: 14px;
+            gap: 8px;
             margin-left: auto;
         }
 
@@ -4128,5 +4128,417 @@
             * {
                 animation: none !important;
                 transition: none !important;
+            }
+        }
+
+        .ai-entry-btn {
+            min-width: 86px;
+        }
+
+        .reader-ai-panel {
+            display: block;
+            padding: 0 1.25rem 0.2rem;
+        }
+
+        .reader-ai-panel:empty {
+            display: none;
+        }
+
+        .reader-ai-shell {
+            display: flex;
+            flex-direction: column;
+            gap: 14px;
+            padding: 14px 16px 16px;
+            border-radius: 18px;
+            border: 1px solid rgba(226, 232, 240, 0.9);
+            background: rgba(248, 250, 252, 0.92);
+        }
+
+        .reader-ai-header {
+            display: flex;
+            align-items: flex-start;
+            justify-content: space-between;
+            gap: 14px;
+        }
+
+        .reader-ai-headline {
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+            min-width: 0;
+        }
+
+        .reader-ai-title {
+            font-size: 0.95rem;
+            font-weight: 700;
+            color: #111827;
+        }
+
+        .reader-ai-meta,
+        .ai-panel-summary-hint,
+        .ai-answer-meta,
+        .ai-citation-meta {
+            font-size: 0.76rem;
+            line-height: 1.5;
+            color: #6b7280;
+        }
+
+        .ai-panel-card,
+        .ai-answer-card {
+            border: 1px solid rgba(226, 232, 240, 0.88);
+            background: #ffffff;
+            border-radius: 16px;
+            padding: 14px 15px;
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+        }
+
+        .ai-answer-card.is-warning {
+            border-color: rgba(245, 158, 11, 0.28);
+            background: rgba(255, 251, 235, 0.88);
+        }
+
+        .ai-answer-card.is-error {
+            border-color: rgba(220, 38, 38, 0.18);
+            background: rgba(254, 242, 242, 0.9);
+        }
+
+        .ai-block {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+
+        .ai-block-title,
+        .ai-answer-title {
+            font-size: 0.82rem;
+            font-weight: 700;
+            color: #111827;
+        }
+
+        .ai-block-copy,
+        .ai-answer-text,
+        .ai-panel-copy {
+            font-size: 0.88rem;
+            line-height: 1.68;
+            color: #344054;
+        }
+
+        .ai-bullet-list {
+            margin: 0;
+            padding-left: 1.1rem;
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+            color: #344054;
+            font-size: 0.86rem;
+            line-height: 1.6;
+        }
+
+        .ai-chip-list {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+        }
+
+        .ai-chip {
+            display: inline-flex;
+            align-items: center;
+            min-height: 28px;
+            padding: 0 11px;
+            border-radius: 999px;
+            background: rgba(241, 245, 249, 0.95);
+            border: 1px solid rgba(226, 232, 240, 0.95);
+            color: #475467;
+            font-size: 0.78rem;
+            font-weight: 600;
+        }
+
+        .ai-related-section,
+        .ai-answer-citations {
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }
+
+        .ai-citation-list {
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }
+
+        .ai-citation-item {
+            display: flex;
+            align-items: flex-start;
+            justify-content: space-between;
+            gap: 12px;
+            border: 1px solid rgba(226, 232, 240, 0.86);
+            background: #ffffff;
+            border-radius: 14px;
+            padding: 12px 13px;
+        }
+
+        .ai-citation-item.is-compact {
+            padding: 11px 12px;
+        }
+
+        .ai-citation-main {
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+            min-width: 0;
+        }
+
+        .ai-citation-title {
+            font-size: 0.84rem;
+            font-weight: 700;
+            color: #111827;
+        }
+
+        .ai-citation-summary {
+            font-size: 0.82rem;
+            line-height: 1.55;
+            color: #475467;
+        }
+
+        .ai-citation-side {
+            flex-shrink: 0;
+        }
+
+        .ai-citation-link {
+            border: 1px solid rgba(203, 213, 225, 0.94);
+            background: #ffffff;
+            color: #344054;
+            border-radius: 999px;
+            min-height: 32px;
+            padding: 0 12px;
+            font-size: 0.76rem;
+            font-weight: 700;
+            text-decoration: none;
+            cursor: pointer;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .ai-citation-link:hover {
+            background: #f8fafc;
+            color: #111827;
+        }
+
+        .ai-empty-copy {
+            font-size: 0.82rem;
+            line-height: 1.55;
+            color: #98a2b3;
+        }
+
+        .ai-modal {
+            width: min(860px, calc(100vw - 48px));
+        }
+
+        .ai-modal-body {
+            display: flex;
+            flex-direction: column;
+            gap: 16px;
+        }
+
+        .ai-assistant-toolbar {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 12px;
+        }
+
+        .ai-mode-toggle {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            padding: 4px;
+            border-radius: 999px;
+            background: rgba(248, 250, 252, 0.95);
+            border: 1px solid rgba(226, 232, 240, 0.9);
+        }
+
+        .ai-mode-btn,
+        .ai-clear-btn {
+            border: 1px solid rgba(214, 220, 228, 0.96);
+            background: #ffffff;
+            color: #475467;
+            border-radius: 999px;
+            min-height: 34px;
+            padding: 0 14px;
+            font-size: 0.78rem;
+            font-weight: 700;
+            cursor: pointer;
+        }
+
+        .ai-mode-btn.is-active {
+            border-color: rgba(148, 163, 184, 0.9);
+            background: #eef2f7;
+            color: #111827;
+        }
+
+        .ai-agent-permissions {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+        }
+
+        .ai-agent-permission {
+            display: inline-flex;
+            align-items: center;
+            min-height: 30px;
+            padding: 0 12px;
+            border-radius: 999px;
+            background: rgba(248, 250, 252, 0.96);
+            border: 1px solid rgba(226, 232, 240, 0.95);
+            color: #475467;
+            font-size: 0.76rem;
+            font-weight: 650;
+        }
+
+        .ai-ask-form {
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+        }
+
+        .ai-ask-textarea {
+            min-height: 128px;
+        }
+
+        .ai-ask-actions {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 12px;
+        }
+
+        .ai-ask-hint {
+            font-size: 0.8rem;
+            line-height: 1.5;
+            color: #6b7280;
+        }
+
+        .ai-ask-result {
+            display: flex;
+            flex-direction: column;
+            gap: 14px;
+            max-height: min(52vh, 560px);
+            overflow-y: auto;
+            padding-right: 2px;
+        }
+
+        .ai-chat-message {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+
+        .ai-chat-message.is-user {
+            align-items: flex-end;
+        }
+
+        .ai-chat-bubble {
+            width: 100%;
+            border: 1px solid rgba(226, 232, 240, 0.88);
+            background: #ffffff;
+            border-radius: 16px;
+            padding: 13px 14px;
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }
+
+        .ai-chat-message.is-user .ai-chat-bubble {
+            width: min(88%, 540px);
+            background: #f8fafc;
+        }
+
+        .ai-chat-role {
+            font-size: 0.76rem;
+            font-weight: 700;
+            color: #6b7280;
+        }
+
+        .ai-tool-events {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+
+        .ai-tool-event {
+            border: 1px solid rgba(226, 232, 240, 0.88);
+            background: rgba(248, 250, 252, 0.92);
+            border-radius: 12px;
+            padding: 10px 11px;
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+        }
+
+        .ai-tool-event.is-failed {
+            border-color: rgba(248, 113, 113, 0.25);
+            background: rgba(254, 242, 242, 0.92);
+        }
+
+        .ai-tool-event-name {
+            font-size: 0.74rem;
+            font-weight: 700;
+            color: #111827;
+        }
+
+        .ai-tool-event-summary {
+            font-size: 0.8rem;
+            line-height: 1.5;
+            color: #475467;
+        }
+
+        .settings-checkbox-list {
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+            padding-top: 2px;
+        }
+
+        .settings-checkbox-row {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            font-size: 0.86rem;
+            color: #334155;
+            cursor: pointer;
+        }
+
+        .settings-checkbox-row input[type="checkbox"] {
+            width: 16px;
+            height: 16px;
+            accent-color: #334155;
+        }
+
+        @media (max-width: 720px) {
+            .reader-ai-panel {
+                padding: 0 1rem 0.15rem;
+            }
+
+            .reader-ai-header,
+            .ai-assistant-toolbar,
+            .ai-ask-actions,
+            .ai-citation-item {
+                flex-direction: column;
+                align-items: stretch;
+            }
+
+            .reader-ai-header .extract-btn,
+            .ai-citation-side,
+            .ai-citation-link,
+            .ai-clear-btn,
+            .ai-ask-actions .extract-btn {
+                width: 100%;
+            }
+
+            .ai-modal {
+                width: min(100vw - 28px, 860px);
             }
         }

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 import re
 import subprocess
@@ -12,6 +13,26 @@ from typing import Any
 
 from paths import STATIC_DIR
 
+logger = logging.getLogger(__name__)
+
+_ffmpeg_path: str | None = None
+
+
+def _find_ffmpeg() -> str:
+    """Locate ffmpeg binary once, checking PATH then common Homebrew locations."""
+    global _ffmpeg_path
+    if _ffmpeg_path is not None:
+        return _ffmpeg_path
+    import shutil
+
+    path = shutil.which("ffmpeg")
+    if not path:
+        for candidate in ("/opt/homebrew/bin/ffmpeg", "/usr/local/bin/ffmpeg"):
+            if Path(candidate).is_file():
+                path = candidate
+                break
+    _ffmpeg_path = path or "ffmpeg"  # fall back to bare name, let subprocess raise if missing
+    return _ffmpeg_path
 
 HTTP_URL_PATTERN = re.compile(r"https?://[^\s<>'\"`]+", re.IGNORECASE)
 SWIFT_SCRIPT_PATH = Path(__file__).with_name("media_text_extract.swift")
@@ -86,23 +107,14 @@ def _first_meaningful_line(value: str | None) -> str:
     return ""
 
 
-def _format_timestamp(seconds: float) -> str:
-    rounded = max(int(round(float(seconds))), 0)
-    hours = rounded // 3600
-    minutes = (rounded % 3600) // 60
-    remaining_seconds = rounded % 60
-    if hours:
-        return f"{hours:02d}:{minutes:02d}:{remaining_seconds:02d}"
-    return f"{minutes:02d}:{remaining_seconds:02d}"
-
-
 def _render_extracted_text(
     *,
     detected_title: str,
     urls: list[str],
     qr_links: list[str],
     ocr_text: str,
-    frame_texts: list[dict[str, Any]],
+    subtitle_text: str = "",
+    transcript_text: str = "",
 ) -> str:
     sections: list[str] = []
 
@@ -114,17 +126,115 @@ def _render_extracted_text(
         sections.append("[qr_links]\n" + "\n".join(qr_links))
     if ocr_text:
         sections.append("[ocr_text]\n" + ocr_text)
-    if frame_texts:
-        sections.append(
-            "[frame_texts]\n"
-            + "\n\n".join(
-                f"{_format_timestamp(entry.get('timestamp_seconds', 0))}\n{entry.get('text', '')}".strip()
-                for entry in frame_texts
-                if str(entry.get("text", "")).strip()
-            )
-        )
+    if subtitle_text:
+        sections.append("[subtitle_text]\n" + subtitle_text)
+    if transcript_text:
+        sections.append("[transcript_text]\n" + transcript_text)
 
     return "\n\n".join(section for section in sections if section.strip()).strip()
+
+
+def _find_video_companion_text(video_path: Path) -> tuple[str, str]:
+    """Look for a subtitle or transcript companion file next to the video.
+
+    Returns (text, source) where source is 'subtitle' or 'transcript'.
+    """
+    stem = video_path.stem
+    parent = video_path.parent
+    for filename, source in [
+        (f"{stem}.subtitle.txt", "subtitle"),
+        (f"{stem}.transcript.txt", "transcript"),
+    ]:
+        candidate = parent / filename
+        if candidate.exists():
+            text = _normalize_text_block(candidate.read_text(encoding="utf-8", errors="ignore"))
+            if text:
+                return text, source
+    return "", ""
+
+
+def parse_subtitle_lines(raw: str) -> str:
+    """Parse SRT/VTT subtitle content into plain text.
+
+    Strips cue numbers, timestamps, VTT headers, and inline tags.
+    Deduplicates consecutive identical lines.
+    """
+    lines: list[str] = []
+    for line in raw.splitlines():
+        stripped = line.strip()
+        if not stripped:
+            continue
+        # Skip VTT headers, SRT cue numbers, and timestamp lines
+        if stripped.startswith(("WEBVTT", "NOTE", "STYLE", "REGION")):
+            continue
+        if "-->" in stripped:
+            continue
+        if re.match(r"^\d+$", stripped):
+            continue
+        cleaned = re.sub(r"<[^>]+>", "", stripped).strip()
+        if cleaned:
+            lines.append(cleaned)
+    # Deduplicate consecutive identical lines (common in auto-generated subs)
+    deduped: list[str] = []
+    for line in lines:
+        if not deduped or deduped[-1] != line:
+            deduped.append(line)
+    return "\n".join(deduped)
+
+
+def _extract_embedded_subtitles(video_path: Path) -> str:
+    """Extract the first embedded subtitle track from a video file using ffmpeg.
+
+    Returns plain text with timestamps and markup stripped, or '' if no subtitle
+    track exists or ffmpeg is unavailable.
+    """
+    srt_path = video_path.with_suffix(".tmp_sub.srt")
+    try:
+        subprocess.run(
+            [_find_ffmpeg(), "-y", "-i", str(video_path), "-map", "0:s:0", str(srt_path)],
+            capture_output=True,
+            check=True,
+            timeout=60,
+        )
+        if not srt_path.exists():
+            return ""
+        return parse_subtitle_lines(srt_path.read_text(encoding="utf-8", errors="ignore"))
+    except (subprocess.CalledProcessError, subprocess.TimeoutExpired, FileNotFoundError) as exc:
+        logger.debug("Embedded subtitle extraction failed for %s: %s", video_path.name, exc)
+        return ""
+    finally:
+        try:
+            srt_path.unlink(missing_ok=True)
+        except OSError:
+            pass
+
+
+def _transcribe_video_with_mlx_whisper(video_path: Path) -> str:
+    """Transcribe video audio using mlx-whisper (Apple Silicon, free, local).
+
+    Requires: pip install mlx-whisper
+    Model is downloaded on first use (~244 MB for small).
+    """
+    try:
+        import mlx_whisper  # type: ignore[import]
+    except ImportError:
+        return ""
+    # mlx-whisper shells out to ffmpeg internally; ensure it can be found.
+    ffmpeg = _find_ffmpeg()
+    ffmpeg_dir = str(Path(ffmpeg).parent)
+    if ffmpeg_dir not in os.environ.get("PATH", ""):
+        os.environ["PATH"] = ffmpeg_dir + ":" + os.environ.get("PATH", "")
+    try:
+        result = mlx_whisper.transcribe(
+            str(video_path),
+            path_or_hf_repo="mlx-community/whisper-small-mlx",
+            language="zh",
+            condition_on_previous_text=False,
+        )
+        return str(result.get("text", "")).strip()
+    except Exception as exc:
+        logger.debug("mlx-whisper transcription failed for %s: %s", video_path.name, exc)
+        return ""
 
 
 def _resolve_media_inputs(item) -> dict[str, list[dict[str, str]]]:
@@ -224,15 +334,16 @@ def parse_item_content(item) -> ContentParseResult:
     has_videos = bool(media_inputs["videos"])
 
     ocr_sections: list[str] = []
-    frame_texts: list[dict[str, Any]] = []
     qr_links: list[str] = []
+    subtitle_sections: list[str] = []
+    transcript_sections: list[str] = []
 
-    if has_images or has_videos:
+    # Images: Swift OCR (unchanged)
+    if has_images:
         extractor_output = _run_swift_media_extractor(
             images=media_inputs["images"],
-            videos=media_inputs["videos"],
+            videos=[],
         )
-
         image_results = extractor_output.get("images", []) if isinstance(extractor_output, dict) else []
         for image_result in image_results:
             ocr_text = _normalize_text_block(image_result.get("ocr_text"))
@@ -242,27 +353,42 @@ def parse_item_content(item) -> ContentParseResult:
             urls.extend(_extract_urls_from_text("\n".join(image_result.get("urls") or [])))
             qr_links.extend(image_result.get("qr_links") or [])
 
-        video_results = extractor_output.get("videos", []) if isinstance(extractor_output, dict) else []
-        for video_result in video_results:
-            qr_links.extend(video_result.get("qr_links") or [])
-            urls.extend(_extract_urls_from_text("\n".join(video_result.get("urls") or [])))
-            for frame in video_result.get("frame_texts") or []:
-                text = _normalize_text_block(frame.get("text"))
-                if not text:
-                    continue
-                frame_entry = {
-                    "timestamp_seconds": float(frame.get("timestamp_seconds") or 0),
-                    "text": text,
-                }
-                frame_texts.append(frame_entry)
-                urls.extend(_extract_urls_from_text(text))
+    # Videos: subtitle companion → embedded track → whisper transcription (no frame OCR, no QR)
+    for video in media_inputs["videos"]:
+        video_path = Path(video["path"])
+        text, source = _find_video_companion_text(video_path)
+        if text:
+            logger.info("视频字幕来源: 伴生文件 (%s) %s", source, video_path.name)
+        if not text:
+            text = _extract_embedded_subtitles(video_path)
+            if text:
+                companion = video_path.parent / f"{video_path.stem}.subtitle.txt"
+                try:
+                    companion.write_text(text, encoding="utf-8")
+                    logger.info("视频字幕来源: 嵌入字幕轨 → 缓存至 %s", companion.name)
+                except OSError:
+                    pass
+                source = "subtitle"
+        if not text:
+            logger.info("无字幕，启动音频转录: %s", video_path.name)
+            text = _transcribe_video_with_mlx_whisper(video_path)
+            if text:
+                transcript_path = video_path.parent / f"{video_path.stem}.transcript.txt"
+                try:
+                    transcript_path.write_text(text, encoding="utf-8")
+                    logger.info("转录完成，缓存至 %s", transcript_path.name)
+                except OSError:
+                    pass
+                source = "transcript"
+        if text:
+            if source == "subtitle":
+                subtitle_sections.append(text)
+            else:
+                transcript_sections.append(text)
 
     ocr_text = "\n\n".join(_unique_preserve_order(ocr_sections))
-    frame_texts = [
-        entry
-        for entry in sorted(frame_texts, key=lambda value: (float(value.get("timestamp_seconds") or 0), value.get("text") or ""))
-        if entry.get("text")
-    ]
+    subtitle_text = "\n\n".join(_unique_preserve_order(subtitle_sections))
+    transcript_text = "\n\n".join(_unique_preserve_order(transcript_sections))
     urls = _unique_preserve_order([value for value in urls if value])
     qr_links = _unique_preserve_order(
         [normalized for normalized in (_normalize_http_url(value) for value in qr_links) if normalized]
@@ -273,13 +399,14 @@ def parse_item_content(item) -> ContentParseResult:
         urls=urls,
         qr_links=qr_links,
         ocr_text=ocr_text,
-        frame_texts=frame_texts,
+        subtitle_text=subtitle_text,
+        transcript_text=transcript_text,
     )
 
     return ContentParseResult(
         extracted_text=extracted_text,
         ocr_text=ocr_text,
-        frame_texts=frame_texts,
+        frame_texts=[],
         urls=urls,
         qr_links=qr_links,
         detected_title=detected_title,

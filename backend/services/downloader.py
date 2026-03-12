@@ -5,6 +5,7 @@
 
 import asyncio
 import logging
+import re
 from pathlib import Path
 from urllib.parse import urlparse
 
@@ -123,6 +124,41 @@ def _expected_total_size(headers: httpx.Headers, downloaded: int, current_total:
     return current_total
 
 
+def _parse_vtt_text(vtt_path: Path) -> str:
+    """Parse a WebVTT subtitle file into plain text, stripping timestamps and inline tags."""
+    from services.content_extraction import parse_subtitle_lines
+
+    try:
+        content = vtt_path.read_text(encoding="utf-8", errors="ignore")
+    except OSError:
+        return ""
+    return parse_subtitle_lines(content)
+
+
+def _save_subtitle_companion(video_path: Path) -> None:
+    """Convert any downloaded VTT subtitle files into a plain-text companion file."""
+    stem = video_path.stem
+    parent = video_path.parent
+    companion = parent / f"{stem}.subtitle.txt"
+    if companion.exists():
+        return
+    vtt_files = sorted(parent.glob(f"{stem}*.vtt"))
+    if not vtt_files:
+        return
+    text = _parse_vtt_text(vtt_files[0])
+    if text:
+        try:
+            companion.write_text(text, encoding="utf-8")
+            logger.info("字幕已保存: %s", companion.name)
+        except OSError as exc:
+            logger.debug("字幕伴生文件写入失败: %s", exc)
+    for vtt in vtt_files:
+        try:
+            vtt.unlink()
+        except OSError:
+            pass
+
+
 def _download_with_ytdlp_sync(url: str, save_path: Path, referer: str = "") -> tuple[Path | None, int]:
     if yt_dlp is None:
         return None, 0
@@ -142,6 +178,11 @@ def _download_with_ytdlp_sync(url: str, save_path: Path, referer: str = "") -> t
         "outtmpl": {"default": outtmpl},
         "format": "best[ext=mp4]/best",
         "http_headers": headers,
+        # Subtitle extraction (priority over audio OCR)
+        "writesubtitles": True,
+        "writeautomaticsub": True,
+        "subtitleslangs": ["all", "-live_chat"],
+        "subtitlesformat": "vtt",
     }
 
     with yt_dlp.YoutubeDL(options) as ydl:
@@ -168,7 +209,51 @@ def _download_with_ytdlp_sync(url: str, save_path: Path, referer: str = "") -> t
         if not final_path or not final_path.exists():
             return None, 0
 
+        _save_subtitle_companion(final_path)
         return final_path, final_path.stat().st_size
+
+
+def _fetch_subtitles_only_sync(url: str, video_path: Path, referer: str = "") -> None:
+    """Fetch subtitles only (skip video download) using yt-dlp from a share page URL."""
+    if yt_dlp is None:
+        return
+
+    companion = video_path.parent / f"{video_path.stem}.subtitle.txt"
+    if companion.exists():
+        return
+
+    headers = {"User-Agent": _MOBILE_UA}
+    if referer:
+        headers["Referer"] = referer
+
+    outtmpl = str(video_path.with_suffix(".%(ext)s"))
+    options = {
+        "quiet": True,
+        "no_warnings": True,
+        "noplaylist": True,
+        "skip_download": True,
+        "writesubtitles": True,
+        "writeautomaticsub": True,
+        "subtitleslangs": ["all", "-live_chat"],
+        "subtitlesformat": "vtt",
+        "outtmpl": {"default": outtmpl},
+        "http_headers": headers,
+    }
+
+    try:
+        with yt_dlp.YoutubeDL(options) as ydl:
+            ydl.extract_info(url, download=True)
+        _save_subtitle_companion(video_path)
+    except Exception as exc:
+        logger.debug("字幕单独抓取失败 %s: %s", url[:80], exc)
+
+
+async def _fetch_subtitles_only(url: str, video_path: Path, referer: str = "") -> None:
+    """Async wrapper for subtitle-only fetch."""
+    try:
+        await asyncio.to_thread(_fetch_subtitles_only_sync, url, video_path, referer)
+    except Exception as exc:
+        logger.debug("字幕单独抓取失败 %s: %s", url[:80], exc)
 
 
 async def _download_with_ytdlp(url: str, save_path: Path, referer: str = "") -> tuple[Path | None, int]:
@@ -289,6 +374,9 @@ async def download_file(url: str, save_path: Path, media_type: str, referer: str
 
                 if not expected_total or total >= expected_total:
                     logger.info("下载完成: %s (%d bytes)", save_path.name, total)
+                    # Video downloaded via direct HTTP — try to grab subtitles separately
+                    if media_type == "video" and referer and _is_ytdlp_candidate(referer, "video"):
+                        await _fetch_subtitles_only(referer, save_path, referer)
                     return save_path, total
 
                 if resume_attempts >= _MAX_RESUME_ATTEMPTS:

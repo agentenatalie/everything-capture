@@ -62,3 +62,7 @@
 - [x] Verify the saved Obsidian endpoint can still read/write/delete in `Sources.base`
 - [x] Retry the remaining pending Obsidian items directly and confirm the library reaches `obsidian_pending = 0`
 - [x] Make Obsidian bulk sync retry one transient network failure and surface the first failure reason in the toast
+- [ ] Remove the login overlay and all user-facing Google/email/phone login UI so the app opens straight into the local library
+- [ ] Remove the sidebar logout action and treat the app shell as local-only mode
+- [ ] Replace the frontend auth flow with automatic local-session bootstrap/recovery only
+- [ ] Verify the local-only shell still loads folders, items, settings, and bulk sync without the auth UI

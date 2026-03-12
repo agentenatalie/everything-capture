@@ -262,18 +262,7 @@
                 createFolderAndApply();
             }
         });
-        authModeEmailBtn.addEventListener('click', () => setAuthMode('email'));
-        authModePhoneBtn.addEventListener('click', () => setAuthMode('phone'));
-        authGoogleBtn.addEventListener('click', () => {
-            if (authGoogleBtn.disabled) return;
-            window.location.href = '/api/auth/google/start';
-        });
-        authEmailRequestBtn.addEventListener('click', () => requestEmailCode());
-        authPhoneRequestBtn.addEventListener('click', () => requestPhoneCode());
-        emailAuthForm.addEventListener('submit', verifyEmailCode);
-        phoneAuthForm.addEventListener('submit', verifyPhoneCode);
         sidebarSettingsBtn.addEventListener('click', () => openSettingsPanel());
-        sidebarLogoutBtn.addEventListener('click', () => logoutCurrentUser());
 
         async function deleteItem(id, event) {
             event.stopPropagation();

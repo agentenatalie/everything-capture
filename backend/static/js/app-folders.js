@@ -149,7 +149,7 @@
 
         async function fetchFolders() {
             if (!ensureAuthenticated({ showOverlay: false })) {
-                folderList.innerHTML = '<div class="folder-loading">登录后显示文件夹</div>';
+                folderList.innerHTML = '<div class="folder-loading">正在连接本地文件夹...</div>';
                 folderMobileStrip.innerHTML = '';
                 updateMobileCaptureFolderSummary();
                 return;

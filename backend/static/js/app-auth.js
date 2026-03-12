@@ -4,17 +4,22 @@
             return input?.url || '';
         }
 
-        function createEmptyAuthState(overrides = {}) {
-            const nextProviders = overrides.providers || authState.providers || {};
+        function createLocalAuthState(overrides = {}) {
             return {
-                authenticated: false,
-                user: null,
+                authenticated: true,
+                user: {
+                    id: 'local-default-user',
+                    display_name: '本地收录库',
+                    email: null,
+                    phone_e164: null,
+                    avatar_url: null,
+                },
                 providers: {
-                    google_enabled: Boolean(nextProviders.google_enabled),
-                    email_enabled: Boolean(nextProviders.email_enabled),
-                    phone_enabled: Boolean(nextProviders.phone_enabled),
-                    email_delivery_mode: nextProviders.email_delivery_mode || 'disabled',
-                    phone_delivery_mode: nextProviders.phone_delivery_mode || 'disabled',
+                    google_enabled: false,
+                    email_enabled: false,
+                    phone_enabled: false,
+                    email_delivery_mode: 'disabled',
+                    phone_delivery_mode: 'disabled',
                 },
                 ...overrides,
             };
@@ -33,122 +38,19 @@
             return response;
         };
 
-        function setAuthStatus(element, message = '', tone = '') {
-            if (!element) return;
-            element.textContent = message;
-            element.className = 'auth-status';
-            if (tone) element.classList.add(`is-${tone}`);
-        }
-
-        function updateAuthProviderHint(providers) {
-            const hints = [];
-            if (providers.google_enabled) {
-                hints.push('Google OAuth 已启用');
-            } else {
-                hints.push('Google OAuth 当前未启用');
-            }
-            if (providers.email_enabled) {
-                hints.push(providers.email_delivery_mode === 'dev' ? '邮箱验证码当前走开发模式' : '邮箱验证码将通过邮件发送');
-            }
-            if (providers.phone_enabled) {
-                hints.push(providers.phone_delivery_mode === 'dev' ? '短信验证码当前走开发模式' : '短信验证码将通过 Twilio 发送');
-            }
-            authProviderHint.textContent = hints.length
-                ? hints.join(' · ')
-                : '当前没有可用登录方式。请先配置 SMTP、Twilio 或部署级 Google OAuth。';
-        }
-
-        function setAuthMode(mode = 'email') {
-            const nextMode = mode === 'phone' ? 'phone' : 'email';
-            const providers = authState.providers || {};
-            if (nextMode === 'phone' && !providers.phone_enabled && providers.email_enabled) {
-                authMode = 'email';
-            } else if (nextMode === 'email' && !providers.email_enabled && providers.phone_enabled) {
-                authMode = 'phone';
-            } else {
-                authMode = nextMode;
-            }
-
-            const emailActive = authMode === 'email';
-            authModeEmailBtn.classList.toggle('active', emailActive);
-            authModePhoneBtn.classList.toggle('active', !emailActive);
-            emailAuthForm.classList.toggle('active', emailActive);
-            phoneAuthForm.classList.toggle('active', !emailActive);
-            emailAuthForm.hidden = !emailActive;
-            phoneAuthForm.hidden = emailActive;
-        }
-
-        function applyAuthProviderAvailability(providers) {
-            authGoogleBtn.disabled = !providers.google_enabled;
-            authModeEmailBtn.disabled = !providers.email_enabled;
-            authModePhoneBtn.disabled = !providers.phone_enabled;
-            authEmailRequestBtn.disabled = !providers.email_enabled;
-            authEmailVerifyBtn.disabled = !providers.email_enabled;
-            authPhoneRequestBtn.disabled = !providers.phone_enabled;
-            authPhoneVerifyBtn.disabled = !providers.phone_enabled;
-
-            if (authMode === 'email' && !providers.email_enabled && providers.phone_enabled) {
-                setAuthMode('phone');
-            } else if (authMode === 'phone' && !providers.phone_enabled && providers.email_enabled) {
-                setAuthMode('email');
-            } else {
-                setAuthMode(authMode);
-            }
-            updateAuthProviderHint(providers);
-        }
-
-        function formatAuthPrimary(user) {
-            if (!user) return '未登录';
-            if (isLocalDefaultUser(user)) return '本地收录库';
-            return user.display_name || user.email || user.phone_e164 || '已登录';
-        }
-
-        function formatAuthSecondary(user) {
-            if (!user) return '请先登录';
-            if (isLocalDefaultUser(user)) return '本地模式 · 自动进入';
-            return user.email || user.phone_e164 || '已登录';
-        }
-
-        function isLocalDefaultUser(user) {
-            return Boolean(user?.id === 'local-default-user');
-        }
-
         function applyAuthState(sessionData) {
-            authState = createEmptyAuthState(sessionData || {});
-            applyAuthProviderAvailability(authState.providers);
-
-            const user = authState.user;
-            sidebarUserName.textContent = formatAuthPrimary(user);
-            sidebarUserSubtitle.textContent = formatAuthSecondary(user);
-            sidebarAvatarImage.src = user?.avatar_url || defaultSidebarAvatar;
-            sidebarUserStatusDot.classList.toggle('is-offline', !authState.authenticated);
-            sidebarLogoutBtn.classList.toggle('is-hidden', !authState.authenticated || isLocalDefaultUser(user));
+            authState = createLocalAuthState(sessionData || {});
+            const user = authState.user || {};
+            sidebarUserName.textContent = user.display_name || '本地收录库';
+            sidebarUserSubtitle.textContent = '本地模式';
+            sidebarAvatarImage.src = user.avatar_url || defaultSidebarAvatar;
+            sidebarUserStatusDot.classList.remove('is-offline');
+            if (sidebarLogoutBtn) {
+                sidebarLogoutBtn.classList.add('is-hidden');
+            }
         }
 
-        function focusAuthInput() {
-            const target = authMode === 'phone' ? authPhoneInput : authEmailInput;
-            requestAnimationFrame(() => target?.focus());
-        }
-
-        function closeTransientPanels() {
-            if (commandOverlay.classList.contains('active')) closeCommandPalette();
-            if (folderPickerOverlay.classList.contains('active')) closeFolderPickerDialog();
-            if (settingsOverlay.classList.contains('active')) settingsOverlay.classList.remove('active');
-            if (modalOverlay.classList.contains('active')) closeModalDialog();
-        }
-
-        function showAuthOverlay(mode = authMode) {
-            closeTransientPanels();
-            setAuthMode(mode);
-            authOverlay.classList.add('active');
-            focusAuthInput();
-        }
-
-        function hideAuthOverlay() {
-            authOverlay.classList.remove('active');
-        }
-
-        function resetAuthenticatedAppState(message = '请先登录后查看你的资料库。') {
+        function resetAuthenticatedAppState(message = '正在连接本地资料库...') {
             hasLoadedAuthenticatedData = false;
             latestSettings = null;
             itemsData = [];
@@ -162,39 +64,33 @@
             latestTotalCount = 0;
             currentFolderScope = 'all';
             currentFolderId = null;
-            closeTransientPanels();
-            setStatsMessage('请先登录');
+            if (commandOverlay.classList.contains('active')) closeCommandPalette();
+            if (folderPickerOverlay.classList.contains('active')) closeFolderPickerDialog();
+            if (settingsOverlay.classList.contains('active')) settingsOverlay.classList.remove('active');
+            if (modalOverlay.classList.contains('active')) closeModalDialog();
+            setStatsMessage('连接本地资料库中');
             grid.className = currentView === 'gallery' ? 'grid' : 'list-view';
             grid.innerHTML = `<div class="empty-state">${message}</div>`;
-            folderList.innerHTML = '<div class="folder-loading">登录后显示文件夹</div>';
+            folderList.innerHTML = '<div class="folder-loading">正在加载本地文件夹...</div>';
             folderMobileStrip.innerHTML = '';
         }
 
-        function ensureAuthenticated(options = {}) {
-            const { showOverlay = true, mode = authMode } = options;
-            if (authState.authenticated) return true;
-            if (showOverlay) showAuthOverlay(mode);
-            return false;
+        function ensureAuthenticated() {
+            return Boolean(authState.authenticated);
         }
 
         async function refreshAuthSession(options = {}) {
             const { silent = false } = options;
             try {
                 const response = await nativeFetch('/api/auth/session');
-                const data = response.ok ? await response.json() : createEmptyAuthState();
-                applyAuthState(data);
-                if (authState.authenticated) {
-                    hideAuthOverlay();
-                } else if (!silent) {
-                    showAuthOverlay(authMode);
-                }
+                const data = response.ok ? await response.json() : createLocalAuthState({ authenticated: false });
+                applyAuthState(data.authenticated ? data : createLocalAuthState({ authenticated: false }));
                 return authState;
             } catch (error) {
-                console.error('Failed to refresh auth session', error);
-                applyAuthState(createEmptyAuthState());
+                console.error('Failed to refresh local session', error);
+                applyAuthState(createLocalAuthState({ authenticated: false }));
                 if (!silent) {
-                    showAuthOverlay(authMode);
-                    showToast('无法连接到认证服务', 'error');
+                    showToast('无法检查本地会话，正在尝试恢复。', 'info');
                 }
                 return authState;
             }
@@ -204,15 +100,12 @@
             const { silent = false } = options;
             try {
                 const response = await nativeFetch('/api/auth/auto-session', { method: 'POST' });
-                const data = response.ok ? await response.json() : createEmptyAuthState();
-                applyAuthState(data);
-                if (authState.authenticated) {
-                    hideAuthOverlay();
-                }
+                const data = response.ok ? await response.json() : createLocalAuthState({ authenticated: false });
+                applyAuthState(data.authenticated ? data : createLocalAuthState({ authenticated: false }));
                 return authState;
             } catch (error) {
                 console.error('Failed to provision local session', error);
-                applyAuthState(createEmptyAuthState());
+                applyAuthState(createLocalAuthState({ authenticated: false }));
                 if (!silent) {
                     showToast('无法初始化本地会话', 'error');
                 }
@@ -223,7 +116,7 @@
         async function bootstrapAuthenticatedData(options = {}) {
             const { force = false } = options;
             if (!authState.authenticated) {
-                resetAuthenticatedAppState();
+                resetAuthenticatedAppState('无法连接到本地资料库。');
                 return;
             }
             if (hasLoadedAuthenticatedData && !force) return;
@@ -231,211 +124,38 @@
             await Promise.all([fetchFolders(), fetchItems()]);
         }
 
-        function clearAuthInputs() {
-            authEmailCodeInput.value = '';
-            authPhoneCodeInput.value = '';
-            setAuthStatus(authEmailStatus);
-            setAuthStatus(authPhoneStatus);
-        }
-
-        async function handleAuthenticatedSession(sessionData, successMessage) {
-            applyAuthState(sessionData);
-            clearAuthInputs();
-            hideAuthOverlay();
-            await bootstrapAuthenticatedData({ force: true });
-            if (typeof flushMobileCaptureQueue === 'function') {
-                await flushMobileCaptureQueue({ silent: true });
-            }
-            if (successMessage) showToast(successMessage, 'success');
-        }
-
-        function handleUnauthorizedState() {
+        async function handleUnauthorizedState() {
             if (authUnauthorizedNoticeShown) return;
             authUnauthorizedNoticeShown = true;
-            const providerSnapshot = authState.providers;
-            applyAuthState(createEmptyAuthState({ providers: providerSnapshot }));
-            resetAuthenticatedAppState('会话已断开，正在重新连接本地资料库...');
-            provisionLocalSession({ silent: true })
-                .then((session) => {
-                    if (session.authenticated) {
-                        return bootstrapAuthenticatedData({ force: true });
-                    }
-                    showToast('无法恢复本地会话', 'error');
-                    return null;
-                })
-                .catch(() => {});
-            if (authBootstrapComplete) {
-                showToast('会话已刷新，已尝试自动恢复。', 'info');
-            }
-            window.setTimeout(() => {
-                authUnauthorizedNoticeShown = false;
-            }, 1500);
-        }
-
-        async function logoutCurrentUser() {
-            sidebarLogoutBtn.disabled = true;
+            applyAuthState(createLocalAuthState({ authenticated: false }));
+            resetAuthenticatedAppState('本地会话已断开，正在自动恢复...');
             try {
-                await fetch('/api/auth/logout', { method: 'POST' });
+                const session = await provisionLocalSession({ silent: true });
+                if (session.authenticated) {
+                    await bootstrapAuthenticatedData({ force: true });
+                    showToast('本地会话已自动恢复。', 'info');
+                } else {
+                    showToast('无法恢复本地会话', 'error');
+                }
             } catch (error) {
-                console.error('Failed to logout', error);
+                showToast('无法恢复本地会话', 'error');
             } finally {
-                sidebarLogoutBtn.disabled = false;
+                window.setTimeout(() => {
+                    authUnauthorizedNoticeShown = false;
+                }, 1500);
             }
-            applyAuthState(createEmptyAuthState({ providers: authState.providers }));
-            resetAuthenticatedAppState('你已退出登录。重新登录后可继续访问你的资料库。');
-            await refreshAuthSession({ silent: true });
-            showAuthOverlay(authMode);
-            showToast('已退出登录', 'success');
         }
 
         function openSettingsPanel() {
-            if (!ensureAuthenticated({ mode: 'email' })) return;
+            if (!ensureAuthenticated()) return;
             settingsOverlay.classList.add('active');
             loadSettings();
         }
 
-        async function requestEmailCode() {
-            const email = authEmailInput.value.trim();
-            if (!email) {
-                setAuthStatus(authEmailStatus, '请输入邮箱地址', 'error');
-                return;
-            }
-
-            authEmailRequestBtn.disabled = true;
-            setAuthStatus(authEmailStatus, '发送中...');
-            try {
-                const response = await fetch('/api/auth/email/request-code', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ email }),
-                });
-                const data = await response.json().catch(() => ({}));
-                if (!response.ok) {
-                    throw new Error(data.detail || '发送验证码失败');
-                }
-                let message = `验证码已发送到 ${data.target_masked}。`;
-                if (data.dev_code) {
-                    authEmailCodeInput.value = data.dev_code;
-                    message += ` 开发模式验证码：${data.dev_code}`;
-                }
-                setAuthStatus(authEmailStatus, message, 'success');
-                authEmailCodeInput.focus();
-            } catch (error) {
-                setAuthStatus(authEmailStatus, error.message, 'error');
-            } finally {
-                authEmailRequestBtn.disabled = false;
-            }
-        }
-
-        async function verifyEmailCode(event) {
-            event.preventDefault();
-            const email = authEmailInput.value.trim();
-            const code = authEmailCodeInput.value.trim();
-            if (!email || !code) {
-                setAuthStatus(authEmailStatus, '请输入邮箱和验证码', 'error');
-                return;
-            }
-
-            authEmailVerifyBtn.disabled = true;
-            setAuthStatus(authEmailStatus, '登录中...');
-            try {
-                const response = await fetch('/api/auth/email/verify-code', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ email, code }),
-                });
-                const data = await response.json().catch(() => ({}));
-                if (!response.ok) {
-                    throw new Error(data.detail || '邮箱登录失败');
-                }
-                await handleAuthenticatedSession(data, '邮箱登录成功');
-            } catch (error) {
-                setAuthStatus(authEmailStatus, error.message, 'error');
-            } finally {
-                authEmailVerifyBtn.disabled = false;
-            }
-        }
-
-        async function requestPhoneCode() {
-            const phone = authPhoneInput.value.trim();
-            if (!phone) {
-                setAuthStatus(authPhoneStatus, '请输入手机号', 'error');
-                return;
-            }
-
-            authPhoneRequestBtn.disabled = true;
-            setAuthStatus(authPhoneStatus, '发送中...');
-            try {
-                const response = await fetch('/api/auth/phone/request-code', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ phone }),
-                });
-                const data = await response.json().catch(() => ({}));
-                if (!response.ok) {
-                    throw new Error(data.detail || '发送验证码失败');
-                }
-                let message = `验证码已发送到 ${data.target_masked}。`;
-                if (data.dev_code) {
-                    authPhoneCodeInput.value = data.dev_code;
-                    message += ` 开发模式验证码：${data.dev_code}`;
-                }
-                setAuthStatus(authPhoneStatus, message, 'success');
-                authPhoneCodeInput.focus();
-            } catch (error) {
-                setAuthStatus(authPhoneStatus, error.message, 'error');
-            } finally {
-                authPhoneRequestBtn.disabled = false;
-            }
-        }
-
-        async function verifyPhoneCode(event) {
-            event.preventDefault();
-            const phone = authPhoneInput.value.trim();
-            const code = authPhoneCodeInput.value.trim();
-            if (!phone || !code) {
-                setAuthStatus(authPhoneStatus, '请输入手机号和验证码', 'error');
-                return;
-            }
-
-            authPhoneVerifyBtn.disabled = true;
-            setAuthStatus(authPhoneStatus, '登录中...');
-            try {
-                const response = await fetch('/api/auth/phone/verify-code', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ phone, code }),
-                });
-                const data = await response.json().catch(() => ({}));
-                if (!response.ok) {
-                    throw new Error(data.detail || '手机号登录失败');
-                }
-                await handleAuthenticatedSession(data, '手机号登录成功');
-            } catch (error) {
-                setAuthStatus(authPhoneStatus, error.message, 'error');
-            } finally {
-                authPhoneVerifyBtn.disabled = false;
-            }
-        }
-
         async function handleUrlCallbacks(currentSession = authState) {
             const urlParams = new URLSearchParams(window.location.search);
-            const authResult = urlParams.get('auth');
-            const authProvider = urlParams.get('provider');
             const notionAuth = urlParams.get('notion_auth');
             let handled = false;
-
-            if (authResult === 'success' && authProvider === 'google') {
-                handled = true;
-                if (currentSession.authenticated) {
-                    showToast('Google 登录成功', 'success');
-                }
-            } else if (authResult === 'failed') {
-                handled = true;
-                const errorStr = urlParams.get('error') || 'unknown_error';
-                showToast(`Google 登录失败: ${errorStr}`, 'error');
-                showAuthOverlay('email');
-            }
 
             if (notionAuth === 'success') {
                 handled = true;
@@ -465,13 +185,14 @@
         }
 
         async function bootstrapAuth() {
-            applyAuthState(createEmptyAuthState());
+            applyAuthState(createLocalAuthState({ authenticated: false }));
             resetAuthenticatedAppState();
             updateSidebarState();
             updateCommandPaletteState();
             if (typeof startMobileCaptureAutomation === 'function' && window.matchMedia('(max-width: 860px)').matches) {
                 startMobileCaptureAutomation();
             }
+
             let session = await refreshAuthSession({ silent: true });
             if (!session.authenticated) {
                 session = await provisionLocalSession({ silent: true });
@@ -484,6 +205,7 @@
             } else {
                 resetAuthenticatedAppState('无法初始化本地资料库连接。');
             }
+
             await handleUrlCallbacks(session);
             authBootstrapComplete = true;
         }

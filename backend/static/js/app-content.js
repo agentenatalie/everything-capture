@@ -254,7 +254,7 @@
             }
 
             if (!authState.authenticated) {
-                refreshMobileCaptureQueueFeedback(`已保存到本地待同步 ${mobileCaptureQueue.length} 条，连接电脑并登录后自动同步`, 'info');
+                refreshMobileCaptureQueueFeedback(`已保存到本地待同步 ${mobileCaptureQueue.length} 条，连接电脑后会自动同步到本地资料库`, 'info');
                 return {
                     deliveredCount: 0,
                     pendingCount: mobileCaptureQueue.length,
@@ -958,11 +958,6 @@
         });
         document.addEventListener('keydown', e => {
             const key = e.key.toLowerCase();
-            if (authOverlay.classList.contains('active') && e.key === 'Escape') {
-                e.preventDefault();
-                focusAuthInput();
-                return;
-            }
             if ((e.metaKey || e.ctrlKey) && key === 'k') {
                 e.preventDefault();
                 if (commandOverlay.classList.contains('active')) closeCommandPalette();

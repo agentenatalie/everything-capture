@@ -17,6 +17,408 @@ logger = logging.getLogger(__name__)
 
 _ffmpeg_path: str | None = None
 
+_TRADITIONAL_PHRASE_REPLACEMENTS: tuple[tuple[str, str], ...] = (
+    ("融資融券", "融资融券"),
+    ("證券交易所", "证券交易所"),
+    ("收盤價", "收盘价"),
+    ("開盤價", "开盘价"),
+    ("漲跌幅", "涨跌幅"),
+    ("漲跌", "涨跌"),
+    ("換手率", "换手率"),
+    ("總股本", "总股本"),
+    ("總手", "总手"),
+    ("總共", "总共"),
+    ("自由流通股", "自由流通股"),
+    ("流通股", "流通股"),
+    ("科創板", "科创板"),
+    ("創業板", "创业板"),
+    ("新三板", "新三板"),
+    ("滬股通", "沪股通"),
+    ("深股通", "深股通"),
+    ("港股通", "港股通"),
+)
+_TRADITIONAL_CHAR_TRANSLATION = str.maketrans(
+    {
+        "萬": "万",
+        "與": "与",
+        "專": "专",
+        "業": "业",
+        "東": "东",
+        "創": "创",
+        "絲": "丝",
+        "兩": "两",
+        "嚴": "严",
+        "優": "优",
+        "喚": "唤",
+        "嗎": "吗",
+        "國": "国",
+        "圖": "图",
+        "圍": "围",
+        "場": "场",
+        "塊": "块",
+        "異": "异",
+        "處": "处",
+        "備": "备",
+        "夠": "够",
+        "學": "学",
+        "實": "实",
+        "寫": "写",
+        "對": "对",
+        "導": "导",
+        "將": "将",
+        "屆": "届",
+        "層": "层",
+        "屬": "属",
+        "島": "岛",
+        "帶": "带",
+        "幣": "币",
+        "庫": "库",
+        "應": "应",
+        "廣": "广",
+        "張": "张",
+        "強": "强",
+        "彙": "汇",
+        "後": "后",
+        "從": "从",
+        "徑": "径",
+        "恆": "恒",
+        "愛": "爱",
+        "慮": "虑",
+        "懷": "怀",
+        "態": "态",
+        "戶": "户",
+        "拋": "抛",
+        "掛": "挂",
+        "採": "采",
+        "擇": "择",
+        "擔": "担",
+        "據": "据",
+        "擴": "扩",
+        "擺": "摆",
+        "數": "数",
+        "斷": "断",
+        "無": "无",
+        "時": "时",
+        "會": "会",
+        "條": "条",
+        "來": "来",
+        "樣": "样",
+        "機": "机",
+        "標": "标",
+        "權": "权",
+        "歸": "归",
+        "歲": "岁",
+        "氣": "气",
+        "內": "内",
+        "沒": "没",
+        "況": "况",
+        "決": "决",
+        "灣": "湾",
+        "測": "测",
+        "準": "准",
+        "濟": "济",
+        "為": "为",
+        "營": "营",
+        "獨": "独",
+        "獲": "获",
+        "畫": "画",
+        "當": "当",
+        "療": "疗",
+        "發": "发",
+        "盡": "尽",
+        "監": "监",
+        "盤": "盘",
+        "眾": "众",
+        "著": "着",
+        "礎": "础",
+        "禮": "礼",
+        "離": "离",
+        "種": "种",
+        "稱": "称",
+        "穩": "稳",
+        "積": "积",
+        "競": "竞",
+        "筆": "笔",
+        "簡": "简",
+        "類": "类",
+        "級": "级",
+        "約": "约",
+        "細": "细",
+        "終": "终",
+        "組": "组",
+        "經": "经",
+        "結": "结",
+        "給": "给",
+        "統": "统",
+        "絕": "绝",
+        "續": "续",
+        "總": "总",
+        "維": "维",
+        "綱": "纲",
+        "網": "网",
+        "綠": "绿",
+        "綜": "综",
+        "緊": "紧",
+        "線": "线",
+        "練": "练",
+        "縣": "县",
+        "縱": "纵",
+        "織": "织",
+        "聽": "听",
+        "職": "职",
+        "聯": "联",
+        "聲": "声",
+        "聞": "闻",
+        "腳": "脚",
+        "腦": "脑",
+        "臉": "脸",
+        "臺": "台",
+        "舉": "举",
+        "舊": "旧",
+        "藝": "艺",
+        "節": "节",
+        "華": "华",
+        "葉": "叶",
+        "術": "术",
+        "號": "号",
+        "雖": "虽",
+        "衛": "卫",
+        "補": "补",
+        "裝": "装",
+        "襲": "袭",
+        "覺": "觉",
+        "覽": "览",
+        "觀": "观",
+        "規": "规",
+        "視": "视",
+        "觸": "触",
+        "訂": "订",
+        "計": "计",
+        "訊": "讯",
+        "討": "讨",
+        "訓": "训",
+        "記": "记",
+        "講": "讲",
+        "註": "注",
+        "設": "设",
+        "許": "许",
+        "論": "论",
+        "證": "证",
+        "評": "评",
+        "詞": "词",
+        "試": "试",
+        "該": "该",
+        "詳": "详",
+        "語": "语",
+        "誤": "误",
+        "說": "说",
+        "讀": "读",
+        "課": "课",
+        "調": "调",
+        "談": "谈",
+        "請": "请",
+        "諸": "诸",
+        "識": "识",
+        "譜": "谱",
+        "護": "护",
+        "變": "变",
+        "讓": "让",
+        "貝": "贝",
+        "財": "财",
+        "責": "责",
+        "貴": "贵",
+        "貸": "贷",
+        "費": "费",
+        "資": "资",
+        "賣": "卖",
+        "賬": "账",
+        "賠": "赔",
+        "質": "质",
+        "購": "购",
+        "贏": "赢",
+        "趨": "趋",
+        "車": "车",
+        "軟": "软",
+        "轉": "转",
+        "輪": "轮",
+        "辦": "办",
+        "這": "这",
+        "進": "进",
+        "遠": "远",
+        "連": "连",
+        "還": "还",
+        "邊": "边",
+        "達": "达",
+        "遞": "递",
+        "選": "选",
+        "遺": "遗",
+        "郵": "邮",
+        "醫": "医",
+        "釋": "释",
+        "鈔": "钞",
+        "錢": "钱",
+        "錄": "录",
+        "鐘": "钟",
+        "鐵": "铁",
+        "鑒": "鉴",
+        "長": "长",
+        "門": "门",
+        "閉": "闭",
+        "開": "开",
+        "問": "问",
+        "關": "关",
+        "隊": "队",
+        "際": "际",
+        "陽": "阳",
+        "陰": "阴",
+        "階": "阶",
+        "險": "险",
+        "隨": "随",
+        "難": "难",
+        "雜": "杂",
+        "雙": "双",
+        "電": "电",
+        "靈": "灵",
+        "靜": "静",
+        "響": "响",
+        "頁": "页",
+        "頂": "顶",
+        "項": "项",
+        "順": "顺",
+        "預": "预",
+        "領": "领",
+        "頭": "头",
+        "頻": "频",
+        "顆": "颗",
+        "題": "题",
+        "顏": "颜",
+        "願": "愿",
+        "顯": "显",
+        "風": "风",
+        "飛": "飞",
+        "飯": "饭",
+        "飲": "饮",
+        "館": "馆",
+        "驗": "验",
+        "體": "体",
+        "點": "点",
+        "齊": "齐",
+        "個": "个",
+        "麼": "么",
+        "們": "们",
+        "裡": "里",
+        "價": "价",
+        "額": "额",
+        "綫": "线",
+        "囉": "啰",
+        "剛": "刚",
+        "則": "则",
+        "刪": "删",
+        "剝": "剥",
+        "區": "区",
+        "協": "协",
+        "單": "单",
+        "卻": "却",
+        "壓": "压",
+        "壞": "坏",
+        "壽": "寿",
+        "奪": "夺",
+        "婦": "妇",
+        "寶": "宝",
+        "審": "审",
+        "尷": "尴",
+        "屆": "届",
+        "嶄": "崭",
+        "幾": "几",
+        "廳": "厅",
+        "彌": "弥",
+        "徵": "征",
+        "懇": "恳",
+        "懸": "悬",
+        "扮": "扮",
+        "挾": "挟",
+        "摺": "折",
+        "敵": "敌",
+        "暫": "暂",
+        "櫃": "柜",
+        "殘": "残",
+        "殼": "壳",
+        "毀": "毁",
+        "滾": "滚",
+        "滿": "满",
+        "滬": "沪",
+        "漢": "汉",
+        "潔": "洁",
+        "燈": "灯",
+        "爛": "烂",
+        "狀": "状",
+        "獎": "奖",
+        "環": "环",
+        "瑪": "玛",
+        "畢": "毕",
+        "癥": "症",
+        "皺": "皱",
+        "盞": "盏",
+        "睏": "困",
+        "矚": "瞩",
+        "礙": "碍",
+        "禍": "祸",
+        "禦": "御",
+        "竄": "窜",
+        "籤": "签",
+        "糧": "粮",
+        "績": "绩",
+        "纔": "才",
+        "罷": "罢",
+        "聖": "圣",
+        "臨": "临",
+        "蘇": "苏",
+        "蝦": "虾",
+        "術": "术",
+        "藍": "蓝",
+        "虧": "亏",
+        "號": "号",
+        "貯": "贮",
+        "賦": "赋",
+        "趕": "赶",
+        "蹤": "踪",
+        "遷": "迁",
+        "醜": "丑",
+        "針": "针",
+        "鍋": "锅",
+        "鑽": "钻",
+        "陸": "陆",
+        "雞": "鸡",
+        "黃": "黄",
+    }
+)
+_PARAGRAPH_BREAK_MARKERS = (
+    "首先",
+    "其次",
+    "然后",
+    "接下来",
+    "另外",
+    "最后",
+    "再往下",
+    "再看",
+    "反过来",
+    "总之",
+    "下面",
+    "这个时候",
+    "那接下来",
+    "那我们",
+    "我们来看",
+    "大家要注意",
+)
+_QUESTION_ENDINGS = ("吗", "呢", "吧", "是不是", "对不对", "行不行", "可不可以")
+_SOFT_ENDINGS = ("因为", "所以", "但是", "不过", "然后", "以及", "还有", "而且", "如果", "比如", "例如")
+_CJK_CHAR_PATTERN = re.compile(r"[\u3400-\u4dbf\u4e00-\u9fff]")
+_CJK_SPACE_PATTERN = re.compile(r"(?<=[\u3400-\u4dbf\u4e00-\u9fff])\s+(?=[\u3400-\u4dbf\u4e00-\u9fff])")
+_LONG_CHUNK_BREAK_PATTERN = re.compile(
+    r"(?<=[\u3400-\u4dbf\u4e00-\u9fffA-Za-z0-9])"
+    r"(?=(?:首先|其次|然后|接下来|另外|最后|再往下|再看|反过来|总之|下面|这个时候|那接下来|那我们|我们来看|大家要注意))"
+)
+
 
 def _find_ffmpeg() -> str:
     """Locate ffmpeg binary once, checking PATH then common Homebrew locations."""
@@ -92,6 +494,111 @@ def _normalize_text_block(value: str | None) -> str:
     return text.strip()
 
 
+def _to_simplified_chinese(value: str | None) -> str:
+    text = str(value or "")
+    if not text:
+        return ""
+    for source, target in _TRADITIONAL_PHRASE_REPLACEMENTS:
+        text = text.replace(source, target)
+    return text.translate(_TRADITIONAL_CHAR_TRANSLATION)
+
+
+def _normalize_video_fragment(value: str | None) -> str:
+    text = _to_simplified_chinese(value)
+    text = text.replace("\u3000", " ")
+    text = text.replace("\r\n", "\n").replace("\r", "\n")
+    text = re.sub(r"[ \t]+", " ", text)
+    text = re.sub(r"\s*\n\s*", "\n", text)
+    text = _CJK_SPACE_PATTERN.sub("", text)
+    text = re.sub(r"\s+([，。！？；：、])", r"\1", text)
+    text = re.sub(r"([（(])\s+", r"\1", text)
+    text = re.sub(r"\s+([）)])", r"\1", text)
+    text = re.sub(r"\bOK\b(?=\s*[\u3400-\u4dbf\u4e00-\u9fff])", "OK，", text)
+    text = re.sub(r"([，。！？；：、]){2,}", lambda match: match.group(1), text)
+    return text.strip()
+
+
+def _split_long_video_chunk(value: str) -> list[str]:
+    text = _normalize_video_fragment(value)
+    if not text:
+        return []
+    if len(text) < 80:
+        return [text]
+    parts = [part.strip(" ，。") for part in _LONG_CHUNK_BREAK_PATTERN.split(text) if part.strip(" ，。")]
+    return parts or [text]
+
+
+def _ensure_sentence_punctuation(value: str) -> str:
+    text = value.strip()
+    if not text:
+        return ""
+    if re.search(r"[。！？!?；;：:，,、]$", text):
+        return text
+    if re.search(r"[”\"')）\]]$", text) and re.search(r"[。！？!?；;：:，,、][”\"')）\]]$", text):
+        return text
+    if any(text.endswith(ending) for ending in _QUESTION_ENDINGS):
+        return text + "？"
+    if any(text.endswith(ending) for ending in _SOFT_ENDINGS):
+        return text + "，"
+    return text + "。"
+
+
+def _paragraphize_video_sentences(sentences: list[str], *, source: str) -> str:
+    if not sentences:
+        return ""
+
+    paragraphs: list[str] = []
+    current: list[str] = []
+    current_length = 0
+    target_length = 120 if source == "transcript" else 90
+    max_sentences = 4 if source == "transcript" else 3
+
+    for sentence in sentences:
+        normalized = sentence.strip()
+        if not normalized:
+            continue
+        starts_new_paragraph = any(normalized.startswith(marker) for marker in _PARAGRAPH_BREAK_MARKERS)
+        if current and (
+            starts_new_paragraph
+            or current_length + len(normalized) > target_length
+            or len(current) >= max_sentences
+        ):
+            paragraphs.append("".join(current).strip())
+            current = []
+            current_length = 0
+        current.append(normalized)
+        current_length += len(normalized)
+
+    if current:
+        paragraphs.append("".join(current).strip())
+
+    return "\n\n".join(paragraph for paragraph in paragraphs if paragraph)
+
+
+def _format_video_text_block(
+    value: str | None,
+    *,
+    source: str,
+    segments: list[str] | None = None,
+) -> str:
+    raw_segments = segments if segments is not None else str(value or "").splitlines()
+    sentence_candidates: list[str] = []
+
+    for segment in raw_segments:
+        for chunk in _split_long_video_chunk(segment):
+            if not chunk:
+                continue
+            sentence_candidates.append(_ensure_sentence_punctuation(chunk))
+
+    if not sentence_candidates and value:
+        fallback = _normalize_video_fragment(value)
+        if fallback:
+            sentence_candidates = [_ensure_sentence_punctuation(fallback)]
+
+    formatted = _paragraphize_video_sentences(sentence_candidates, source=source)
+    return _normalize_text_block(formatted)
+
+
 def _extract_urls_from_text(value: str | None) -> list[str]:
     matches = HTTP_URL_PATTERN.findall(str(value or ""))
     return _unique_preserve_order(
@@ -147,7 +654,10 @@ def _find_video_companion_text(video_path: Path) -> tuple[str, str]:
     ]:
         candidate = parent / filename
         if candidate.exists():
-            text = _normalize_text_block(candidate.read_text(encoding="utf-8", errors="ignore"))
+            text = _format_video_text_block(
+                candidate.read_text(encoding="utf-8", errors="ignore"),
+                source=source,
+            )
             if text:
                 return text, source
     return "", ""
@@ -198,7 +708,10 @@ def _extract_embedded_subtitles(video_path: Path) -> str:
         )
         if not srt_path.exists():
             return ""
-        return parse_subtitle_lines(srt_path.read_text(encoding="utf-8", errors="ignore"))
+        return _format_video_text_block(
+            parse_subtitle_lines(srt_path.read_text(encoding="utf-8", errors="ignore")),
+            source="subtitle",
+        )
     except (subprocess.CalledProcessError, subprocess.TimeoutExpired, FileNotFoundError) as exc:
         logger.debug("Embedded subtitle extraction failed for %s: %s", video_path.name, exc)
         return ""
@@ -230,8 +743,18 @@ def _transcribe_video_with_mlx_whisper(video_path: Path) -> str:
             path_or_hf_repo="mlx-community/whisper-small-mlx",
             language="zh",
             condition_on_previous_text=False,
+            initial_prompt="以下是普通话视频内容，请使用简体中文输出，并补充自然的中文标点。",
         )
-        return str(result.get("text", "")).strip()
+        segments = [
+            str(entry.get("text", "")).strip()
+            for entry in (result.get("segments") or [])
+            if str(entry.get("text", "")).strip()
+        ]
+        return _format_video_text_block(
+            str(result.get("text", "")).strip(),
+            source="transcript",
+            segments=segments or None,
+        )
     except Exception as exc:
         logger.debug("mlx-whisper transcription failed for %s: %s", video_path.name, exc)
         return ""
@@ -381,6 +904,7 @@ def parse_item_content(item) -> ContentParseResult:
                     pass
                 source = "transcript"
         if text:
+            text = _format_video_text_block(text, source=source or "transcript")
             if source == "subtitle":
                 subtitle_sections.append(text)
             else:
@@ -414,4 +938,3 @@ def parse_item_content(item) -> ContentParseResult:
         parse_status="completed",
         parsed_at=datetime.utcnow(),
     )
-

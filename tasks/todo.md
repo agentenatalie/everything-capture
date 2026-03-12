@@ -1,3 +1,7 @@
+- [x] Add lightweight video text post-processing for simplified Chinese conversion and readability
+- [x] Apply transcript/subtitle formatting before caching and extracted_text rendering
+- [x] Verify video text formatting with focused content extraction tests
+
 - [x] Inspect current baseline, auth gate, and run configuration
 - [x] Auto-enter the content page without showing the Google login overlay
 - [x] Add a mobile-only web capture entry with paste/import flow

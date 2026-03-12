@@ -202,7 +202,7 @@ class HtmlFallbackFormattingTests(unittest.TestCase):
         self.assertIn("- Claude Code Plugin support\n- Custom agent (subagent) support", note)
         self.assertNotIn("- Claude Code Plugin support\n\n- Custom agent (subagent) support", note)
 
-    def test_obsidian_note_appends_parsed_text_at_the_end_inside_triple_quotes(self) -> None:
+    def test_obsidian_note_places_parsed_text_code_block_before_source(self) -> None:
         item = self.make_item()
         item.extracted_text = "[ocr_text]\n图片里的原始文字"
 
@@ -211,7 +211,12 @@ class HtmlFallbackFormattingTests(unittest.TestCase):
             {"/static/media/first.png": "EverythingCapture_Media/item-1234/first.png"},
         )
 
-        self.assertTrue(note.rstrip().endswith("'''\n[ocr_text]\n图片里的原始文字\n'''"))
+        self.assertIn("```text\n[ocr_text]\n图片里的原始文字\n```", note)
+        self.assertIn("[Source](https://example.com/article)", note)
+        self.assertLess(
+            note.index("```text\n[ocr_text]\n图片里的原始文字\n```"),
+            note.index("[Source](https://example.com/article)"),
+        )
 
     def test_obsidian_note_skips_douyin_cover_when_video_exists(self) -> None:
         item = Item(

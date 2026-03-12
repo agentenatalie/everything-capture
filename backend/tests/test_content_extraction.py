@@ -7,7 +7,7 @@ from unittest.mock import patch
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
 from models import Item, Media  # noqa: E402
-from services.content_extraction import parse_item_content, parse_subtitle_lines  # noqa: E402
+from services.content_extraction import _format_video_text_block, parse_item_content, parse_subtitle_lines  # noqa: E402
 
 
 class ContentExtractionTests(unittest.TestCase):
@@ -56,7 +56,7 @@ class ContentExtractionTests(unittest.TestCase):
             ],
         }
         # Video has a subtitle companion
-        mock_companion.return_value = ("今天我们来聊聊这个话题\n非常有意思", "subtitle")
+        mock_companion.return_value = ("這是第一句\n接下來講第二句\n最後收尾", "subtitle")
 
         result = parse_item_content(item)
 
@@ -79,7 +79,9 @@ class ContentExtractionTests(unittest.TestCase):
         )
         self.assertIn("[ocr_text]", result.extracted_text)
         self.assertIn("[subtitle_text]", result.extracted_text)
-        self.assertIn("今天我们来聊聊", result.extracted_text)
+        self.assertIn("这是第一句。", result.extracted_text)
+        self.assertIn("接下来讲第二句。", result.extracted_text)
+        self.assertIn("最后收尾。", result.extracted_text)
         # Swift was called with videos=[] (no video OCR)
         mock_swift.assert_called_once_with(images=mock_media_inputs.return_value["images"], videos=[])
 
@@ -123,12 +125,12 @@ class ContentExtractionTests(unittest.TestCase):
         }
         mock_companion.return_value = ("", "")
         mock_embedded.return_value = ""
-        mock_whisper.return_value = "这是一段测试转录文本"
+        mock_whisper.return_value = "這是一段測試轉錄文本"
 
         result = parse_item_content(item)
 
         self.assertIn("[transcript_text]", result.extracted_text)
-        self.assertIn("这是一段测试转录文本", result.extracted_text)
+        self.assertIn("这是一段测试转录文本。", result.extracted_text)
         self.assertNotIn("[subtitle_text]", result.extracted_text)
 
     @patch("services.content_extraction._transcribe_video_with_mlx_whisper")
@@ -186,6 +188,29 @@ class SubtitleParsingTests(unittest.TestCase):
 
     def test_empty_input(self) -> None:
         self.assertEqual(parse_subtitle_lines(""), "")
+
+
+class VideoTextFormattingTests(unittest.TestCase):
+    def test_format_video_text_block_converts_to_simplified_and_splits_paragraphs(self) -> None:
+        formatted = _format_video_text_block(
+            "這個就是第一句 接下來我們講第二句 最後做總結",
+            source="transcript",
+            segments=["這個就是第一句", "接下來我們講第二句", "最後做總結"],
+        )
+
+        self.assertIn("这个就是第一句。", formatted)
+        self.assertIn("接下来我们讲第二句。", formatted)
+        self.assertIn("最后做总结。", formatted)
+        self.assertIn("\n\n", formatted)
+
+    def test_format_video_text_block_keeps_existing_urls_readable(self) -> None:
+        formatted = _format_video_text_block(
+            "第一行\n第二行 https://example.com/demo",
+            source="subtitle",
+        )
+
+        self.assertIn("第一行。", formatted)
+        self.assertIn("https://example.com/demo。", formatted)
 
 
 if __name__ == "__main__":

@@ -167,7 +167,7 @@ def _parsed_text_appendix(item: Item) -> str:
     text = (item.extracted_text or "").replace("\r\n", "\n").replace("\r", "\n").strip()
     if not text:
         return ""
-    return "'''\n" + text + "\n'''"
+    return text
 
 
 def _safe_note_name(title: str | None, fallback: str) -> str:
@@ -1090,13 +1090,15 @@ def _build_obsidian_note(item: Item, media_references: dict[str, str]) -> str:
             if media_path:
                 parts.append(f"![[{media_path}]]\n\n")
 
-    if item.source_url:
-        parts.append(f"[Source]({item.source_url})\n")
-
     parsed_text_appendix = _parsed_text_appendix(item)
     if parsed_text_appendix:
         parts.append("\n" if not parts[-1].endswith("\n") else "")
-        parts.append(parsed_text_appendix + "\n")
+        parts.append("```text\n")
+        parts.append(parsed_text_appendix)
+        parts.append("\n```\n")
+
+    if item.source_url:
+        parts.append(f"[Source]({item.source_url})\n")
 
     return "".join(parts)
 

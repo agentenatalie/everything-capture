@@ -215,6 +215,7 @@
                         <div class="toolbar-filters">
                             <select id="platformFilter" class="platform-select" aria-label="筛选平台">
                                 <option value="all">全部</option>
+                                <option value="github">GitHub</option>
                                 <option value="wechat">公众号</option>
                                 <option value="douyin">抖音</option>
                                 <option value="xiaohongshu">小红书</option>
@@ -290,33 +291,6 @@
                 </div>
             </div>
             <div class="modal-body settings-body">
-                <div class="settings-group">
-                    <div class="settings-section">
-                        <h3>Google 登录</h3>
-                        <div class="settings-help" style="margin-bottom: 12px;">这是全局部署级配置。保存后，登录页会直接启用 Google OAuth。</div>
-                        <div class="settings-field">
-                            <label class="settings-label">Google OAuth Client ID</label>
-                            <input type="text" id="googleOauthClientId" class="filter-input" style="width: 100%;"
-                                placeholder="1234567890-xxxxx.apps.googleusercontent.com" />
-                        </div>
-                        <div class="settings-field">
-                            <label class="settings-label">Google OAuth Client Secret</label>
-                            <input type="password" id="googleOauthClientSecret" class="filter-input" style="width: 100%;"
-                                placeholder="GOCSPX-..." />
-                            <div class="settings-help">出于安全原因不会回显已保存的 Secret。留空时保留当前值。</div>
-                        </div>
-                        <div class="settings-field">
-                            <label class="settings-label">Google Redirect URI</label>
-                            <input type="text" id="googleOauthRedirectUri" class="filter-input" style="width: 100%;"
-                                placeholder="http://127.0.0.1:8000/api/auth/google/callback" />
-                            <div class="settings-help">不填时，后端会回退到当前服务的 `/api/auth/google/callback`。</div>
-                        </div>
-                        <div id="googleOauthStatusText" class="settings-status" style="color: #6b7280;">状态：未配置</div>
-                    </div>
-                </div>
-
-                <hr class="settings-divider">
-
                 <div class="settings-group">
                     <div class="settings-section">
                         <h3>Notion 集成</h3>
@@ -417,6 +391,11 @@
 
                 <button id="saveSettingsBtn" class="extract-btn settings-primary"
                     style="margin-top: 10px; width: 100%;">保存设置</button>
+                <div class="settings-bulk-actions">
+                    <button id="syncAllNotionBtn" class="extract-btn settings-secondary" type="button" disabled>同步全部笔记到 Notion</button>
+                    <button id="syncAllObsidianBtn" class="extract-btn settings-secondary" type="button" disabled>同步全部笔记到 Obsidian</button>
+                </div>
+                <div class="settings-help settings-bulk-help">已同步过的笔记会自动跳过，只补同步缺失项。</div>
             </div>
         </div>
     </div>

@@ -45,7 +45,7 @@
             if (providers.google_enabled) {
                 hints.push('Google OAuth 已启用');
             } else {
-                hints.push('Google OAuth 尚未配置，可先用邮箱或手机号登录后到设置页启用');
+                hints.push('Google OAuth 当前未启用');
             }
             if (providers.email_enabled) {
                 hints.push(providers.email_delivery_mode === 'dev' ? '邮箱验证码当前走开发模式' : '邮箱验证码将通过邮件发送');
@@ -55,7 +55,7 @@
             }
             authProviderHint.textContent = hints.length
                 ? hints.join(' · ')
-                : '当前没有可用登录方式。请先配置 Google OAuth、SMTP 或 Twilio。';
+                : '当前没有可用登录方式。请先配置 SMTP、Twilio 或部署级 Google OAuth。';
         }
 
         function setAuthMode(mode = 'email') {

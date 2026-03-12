@@ -662,11 +662,11 @@
                 }
 
                 commandResults.innerHTML = results.map((item) => {
-                    const snippet = truncateText(item.canonical_text || item.source_url || '无正文内容', 44);
+                    const snippet = getDisplayItemPreview(item, 44) || truncateText(item.source_url || '无正文内容', 44);
                     return `
                         <button class="suggestion-item" type="button" onclick="openCommandResult('${item.id}')">
                             <div class="command-result-body">
-                                <span class="command-result-title">${escapeHtml(item.title || '无标题')}</span>
+                                <span class="command-result-title">${escapeHtml(getDisplayItemTitle(item))}</span>
                                 <span class="command-result-snippet">${escapeHtml(snippet)}</span>
                             </div>
                             <span class="suggestion-meta">${platformDisplayLabel(item)} · ${formatDate(item.created_at)}</span>
@@ -1024,16 +1024,69 @@
 
         function normalizePlatform(platform, sourceUrl = '') {
             const value = (platform || '').toLowerCase();
+            const normalizedSourceUrl = String(sourceUrl || '').toLowerCase();
+            if (value.includes('github') || normalizedSourceUrl.includes('github.com/')) return 'github';
             if (value.includes('douyin') || value.includes('抖音') || value.includes('tiktok')) return 'douyin';
             if (value.includes('xiaohongshu') || value.includes('小红书') || value.includes('rednote') || value === 'xhs') return 'xiaohongshu';
-            if (value.includes('wechat') || value.includes('weixin') || sourceUrl.includes('mp.weixin.qq.com') || sourceUrl.includes('weixin.qq.com')) return 'wechat';
+            if (value.includes('wechat') || value.includes('weixin') || normalizedSourceUrl.includes('mp.weixin.qq.com') || normalizedSourceUrl.includes('weixin.qq.com')) return 'wechat';
             if (value === 'x' || value.includes('twitter')) return 'x';
             if (value === 'general' || value === 'generic' || value === 'web' || value === 'site') return 'web';
             return value;
         }
 
+        function getGitHubRepoPath(sourceUrl = '') {
+            try {
+                const parsed = new URL(String(sourceUrl || '').trim());
+                if (!parsed.hostname.toLowerCase().includes('github.com')) return '';
+                const segments = parsed.pathname.split('/').filter(Boolean);
+                if (segments.length < 2) return '';
+                return `${segments[0]}/${segments[1]}`.replace(/\.git$/i, '');
+            } catch (error) {
+                return '';
+            }
+        }
+
+        function getGitHubTitleParts(item) {
+            if (normalizePlatform(item?.platform || '', item?.source_url || '') !== 'github') {
+                return null;
+            }
+
+            const rawTitle = String(item?.title || '').trim();
+            const repoFromUrl = getGitHubRepoPath(item?.source_url || '');
+            const titleMatch = rawTitle.match(/^GitHub\s*-\s*([^:：]+?)\s*[:：]\s*(.+)$/i);
+            const repoOnlyMatch = rawTitle.match(/^GitHub\s*-\s*(.+)$/i);
+            const repoName = (titleMatch?.[1] || repoFromUrl || repoOnlyMatch?.[1] || rawTitle || 'GitHub 项目').trim();
+            const description = (titleMatch?.[2] || '').trim();
+
+            return {
+                repoName: repoName || 'GitHub 项目',
+                description,
+                rawTitle: rawTitle || repoName || 'GitHub 项目',
+            };
+        }
+
+        function getDisplayItemTitle(item) {
+            const githubParts = getGitHubTitleParts(item);
+            if (githubParts?.repoName) {
+                return githubParts.repoName;
+            }
+            return String(item?.title || '').trim() || '无标题';
+        }
+
+        function getDisplayItemPreview(item, maxLength = 120) {
+            const githubParts = getGitHubTitleParts(item);
+            if (githubParts?.description) {
+                return truncateText(githubParts.description, maxLength);
+            }
+
+            const canonicalText = String(item?.canonical_text || '').trim();
+            if (!canonicalText) return '无正文内容';
+            return truncateText(canonicalText, maxLength);
+        }
+
         function platformDisplayLabel(item) {
             const platform = normalizePlatform(item.platform || '', (item.source_url || '').toLowerCase());
+            if (platform === 'github') return 'GitHub';
             if (platform === 'web') return 'web';
             return platform || 'web';
         }
@@ -1056,6 +1109,8 @@
         function renderPlatformMark(item) {
             const platform = normalizePlatform(item.platform || '', (item.source_url || '').toLowerCase());
             switch (platform) {
+                case 'github':
+                    return '<span class="platform-glyph">GH</span>';
                 case 'wechat':
                     return '<span class="platform-glyph">微</span>';
                 case 'douyin':

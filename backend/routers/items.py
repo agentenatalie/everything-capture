@@ -31,6 +31,7 @@ router = APIRouter(
 
 PLATFORM_ALIASES = {
     "all": "all",
+    "github": "github",
     "xiaohongshu": "xiaohongshu",
     "douyin": "douyin",
     "wechat": "wechat",
@@ -291,12 +292,20 @@ def apply_platform_filter(query, platform: str):
                 source_url_expr.like("%weixin.qq.com%"),
             )
         )
+    if normalized == "github":
+        return query.filter(
+            or_(
+                platform_expr == "github",
+                source_url_expr.like("%github.com/%"),
+            )
+        )
     if normalized == "web":
         return query.filter(
             platform_expr.in_(["web", "generic", "general", "site"])
         ).filter(
             ~source_url_expr.like("%mp.weixin.qq.com%"),
             ~source_url_expr.like("%weixin.qq.com%"),
+            ~source_url_expr.like("%github.com/%"),
         )
     if normalized == "x":
         return query.filter(platform_expr.in_(["x", "twitter"]))

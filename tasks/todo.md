@@ -52,3 +52,13 @@
 - [x] Add durable capture-service storage support so queued uploads survive cloud restarts and overnight worker downtime
 - [x] Requeue stale claimed capture items so the local worker can resume interrupted work instead of losing it in `processing`
 - [x] Add a waiting-list view on the capture site that shows queued item counts and the items still waiting/processing
+- [ ] Show GitHub items as `来自 GitHub`, add GitHub to the platform filter, and keep GitHub filtering working server-side
+- [ ] Reformat GitHub project titles in list/card views so long repo titles stay readable without mutating stored data
+- [ ] Remove the gallery-card bottom-bar folder-management action while keeping other item operations intact
+- [ ] Remove the Google login configuration section from settings and make the settings JS resilient to its absence
+- [ ] Add bottom-row bulk sync actions for Notion and Obsidian that skip items already marked as synced
+- [ ] Verify the new GitHub filter/title behavior plus bulk sync endpoints with focused backend tests
+- [x] Investigate the Obsidian bulk-sync report that showed `新增 0 / 跳过 6 / 失败 57`
+- [x] Verify the saved Obsidian endpoint can still read/write/delete in `Sources.base`
+- [x] Retry the remaining pending Obsidian items directly and confirm the library reaches `obsidian_pending = 0`
+- [x] Make Obsidian bulk sync retry one transient network failure and surface the first failure reason in the toast

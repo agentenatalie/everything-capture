@@ -1403,14 +1403,8 @@ async def list_notion_databases(db: Session = Depends(get_db)):
     results.sort(key=lambda entry: (entry["object"] != "database", entry["title"].lower()))
     return {"results": results}
 
-@router.post("/notion/sync/{item_id}")
-async def sync_to_notion(item_id: str, db: Session = Depends(get_db)):
-    user_id = get_current_user_id()
-    item = _get_user_item(db, user_id, item_id)
-    if not item:
-        raise HTTPException(status_code=404, detail="Item not found")
-        
-    settings = _get_user_settings(db, user_id)
+async def _sync_item_to_notion(item: Item, db: Session, *, settings: Settings | None = None):
+    settings = settings or _get_user_settings(db, item.user_id)
     notion_api_token = _get_setting_secret(settings, "notion_api_token")
     if not notion_api_token:
         raise HTTPException(status_code=400, detail="Notion settings are incomplete: missing notion_api_token")
@@ -1518,14 +1512,18 @@ async def sync_to_notion(item_id: str, db: Session = Depends(get_db)):
             logger.error(f"Network error to Notion API: {str(e)}")
             raise HTTPException(status_code=500, detail=f"Network error connecting to Notion: {str(e)}")
 
-@router.post("/obsidian/sync/{item_id}")
-async def sync_to_obsidian(item_id: str, db: Session = Depends(get_db)):
+@router.post("/notion/sync/{item_id}")
+async def sync_to_notion(item_id: str, db: Session = Depends(get_db)):
     user_id = get_current_user_id()
     item = _get_user_item(db, user_id, item_id)
     if not item:
         raise HTTPException(status_code=404, detail="Item not found")
-        
-    settings = _get_user_settings(db, user_id)
+
+    return await _sync_item_to_notion(item, db)
+
+
+async def _sync_item_to_obsidian(item: Item, db: Session, *, settings: Settings | None = None):
+    settings = settings or _get_user_settings(db, item.user_id)
     obsidian_rest_api_url = _clean_optional_string(settings.obsidian_rest_api_url if settings else None)
     obsidian_api_key = _get_setting_secret(settings, "obsidian_api_key")
     if not settings or not obsidian_rest_api_url or not obsidian_api_key:
@@ -1600,6 +1598,131 @@ async def sync_to_obsidian(item_id: str, db: Session = Depends(get_db)):
 
     error_message = f"Network error connecting to Obsidian: {str(last_error)}" if last_error else "Network error connecting to Obsidian"
     raise HTTPException(status_code=500, detail=error_message)
+
+
+@router.post("/obsidian/sync/{item_id}")
+async def sync_to_obsidian(item_id: str, db: Session = Depends(get_db)):
+    user_id = get_current_user_id()
+    item = _get_user_item(db, user_id, item_id)
+    if not item:
+        raise HTTPException(status_code=404, detail="Item not found")
+
+    return await _sync_item_to_obsidian(item, db)
+
+
+@router.post("/notion/sync-all")
+async def sync_all_to_notion(db: Session = Depends(get_db)):
+    user_id = get_current_user_id()
+    settings = _get_user_settings(db, user_id)
+    items = (
+        db.query(Item)
+        .filter(Item.user_id == user_id)
+        .order_by(Item.created_at.desc())
+        .all()
+    )
+
+    pending_items = [item for item in items if not item.notion_page_id]
+    skipped_count = len(items) - len(pending_items)
+    synced_items: list[dict[str, str]] = []
+    failed_items: list[dict[str, str]] = []
+
+    for item in pending_items:
+        try:
+            result = await _sync_item_to_notion(item, db, settings=settings)
+            synced_items.append(
+                {
+                    "id": item.id,
+                    "notion_page_id": result.get("notion_page_id") or "",
+                }
+            )
+        except HTTPException as exc:
+            failed_items.append(
+                {
+                    "id": item.id,
+                    "message": str(exc.detail),
+                }
+            )
+
+    return {
+        "status": "ok",
+        "target": "notion",
+        "total_count": len(items),
+        "attempted_count": len(pending_items),
+        "synced_count": len(synced_items),
+        "skipped_count": skipped_count,
+        "failed_count": len(failed_items),
+        "items": synced_items,
+        "errors": failed_items[:10],
+    }
+
+
+@router.post("/obsidian/sync-all")
+async def sync_all_to_obsidian(db: Session = Depends(get_db)):
+    user_id = get_current_user_id()
+    settings = _get_user_settings(db, user_id)
+    items = (
+        db.query(Item)
+        .filter(Item.user_id == user_id)
+        .order_by(Item.created_at.desc())
+        .all()
+    )
+
+    pending_items = [item for item in items if not item.obsidian_path]
+    skipped_count = len(items) - len(pending_items)
+    synced_items: list[dict[str, str]] = []
+    failed_items: list[dict[str, str]] = []
+
+    for item in pending_items:
+        try:
+            result = await _sync_item_to_obsidian(item, db, settings=settings)
+        except HTTPException as exc:
+            detail = str(exc.detail)
+            if "Network error connecting to Obsidian" in detail:
+                try:
+                    result = await _sync_item_to_obsidian(item, db, settings=settings)
+                except HTTPException as retry_exc:
+                    failed_items.append(
+                        {
+                            "id": item.id,
+                            "message": str(retry_exc.detail),
+                        }
+                    )
+                    continue
+            else:
+                failed_items.append(
+                    {
+                        "id": item.id,
+                        "message": detail,
+                    }
+                )
+                continue
+
+        try:
+            synced_items.append(
+                {
+                    "id": item.id,
+                    "obsidian_path": result.get("obsidian_path") or "",
+                }
+            )
+        except Exception as exc:
+            failed_items.append(
+                {
+                    "id": item.id,
+                    "message": str(exc),
+                }
+            )
+
+    return {
+        "status": "ok",
+        "target": "obsidian",
+        "total_count": len(items),
+        "attempted_count": len(pending_items),
+        "synced_count": len(synced_items),
+        "skipped_count": skipped_count,
+        "failed_count": len(failed_items),
+        "items": synced_items,
+        "errors": failed_items[:10],
+    }
 
 
 @router.post("/sync-status/refresh")

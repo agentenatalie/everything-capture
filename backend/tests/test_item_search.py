@@ -4,10 +4,16 @@ import sys
 import unittest
 from types import SimpleNamespace
 
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker
+
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
-from routers.items import rank_search_rows  # noqa: E402
+from database import Base  # noqa: E402
+from models import Item  # noqa: E402
+from routers.items import apply_platform_filter, rank_search_rows  # noqa: E402
+from tenant import DEFAULT_USER_ID  # noqa: E402
 
 
 class ProductSearchRankingTests(unittest.TestCase):
@@ -77,6 +83,53 @@ class ProductSearchRankingTests(unittest.TestCase):
         self.assertIn("open-source-agent", ranked[:2])
         self.assertNotIn("life-growth", ranked[:2])
         self.assertNotIn("component-library", ranked)
+
+
+class PlatformFilterTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.engine = create_engine("sqlite:///:memory:")
+        Base.metadata.create_all(bind=self.engine)
+        self.Session = sessionmaker(bind=self.engine, autocommit=False, autoflush=False)
+
+    def tearDown(self) -> None:
+        Base.metadata.drop_all(bind=self.engine)
+        self.engine.dispose()
+
+    def test_github_filter_matches_github_urls_and_excludes_web_bucket(self) -> None:
+        with self.Session() as db:
+            db.add_all(
+                [
+                    Item(
+                        id="github-item",
+                        user_id=DEFAULT_USER_ID,
+                        source_url="https://github.com/octocat/hello-world",
+                        final_url="https://github.com/octocat/hello-world",
+                        title="GitHub - octocat/hello-world: example repo",
+                        canonical_text="Example repository",
+                        canonical_html="<p>Example repository</p>",
+                        platform="generic",
+                        status="ready",
+                    ),
+                    Item(
+                        id="web-item",
+                        user_id=DEFAULT_USER_ID,
+                        source_url="https://example.com/article",
+                        final_url="https://example.com/article",
+                        title="Example article",
+                        canonical_text="Example article",
+                        canonical_html="<p>Example article</p>",
+                        platform="generic",
+                        status="ready",
+                    ),
+                ]
+            )
+            db.commit()
+
+            github_ids = [item.id for item in apply_platform_filter(db.query(Item), "github").all()]
+            web_ids = [item.id for item in apply_platform_filter(db.query(Item), "web").all()]
+
+        self.assertEqual(github_ids, ["github-item"])
+        self.assertEqual(web_ids, ["web-item"])
 
 
 if __name__ == "__main__":

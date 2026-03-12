@@ -1442,9 +1442,12 @@
             font-size: 0.94rem;
             font-weight: 620;
             color: var(--text-primary);
-            white-space: nowrap;
+            display: -webkit-box;
+            -webkit-line-clamp: 2;
+            -webkit-box-orient: vertical;
             overflow: hidden;
             text-overflow: ellipsis;
+            line-height: 1.4;
         }
 
         .list-preview {
@@ -2436,6 +2439,32 @@
 
         .settings-primary {
             width: 100%;
+        }
+
+        .settings-bulk-actions {
+            display: grid;
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+            gap: 12px;
+            margin-top: 12px;
+        }
+
+        .settings-secondary {
+            width: 100%;
+            background: #ffffff;
+            color: #0f172a;
+            border: 1px solid #d6dde8;
+            box-shadow: 0 14px 28px -22px rgba(15, 23, 42, 0.45);
+        }
+
+        .settings-secondary:hover:not(:disabled) {
+            background: #0f172a;
+            color: #ffffff;
+            border-color: #0f172a;
+        }
+
+        .settings-bulk-help {
+            margin-top: 10px;
+            text-align: center;
         }
 
         /* Article HTML Content (inline images, reserved for canonical_html rich text) */
@@ -3470,6 +3499,10 @@
             .platform-select {
                 width: 112px;
                 flex-shrink: 0;
+            }
+
+            .settings-bulk-actions {
+                grid-template-columns: 1fr;
             }
 
             .folder-picker-commandbar {

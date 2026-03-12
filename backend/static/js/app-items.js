@@ -141,10 +141,12 @@
             if (currentView === 'list') {
                 grid.className = 'list-view';
                 grid.innerHTML = entries.map((item) => {
-                    const textPreview = item.canonical_text ? item.canonical_text.substring(0, 120) + '...' : '无正文内容';
+                    const textPreview = getDisplayItemPreview(item, 120);
                     const length = item.canonical_text ? item.canonical_text.length : 0;
                     const thumb = getItemThumbnail(item);
                     const activeClass = currentOpenItemId === item.id ? ' is-active' : '';
+                    const displayTitle = getDisplayItemTitle(item);
+                    const fullTitle = String(item.title || displayTitle || '无标题').trim();
                     const thumbHtml = thumb
                         ? `<div class="list-thumb"><img src="${thumb.url}" loading="lazy" alt=""></div>`
                         : `<div class="list-thumb"></div>`;
@@ -154,9 +156,9 @@
                                 ${thumbHtml}
                                 <div class="list-content">
                                     <div class="list-title-row">
-                                        <div class="list-title">${item.title || '无标题'}</div>
+                                        <div class="list-title" title="${escapeAttribute(fullTitle)}">${escapeHtml(displayTitle)}</div>
                                     </div>
-                                    <div class="list-preview">${textPreview}</div>
+                                    <div class="list-preview">${escapeHtml(textPreview)}</div>
                                 </div>
                             </div>
                             <div class="list-side">
@@ -184,7 +186,9 @@
             grid.className = 'grid';
             grid.innerHTML = entries.map((item) => {
                 const activeClass = currentOpenItemId === item.id ? ' is-active' : '';
-                const title = escapeHtml(item.title || '无标题');
+                const displayTitle = getDisplayItemTitle(item);
+                const title = escapeHtml(displayTitle);
+                const fullTitle = escapeAttribute(String(item.title || displayTitle || '无标题').trim());
                 const sourceLabel = escapeHtml(`来自 ${platformDisplayLabel(item)}`);
                 const relativeTime = escapeHtml(formatRelativeTime(item.created_at));
                 const tagsHtml = renderCardTags(item);
@@ -201,13 +205,12 @@
                                 </div>
                                 ${renderSyncBadges(item)}
                             </div>
-                            <h3 class="card-title">${title}</h3>
+                            <h3 class="card-title" title="${fullTitle}">${title}</h3>
                             <div class="card-bottom-row">
                                 <div class="tags">
                                     ${tagsHtml}
                                 </div>
                                 <div class="card-footer-actions">
-                                    ${renderFolderActionButton(item)}
                                     <button onclick="deleteItem('${item.id}', event)" class="delete-btn" title="删除">
                                         <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2M10 11v6M14 11v6"/></svg>
                                     </button>
@@ -300,7 +303,7 @@
             currentOpenItemId = item.id;
             renderItems(filteredEntries);
             setModalFullscreen(false);
-            modalTitle.innerText = item.title || '无标题';
+            modalTitle.innerText = getDisplayItemTitle(item);
             readerStatusDots.innerHTML = `
                 <span class="knowledge-dot notion ${item.notion_page_id ? 'is-ready' : 'is-idle'}" title="Notion${item.notion_page_id ? '已同步' : '未同步'}"></span>
                 <span class="knowledge-dot obsidian ${item.obsidian_path ? 'is-ready' : 'is-idle'}" title="Obsidian${item.obsidian_path ? '已同步' : '未同步'}"></span>

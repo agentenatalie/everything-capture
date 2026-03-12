@@ -6,6 +6,7 @@
         }
 
         function setGoogleOAuthStatus(data) {
+            if (!googleOauthStatusText) return;
             if (data?.google_oauth_ready) {
                 const managedBy = data.google_oauth_managed_by === 'env' ? '环境变量' : '设置页';
                 const redirectHint = data.google_oauth_redirect_uri
@@ -28,6 +29,25 @@
 
             googleOauthStatusText.textContent = '状态：未配置';
             googleOauthStatusText.style.color = '#6b7280';
+        }
+
+        const syncAllNotionBtn = document.getElementById('syncAllNotionBtn');
+        const syncAllObsidianBtn = document.getElementById('syncAllObsidianBtn');
+        let bulkSyncInFlightTarget = null;
+
+        function refreshBulkSyncButtons() {
+            if (syncAllNotionBtn) {
+                syncAllNotionBtn.disabled = bulkSyncInFlightTarget !== null || !latestSettings?.notion_ready;
+                syncAllNotionBtn.textContent = bulkSyncInFlightTarget === 'notion'
+                    ? '同步中...'
+                    : '同步全部笔记到 Notion';
+            }
+            if (syncAllObsidianBtn) {
+                syncAllObsidianBtn.disabled = bulkSyncInFlightTarget !== null || !latestSettings?.obsidian_ready;
+                syncAllObsidianBtn.textContent = bulkSyncInFlightTarget === 'obsidian'
+                    ? '同步中...'
+                    : '同步全部笔记到 Obsidian';
+            }
         }
 
         function setNotionStatus(data) {
@@ -186,14 +206,18 @@
                 if (res.ok) {
                     const data = await res.json();
                     latestSettings = data;
-                    googleOauthClientIdInput.value = data.google_oauth_client_id || '';
+                    if (googleOauthClientIdInput) {
+                        googleOauthClientIdInput.value = data.google_oauth_client_id || '';
+                    }
                     applySecretInputState(
                         googleOauthClientSecretInput,
                         Boolean(data.google_oauth_client_secret_saved),
                         'GOCSPX-...',
                         '已保存，留空则保留当前 Client Secret'
                     );
-                    googleOauthRedirectUriInput.value = data.google_oauth_redirect_uri || '';
+                    if (googleOauthRedirectUriInput) {
+                        googleOauthRedirectUriInput.value = data.google_oauth_redirect_uri || '';
+                    }
                     applySecretInputState(
                         document.getElementById('notionApiToken'),
                         Boolean(data.notion_api_token_saved),
@@ -221,6 +245,7 @@
                     setGoogleOAuthStatus(data);
                     setNotionStatus(data);
                     setObsidianStatus(data);
+                    refreshBulkSyncButtons();
                     await loadNotionDatabases(data.notion_database_id || '');
                     return data;
                 }
@@ -240,8 +265,6 @@
 
         btnSaveSettings.onclick = async () => {
             const payload = {
-                google_oauth_client_id: googleOauthClientIdInput.value.trim() || null,
-                google_oauth_redirect_uri: googleOauthRedirectUriInput.value.trim() || null,
                 notion_client_id: document.getElementById('notionClientId').value.trim() || null,
                 notion_redirect_uri: document.getElementById('notionRedirectUri').value.trim() || null,
                 notion_database_id: notionDbIdInput.value.trim() || null,
@@ -249,7 +272,13 @@
                 obsidian_folder_path: document.getElementById('obsidianFolderPath').value.trim() || null,
                 auto_sync_target: document.getElementById('autoSyncTarget').value
             };
-            const googleOauthClientSecret = googleOauthClientSecretInput.value.trim();
+            if (googleOauthClientIdInput) {
+                payload.google_oauth_client_id = googleOauthClientIdInput.value.trim() || null;
+            }
+            if (googleOauthRedirectUriInput) {
+                payload.google_oauth_redirect_uri = googleOauthRedirectUriInput.value.trim() || null;
+            }
+            const googleOauthClientSecret = googleOauthClientSecretInput?.value.trim() || '';
             const notionClientSecret = document.getElementById('notionClientSecret').value.trim();
             const obsidianApiKey = document.getElementById('obsidianApiKey').value.trim();
             if (googleOauthClientSecret) payload.google_oauth_client_secret = googleOauthClientSecret;
@@ -269,12 +298,11 @@
                     setGoogleOAuthStatus(data);
                     setNotionStatus(data);
                     setObsidianStatus(data);
+                    refreshBulkSyncButtons();
                     await loadNotionDatabases(data.notion_database_id || '');
                     await refreshAuthSession({ silent: true });
                     if (data.notion_ready || data.obsidian_ready) {
                         showToast('设置已保存，集成已更新。', 'success');
-                    } else if (data.google_oauth_ready) {
-                        showToast('设置已保存，Google 登录已启用。', 'success');
                     } else {
                         showToast('设置已保存，但仍有未完成的集成配置。', 'info');
                     }
@@ -393,6 +421,45 @@
             }
         };
 
+        async function runBulkSync(target) {
+            if (bulkSyncInFlightTarget) return;
+            bulkSyncInFlightTarget = target;
+            refreshBulkSyncButtons();
+            try {
+                const response = await fetch(`/api/connect/${target}/sync-all`, { method: 'POST' });
+                const data = await response.json().catch(() => ({}));
+                if (!response.ok) {
+                    throw new Error(data.detail || '批量同步失败');
+                }
+
+                const syncedCount = Number(data.synced_count || 0);
+                const skippedCount = Number(data.skipped_count || 0);
+                const failedCount = Number(data.failed_count || 0);
+                const firstError = failedCount && Array.isArray(data.errors) && data.errors[0]?.message
+                    ? ` 首个失败：${String(data.errors[0].message).slice(0, 120)}`
+                    : '';
+                showToast(
+                    `${target === 'notion' ? 'Notion' : 'Obsidian'} 全量同步完成：新增 ${syncedCount} 条，跳过 ${skippedCount} 条${failedCount ? `，失败 ${failedCount} 条` : ''}${firstError}`,
+                    failedCount ? 'info' : 'success'
+                );
+                await fetchItems();
+                if (currentOpenItemId) {
+                    const refreshedItem = itemsData.find((item) => item.id === currentOpenItemId);
+                    if (refreshedItem) {
+                        openModalByItem(refreshedItem);
+                    }
+                }
+            } catch (error) {
+                showToast(`${target === 'notion' ? 'Notion' : 'Obsidian'} 批量同步失败: ${error.message}`, 'error');
+            } finally {
+                bulkSyncInFlightTarget = null;
+                refreshBulkSyncButtons();
+            }
+        }
+
+        syncAllNotionBtn?.addEventListener('click', () => runBulkSync('notion'));
+        syncAllObsidianBtn?.addEventListener('click', () => runBulkSync('obsidian'));
+
         window.addEventListener('focus', () => {
             if (!hasWindowFocusedOnce) {
                 hasWindowFocusedOnce = true;
@@ -410,4 +477,3 @@
         remoteSyncRefreshTimer = window.setInterval(() => {
             scheduleRemoteSyncRefresh();
         }, REMOTE_SYNC_REFRESH_INTERVAL_MS);
-

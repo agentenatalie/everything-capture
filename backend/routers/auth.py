@@ -28,6 +28,7 @@ from auth import (
     normalize_phone_e164,
 )
 from database import get_db
+from frontend_bridge import build_frontend_url
 from models import AuthSession, AuthVerificationCode, User
 from schemas import (
     AuthProvidersResponse,
@@ -456,17 +457,32 @@ def start_google_auth(request: Request, db: Session = Depends(get_db)):
 @router.get("/google/callback", name="google_auth_callback")
 async def google_auth_callback(request: Request, code: str | None = None, state: str | None = None, error: str | None = None, db: Session = Depends(get_db)):
     if error:
-        return RedirectResponse(url=f"/?auth=failed&provider=google&error={urllib.parse.quote(error)}")
+        return RedirectResponse(
+            url=build_frontend_url(
+                request,
+                query_params={"auth": "failed", "provider": "google", "error": error},
+            )
+        )
     expected_state = request.cookies.get(AUTH_GOOGLE_STATE_COOKIE)
     if not code or not state or not expected_state or state != expected_state:
-        return RedirectResponse(url="/?auth=failed&provider=google&error=invalid_state")
+        return RedirectResponse(
+            url=build_frontend_url(
+                request,
+                query_params={"auth": "failed", "provider": "google", "error": "invalid_state"},
+            )
+        )
 
     google_config = resolve_google_oauth_config(db)
     client_id = (google_config.get("client_id") or "").strip()
     client_secret = (google_config.get("client_secret") or "").strip()
     redirect_uri = _google_redirect_uri(request, google_config)
     if not client_id or not client_secret:
-        return RedirectResponse(url="/?auth=failed&provider=google&error=missing_config")
+        return RedirectResponse(
+            url=build_frontend_url(
+                request,
+                query_params={"auth": "failed", "provider": "google", "error": "missing_config"},
+            )
+        )
 
     async with httpx.AsyncClient(timeout=15.0) as client:
         token_response = await client.post(
@@ -480,19 +496,34 @@ async def google_auth_callback(request: Request, code: str | None = None, state:
             },
         )
         if token_response.status_code >= 300:
-            return RedirectResponse(url="/?auth=failed&provider=google&error=token_exchange_failed")
+            return RedirectResponse(
+                url=build_frontend_url(
+                    request,
+                    query_params={"auth": "failed", "provider": "google", "error": "token_exchange_failed"},
+                )
+            )
 
         token_payload = token_response.json()
         access_token = token_payload.get("access_token")
         if not access_token:
-            return RedirectResponse(url="/?auth=failed&provider=google&error=missing_access_token")
+            return RedirectResponse(
+                url=build_frontend_url(
+                    request,
+                    query_params={"auth": "failed", "provider": "google", "error": "missing_access_token"},
+                )
+            )
 
         userinfo_response = await client.get(
             "https://openidconnect.googleapis.com/v1/userinfo",
             headers={"Authorization": f"Bearer {access_token}"},
         )
         if userinfo_response.status_code >= 300:
-            return RedirectResponse(url="/?auth=failed&provider=google&error=userinfo_failed")
+            return RedirectResponse(
+                url=build_frontend_url(
+                    request,
+                    query_params={"auth": "failed", "provider": "google", "error": "userinfo_failed"},
+                )
+            )
 
     profile = userinfo_response.json()
     google_sub = (profile.get("sub") or "").strip()
@@ -500,7 +531,12 @@ async def google_auth_callback(request: Request, code: str | None = None, state:
     display_name = (profile.get("name") or (email.split("@")[0] if email else "Google User")).strip()
     avatar_url = (profile.get("picture") or "").strip() or None
     if not google_sub or not email:
-        return RedirectResponse(url="/?auth=failed&provider=google&error=incomplete_profile")
+        return RedirectResponse(
+            url=build_frontend_url(
+                request,
+                query_params={"auth": "failed", "provider": "google", "error": "incomplete_profile"},
+            )
+        )
 
     user = _create_or_claim_user(
         db,
@@ -512,7 +548,12 @@ async def google_auth_callback(request: Request, code: str | None = None, state:
     auth_session, raw_token = issue_auth_session(db, user, "google_oauth", request)
     db.commit()
 
-    response = RedirectResponse(url="/?auth=success&provider=google")
+    response = RedirectResponse(
+        url=build_frontend_url(
+            request,
+            query_params={"auth": "success", "provider": "google"},
+        )
+    )
     attach_session_cookie(response, raw_token, auth_session.expires_at)
     response.delete_cookie(AUTH_GOOGLE_STATE_COOKIE, path="/", samesite="lax")
     return response

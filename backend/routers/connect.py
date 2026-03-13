@@ -1,9 +1,10 @@
 from contextlib import AsyncExitStack
 from time import monotonic
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy.orm import Session
 from database import get_db
+from frontend_bridge import build_frontend_url
 from models import Item, Settings
 import httpx
 import logging
@@ -1641,9 +1642,14 @@ async def get_notion_oauth_url(db: Session = Depends(get_db)):
     return {"url": auth_url}
 
 @router.get("/notion/oauth/callback")
-async def notion_oauth_callback(code: str, error: str = None, db: Session = Depends(get_db)):
+async def notion_oauth_callback(request: Request, code: str, error: str = None, db: Session = Depends(get_db)):
     if error:
-        return RedirectResponse(url=f"/?notion_auth=failed&error={urllib.parse.quote(error)}")
+        return RedirectResponse(
+            url=build_frontend_url(
+                request,
+                query_params={"notion_auth": "failed", "error": error},
+            )
+        )
         
     user_id = get_current_user_id()
     settings = _get_user_settings(db, user_id)
@@ -1655,7 +1661,12 @@ async def notion_oauth_callback(code: str, error: str = None, db: Session = Depe
     notion_client_secret = _get_setting_secret(settings, "notion_client_secret")
     notion_redirect_uri = _clean_optional_string(settings.notion_redirect_uri if settings else None)
     if not notion_client_id or not notion_client_secret or not notion_redirect_uri:
-        return RedirectResponse(url="/?notion_auth=failed&error=missing_config")
+        return RedirectResponse(
+            url=build_frontend_url(
+                request,
+                query_params={"notion_auth": "failed", "error": "missing_config"},
+            )
+        )
 
     # Exchange code for access token
     auth_string = f"{notion_client_id}:{notion_client_secret}"
@@ -1681,13 +1692,28 @@ async def notion_oauth_callback(code: str, error: str = None, db: Session = Depe
                 settings.notion_api_token = encrypt_secret(data.get("access_token"))
                 db.commit()
                 notion_redirect_state = "success" if _normalize_notion_id(settings.notion_database_id) else "partial"
-                return RedirectResponse(url=f"/?notion_auth={notion_redirect_state}")
+                return RedirectResponse(
+                    url=build_frontend_url(
+                        request,
+                        query_params={"notion_auth": notion_redirect_state},
+                    )
+                )
             else:
                 logger.error(f"Notion OAuth token exchange failed: {response.text}")
-                return RedirectResponse(url="/?notion_auth=failed&error=exchange_failed")
+                return RedirectResponse(
+                    url=build_frontend_url(
+                        request,
+                        query_params={"notion_auth": "failed", "error": "exchange_failed"},
+                    )
+                )
         except Exception as e:
             logger.error(f"Notion OAuth token exchange error: {str(e)}")
-            return RedirectResponse(url="/?notion_auth=failed&error=network_error")
+            return RedirectResponse(
+                url=build_frontend_url(
+                    request,
+                    query_params={"notion_auth": "failed", "error": "network_error"},
+                )
+            )
 
 @router.get("/notion/databases")
 async def list_notion_databases(db: Session = Depends(get_db)):
@@ -2128,6 +2154,9 @@ async def refresh_sync_status(request: SyncStatusRefreshRequest, db: Session = D
                     resolved_obsidian_path = item.obsidian_path
                     matched_note_content = None
                     verification_unknown = False
+                    verified_obsidian_status = False
+                    obsidian_request_failed = False
+                    obsidian_binding_missing = False
                     for url_base, obsidian_client in obsidian_clients.items():
                         try:
                             resolved_obsidian_path, matched_note_content, verification_unknown = await _resolve_obsidian_target_note(
@@ -2138,14 +2167,16 @@ async def refresh_sync_status(request: SyncStatusRefreshRequest, db: Session = D
                                 note_path,
                                 discovered_note_path=discovered_note_paths.get(item.id),
                             )
+                            verified_obsidian_status = True
                         except httpx.RequestError as exc:
+                            obsidian_request_failed = True
                             logger.warning("Failed to refresh Obsidian sync status for %s via %s: %s", item.id, url_base, exc)
                             continue
 
                         if verification_unknown or matched_note_content is not None:
                             break
 
-                    if verification_unknown:
+                    if verification_unknown or (obsidian_request_failed and not verified_obsidian_status):
                         pass
                     elif matched_note_content is not None:
                         if item.obsidian_path != resolved_obsidian_path:
@@ -2168,6 +2199,7 @@ async def refresh_sync_status(request: SyncStatusRefreshRequest, db: Session = D
                         item.obsidian_path = None
                         item.obsidian_last_synced_hash = None
                         item.obsidian_last_synced_at = None
+                        obsidian_binding_missing = True
                         dirty = True
 
                 _store_sync_status_cache(item)
@@ -2177,6 +2209,7 @@ async def refresh_sync_status(request: SyncStatusRefreshRequest, db: Session = D
                         "notion_page_id": item.notion_page_id,
                         "obsidian_path": item.obsidian_path,
                         "obsidian_sync_state": _obsidian_sync_state(item),
+                        "obsidian_binding_missing": obsidian_binding_missing if obsidian_api_key and obsidian_clients else False,
                     }
                 )
 

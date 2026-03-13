@@ -6,7 +6,7 @@ import threading
 import unittest
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 from bs4 import BeautifulSoup
 
@@ -24,9 +24,11 @@ from services.extractor import (  # noqa: E402
     _parse_douyin_router_data,
     _parse_x_article_result,
     _parse_twitter_oembed_html,
+    extract_content,
     extract_douyin,
     extract_twitter,
     extract_generic,
+    ExtractResult,
 )
 from services.downloader import download_media_list  # noqa: E402
 from services.downloader import download_file  # noqa: E402
@@ -507,6 +509,28 @@ class ExtractorMediaTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result.text, "Embedded Video Test")
         self.assertIsNotNone(result.media_urls)
         self.assertEqual(result.media_urls[0]["url"], "https://www.youtube.com/embed/dQw4w9WgXcQ")
+
+    async def test_extract_content_rejects_wechat_captcha_interstitial(self) -> None:
+        interstitial = ExtractResult(
+            title="Unknown",
+            text="：\n，\n。\n视频\n小程序\n赞\n在看",
+            platform="generic",
+            final_url=(
+                "https://mp.weixin.qq.com/mp/wappoc_appmsgcaptcha"
+                "?target_url=https%3A%2F%2Fmp.weixin.qq.com%2Fs%2Fexample"
+            ),
+        )
+
+        with patch(
+            "services.extractor.extract_generic",
+            new=AsyncMock(return_value=interstitial),
+        ):
+            result = await extract_content("https://mp.weixin.qq.com/s/example")
+
+        self.assertEqual(result.title, "提取失败")
+        self.assertEqual(result.text, "")
+        self.assertEqual(result.platform, "wechat")
+        self.assertEqual(result.final_url, "https://mp.weixin.qq.com/s/example")
 
     def test_parse_twitter_oembed_html_extracts_text(self) -> None:
         result = _parse_twitter_oembed_html(

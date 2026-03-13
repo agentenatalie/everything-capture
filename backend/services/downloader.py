@@ -11,6 +11,7 @@ from urllib.parse import urlparse
 
 import httpx
 from paths import MEDIA_DIR
+from tenant import DEFAULT_USER_ID
 
 try:
     import yt_dlp
@@ -467,7 +468,9 @@ async def download_media_list(
     返回: [{"type", "original_url", "local_path", "file_size", "display_order"}, ...]
     """
     results = []
-    path_parts = ["users", user_id, item_id] if user_id else [item_id]
+    if not user_id:
+        user_id = DEFAULT_USER_ID
+    path_parts = ["users", user_id, item_id]
     item_dir = MEDIA_ROOT.joinpath(*path_parts)
 
     for media in media_list:

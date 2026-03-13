@@ -109,6 +109,24 @@ def detect_platform(url: str) -> str:
     return "generic"
 
 
+def _is_wechat_interstitial_url(url: str | None) -> bool:
+    value = str(url or "").strip()
+    if not value:
+        return False
+
+    try:
+        parsed = urlparse(value)
+    except Exception:
+        return False
+
+    host = (parsed.hostname or "").lower()
+    if host not in {"mp.weixin.qq.com", "weixin.qq.com"}:
+        return False
+
+    path = (parsed.path or "").lower()
+    return path.startswith("/mp/") and "captcha" in path
+
+
 # ---------------------------------------------------------------------------
 # 工具函数
 # ---------------------------------------------------------------------------
@@ -2143,12 +2161,18 @@ async def extract_content(url: str) -> ExtractResult:
     extractor = _EXTRACTORS.get(platform)
     if extractor and platform != "generic":
         result = await extractor(url)
+        if platform == "wechat" and result and _is_wechat_interstitial_url(result.final_url):
+            logger.warning("微信提取命中验证码页: %s -> %s", url, result.final_url)
+            result = None
         if result and (len(result.text) > 20 or result.media_urls):
             return result
         logger.info("平台 %s 提取失败，回退到通用提取器", platform)
 
     # 通用提取器
     result = await extract_generic(url)
+    if platform == "wechat" and result and _is_wechat_interstitial_url(result.final_url):
+        logger.warning("微信通用提取命中验证码页: %s -> %s", url, result.final_url)
+        result = None
     if result and (len(result.text) > 20 or result.media_urls):
         if platform != "generic":
             result.platform = platform  # 保留原始平台标识

@@ -412,9 +412,9 @@
             settingsOverlay.classList.remove('active');
         }
 
-        settingsBtn.onclick = () => {
+        settingsBtn?.addEventListener('click', () => {
             openSettingsPanel();
-        };
+        });
 
         closeSettingsModal.onclick = () => {
             closeSettingsPanel();

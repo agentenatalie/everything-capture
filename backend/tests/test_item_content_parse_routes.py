@@ -73,6 +73,55 @@ class ItemContentParseRouteTests(unittest.TestCase):
         self.assertEqual(response.extracted_text, "手动修改后的解析笔记")
         self.assertEqual(response.parse_status, "completed")
 
+    def test_page_note_routes_create_list_and_update(self) -> None:
+        create_request = items_router.ItemPageNoteCreateRequest(
+            title="",
+            content="第一段 AI 对话结论",
+            ai_message_index=1,
+        )
+
+        with self.TestSession() as db:
+            with patch.object(items_router, "get_current_user_id", return_value="local-default-user"):
+                created = items_router.create_item_page_note("item-parse-route", create_request, db=db)
+                listed = items_router.list_item_page_notes("item-parse-route", db=db)
+                updated = items_router.update_item_page_note(
+                    "item-parse-route",
+                    created.id,
+                    items_router.ItemPageNoteUpdateRequest(
+                        title="整理后的页面笔记",
+                        content="更新后的内容",
+                    ),
+                    db=db,
+                )
+
+        self.assertEqual(created.ai_message_index, 1)
+        self.assertEqual(len(listed.notes), 1)
+        self.assertTrue(created.title)
+        self.assertEqual(updated.title, "整理后的页面笔记")
+        self.assertEqual(updated.content, "更新后的内容")
+
+    def test_page_note_update_derives_blank_title_from_latest_content(self) -> None:
+        create_request = items_router.ItemPageNoteCreateRequest(
+            title="初始标题",
+            content="旧内容",
+        )
+
+        with self.TestSession() as db:
+            with patch.object(items_router, "get_current_user_id", return_value="local-default-user"):
+                created = items_router.create_item_page_note("item-parse-route", create_request, db=db)
+                updated = items_router.update_item_page_note(
+                    "item-parse-route",
+                    created.id,
+                    items_router.ItemPageNoteUpdateRequest(
+                        title="",
+                        content="新的页面笔记内容应该成为标题来源",
+                    ),
+                    db=db,
+                )
+
+        self.assertEqual(updated.content, "新的页面笔记内容应该成为标题来源")
+        self.assertTrue(updated.title.startswith("新的页面笔记内容"))
+
 
 if __name__ == "__main__":
     unittest.main()

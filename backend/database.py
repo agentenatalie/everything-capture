@@ -355,6 +355,109 @@ def ensure_runtime_schema():
 
         connection.exec_driver_sql(
             """
+            CREATE TABLE IF NOT EXISTS ai_conversations (
+                id VARCHAR PRIMARY KEY,
+                user_id VARCHAR NOT NULL REFERENCES users(id),
+                workspace_id VARCHAR NOT NULL REFERENCES workspaces(id),
+                current_item_id VARCHAR REFERENCES items(id),
+                title VARCHAR NOT NULL,
+                mode VARCHAR NOT NULL DEFAULT 'chat',
+                messages_json TEXT NOT NULL DEFAULT '[]',
+                search_text TEXT,
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                last_message_at DATETIME
+            )
+            """
+        )
+        ai_conversation_columns = _table_columns(connection, "ai_conversations")
+        if "current_item_id" not in ai_conversation_columns:
+            connection.exec_driver_sql(
+                "ALTER TABLE ai_conversations ADD COLUMN current_item_id VARCHAR REFERENCES items(id)"
+            )
+        if "mode" not in ai_conversation_columns:
+            connection.exec_driver_sql(
+                "ALTER TABLE ai_conversations ADD COLUMN mode VARCHAR NOT NULL DEFAULT 'chat'"
+            )
+        if "messages_json" not in ai_conversation_columns:
+            connection.exec_driver_sql(
+                "ALTER TABLE ai_conversations ADD COLUMN messages_json TEXT NOT NULL DEFAULT '[]'"
+            )
+        if "search_text" not in ai_conversation_columns:
+            connection.exec_driver_sql("ALTER TABLE ai_conversations ADD COLUMN search_text TEXT")
+        if "last_message_at" not in ai_conversation_columns:
+            connection.exec_driver_sql("ALTER TABLE ai_conversations ADD COLUMN last_message_at DATETIME")
+        connection.exec_driver_sql(
+            "UPDATE ai_conversations SET user_id = ? WHERE user_id IS NULL OR trim(user_id) = ''",
+            (DEFAULT_USER_ID,),
+        )
+        connection.exec_driver_sql(
+            "UPDATE ai_conversations SET workspace_id = ? WHERE workspace_id IS NULL OR trim(workspace_id) = ''",
+            (DEFAULT_WORKSPACE_ID,),
+        )
+        connection.exec_driver_sql(
+            "UPDATE ai_conversations SET mode = 'chat' WHERE mode IS NULL OR trim(mode) = ''"
+        )
+        connection.exec_driver_sql(
+            "UPDATE ai_conversations SET messages_json = '[]' WHERE messages_json IS NULL OR trim(messages_json) = ''"
+        )
+        connection.exec_driver_sql(
+            "UPDATE ai_conversations SET last_message_at = COALESCE(last_message_at, updated_at, created_at)"
+        )
+        connection.exec_driver_sql("CREATE INDEX IF NOT EXISTS idx_ai_conversations_user_id ON ai_conversations(user_id)")
+        connection.exec_driver_sql(
+            "CREATE INDEX IF NOT EXISTS idx_ai_conversations_current_item_id ON ai_conversations(current_item_id)"
+        )
+        connection.exec_driver_sql(
+            "CREATE INDEX IF NOT EXISTS idx_ai_conversations_user_updated_at ON ai_conversations(user_id, updated_at DESC)"
+        )
+        connection.exec_driver_sql(
+            "CREATE INDEX IF NOT EXISTS idx_ai_conversations_user_last_message_at ON ai_conversations(user_id, last_message_at DESC)"
+        )
+
+        connection.exec_driver_sql(
+            """
+            CREATE TABLE IF NOT EXISTS item_page_notes (
+                id VARCHAR PRIMARY KEY,
+                item_id VARCHAR NOT NULL REFERENCES items(id),
+                user_id VARCHAR NOT NULL REFERENCES users(id),
+                workspace_id VARCHAR NOT NULL REFERENCES workspaces(id),
+                ai_conversation_id VARCHAR REFERENCES ai_conversations(id),
+                ai_message_index INTEGER,
+                title VARCHAR NOT NULL,
+                content TEXT NOT NULL DEFAULT '',
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+            )
+            """
+        )
+        item_page_note_columns = _table_columns(connection, "item_page_notes")
+        if "ai_conversation_id" not in item_page_note_columns:
+            connection.exec_driver_sql(
+                "ALTER TABLE item_page_notes ADD COLUMN ai_conversation_id VARCHAR REFERENCES ai_conversations(id)"
+            )
+        if "ai_message_index" not in item_page_note_columns:
+            connection.exec_driver_sql("ALTER TABLE item_page_notes ADD COLUMN ai_message_index INTEGER")
+        if "content" not in item_page_note_columns:
+            connection.exec_driver_sql(
+                "ALTER TABLE item_page_notes ADD COLUMN content TEXT NOT NULL DEFAULT ''"
+            )
+        connection.exec_driver_sql(
+            "UPDATE item_page_notes SET user_id = ? WHERE user_id IS NULL OR trim(user_id) = ''",
+            (DEFAULT_USER_ID,),
+        )
+        connection.exec_driver_sql(
+            "UPDATE item_page_notes SET workspace_id = ? WHERE workspace_id IS NULL OR trim(workspace_id) = ''",
+            (DEFAULT_WORKSPACE_ID,),
+        )
+        connection.exec_driver_sql("CREATE INDEX IF NOT EXISTS idx_item_page_notes_item_id ON item_page_notes(item_id)")
+        connection.exec_driver_sql("CREATE INDEX IF NOT EXISTS idx_item_page_notes_user_id ON item_page_notes(user_id)")
+        connection.exec_driver_sql(
+            "CREATE INDEX IF NOT EXISTS idx_item_page_notes_ai_conversation_id ON item_page_notes(ai_conversation_id)"
+        )
+
+        connection.exec_driver_sql(
+            """
             CREATE TABLE IF NOT EXISTS app_config (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 google_oauth_client_id VARCHAR,

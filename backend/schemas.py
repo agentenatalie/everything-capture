@@ -227,6 +227,81 @@ class AiAssistantResponse(BaseModel):
     updated_items: list[ItemResponse] = Field(default_factory=list)
 
 
+class AiConversationStoredMessage(BaseModel):
+    role: str
+    content: str
+    mode: str = "chat"
+    citations: list[AiCitationResponse] = Field(default_factory=list)
+    tool_events: list[AiToolEventResponse] = Field(default_factory=list)
+    knowledge_base_path: Optional[str] = None
+    note_count: int = 0
+    insufficient_context: bool = False
+    is_error: bool = False
+    created_at: Optional[datetime] = None
+
+
+class AiConversationSaveRequest(BaseModel):
+    conversation_id: Optional[str] = None
+    mode: str = "chat"
+    current_item_id: Optional[str] = None
+    title: Optional[str] = None
+    messages: list[AiConversationStoredMessage] = Field(default_factory=list)
+
+
+class AiConversationSummaryResponse(BaseModel):
+    id: str
+    title: str
+    mode: str = "chat"
+    current_item_id: Optional[str] = None
+    current_item_title: Optional[str] = None
+    message_count: int = 0
+    last_message_preview: Optional[str] = None
+    created_at: datetime
+    updated_at: datetime
+    last_message_at: Optional[datetime] = None
+
+    class Config:
+        from_attributes = True
+
+
+class AiConversationResponse(AiConversationSummaryResponse):
+    messages: list[AiConversationStoredMessage] = Field(default_factory=list)
+
+
+class AiConversationListResponse(BaseModel):
+    conversations: list[AiConversationSummaryResponse] = Field(default_factory=list)
+
+
+class ItemPageNoteResponse(BaseModel):
+    id: str
+    item_id: str
+    ai_conversation_id: Optional[str] = None
+    ai_message_index: Optional[int] = None
+    title: str
+    content: str = ""
+    created_at: datetime
+    updated_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+class ItemPageNoteListResponse(BaseModel):
+    notes: list[ItemPageNoteResponse] = Field(default_factory=list)
+
+
+class ItemPageNoteCreateRequest(BaseModel):
+    title: Optional[str] = None
+    content: str = ""
+    ai_conversation_id: Optional[str] = None
+    ai_message_index: Optional[int] = None
+
+
+class ItemPageNoteUpdateRequest(BaseModel):
+    title: Optional[str] = None
+    content: Optional[str] = None
+
+
 class FolderResponse(BaseModel):
     id: str
     name: str

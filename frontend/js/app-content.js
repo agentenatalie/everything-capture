@@ -46,6 +46,14 @@
                     return createToken(
                         `<a href="${escapeAttribute(url)}" target="_blank" rel="noreferrer noopener">${escapeHtml(label)}</a>`
                     );
+                })
+                .replace(/https?:\/\/[^\s<>"'`]+/g, (rawUrl) => {
+                    const safeUrl = extractFirstHttpUrl(rawUrl);
+                    if (!safeUrl) return rawUrl;
+                    const trailing = rawUrl.slice(safeUrl.length);
+                    return createToken(
+                        `<a href="${escapeAttribute(safeUrl)}" target="_blank" rel="noreferrer noopener">${escapeHtml(safeUrl)}</a>${escapeHtml(trailing)}`
+                    );
                 });
 
             rendered = escapeHtml(rendered)
@@ -632,7 +640,7 @@
                     .split(/\n{2,}/)
                     .map((paragraph) => paragraph.trim())
                     .filter(Boolean)
-                    .map((paragraph) => `<p class="content-para">${escapeHtml(paragraph).replace(/\n/g, '<br>')}</p>`)
+                    .map((paragraph) => `<p class="content-para">${renderInlineMarkdown(paragraph).replace(/\n/g, '<br>')}</p>`)
                     .join('');
             }
 
@@ -844,7 +852,7 @@
 
             let html = '';
             paragraphs.forEach((paragraph, index) => {
-                html += `<p class="content-para">${escapeHtml(paragraph).replace(/\n/g, '<br>')}</p>`;
+                html += `<p class="content-para">${renderInlineMarkdown(paragraph).replace(/\n/g, '<br>')}</p>`;
                 const anchoredImages = imageAnchors.get(index) || [];
                 anchoredImages.forEach((url) => {
                     html += `<div class="inline-img-wrap"><img src="${escapeAttribute(resolveMediaUrl(url))}" alt="" class="inline-img"></div>`;

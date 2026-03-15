@@ -6,17 +6,22 @@ from datetime import datetime
 from typing import Any, Optional
 
 from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy import func
+from sqlalchemy import func, or_
 from sqlalchemy.orm import Session
 
 from database import get_db
-from models import Folder, Item, Settings
+from models import AiConversation, Folder, Item, Settings
 from schemas import (
     AiAskRequest,
     AiAskResponse,
     AiAssistantRequest,
     AiAssistantResponse,
     AiCitationResponse,
+    AiConversationListResponse,
+    AiConversationResponse,
+    AiConversationSaveRequest,
+    AiConversationStoredMessage,
+    AiConversationSummaryResponse,
     AiItemAnalysisResponse,
     AiRelatedNotesResponse,
     AiToolEventResponse,
@@ -55,7 +60,9 @@ router = APIRouter(prefix="/api/ai", tags=["ai"])
 
 _JSON_FENCE_PATTERN = re.compile(r"^```(?:json)?\s*|\s*```$", re.IGNORECASE)
 _NOTION_ID_RE = re.compile(r"([0-9a-fA-F]{32}|[0-9a-fA-F]{8}(?:-[0-9a-fA-F]{4}){3}-[0-9a-fA-F]{12})")
+_CITATION_INDEX_PATTERN = re.compile(r"\[(\d{1,2})\]")
 _CHAT_HISTORY_LIMIT = 10
+_SAVED_CHAT_HISTORY_LIMIT = 120
 _AGENT_TOOL_STEP_LIMIT = 6
 
 
@@ -163,6 +170,31 @@ def _serialize_citations(
             )
         )
     return citations
+
+
+def _filter_ranked_notes_by_citation_markers(
+    answer_text: str | None,
+    ranked_notes: list[tuple[KnowledgeBaseNote, float]],
+) -> list[tuple[KnowledgeBaseNote, float]]:
+    if not ranked_notes:
+        return []
+
+    referenced_positions: list[int] = []
+    seen_positions: set[int] = set()
+    for raw_index in _CITATION_INDEX_PATTERN.findall(str(answer_text or "")):
+        try:
+            index = int(raw_index)
+        except ValueError:
+            continue
+        if index < 1 or index > len(ranked_notes) or index in seen_positions:
+            continue
+        referenced_positions.append(index)
+        seen_positions.add(index)
+
+    if not referenced_positions:
+        return []
+
+    return [ranked_notes[index - 1] for index in referenced_positions]
 
 
 def _build_note_context_lines(note: KnowledgeBaseNote, index: int) -> str:
@@ -298,7 +330,8 @@ def _ask_ai_system_prompt() -> str:
         "只能基于提供的笔记回答，不要引入外部常识来补空。"
         "优先使用每篇笔记已有的 `summary` / `摘要`，不要重复整理同一份知识。"
         "如果证据不足，必须明确说信息不足。"
-        "回答时尽量使用 [1] [2] 这样的引用编号。"
+        "只有在你实际引用了某条笔记时，才使用 [1] [2] 这样的引用编号。"
+        "如果答案没有直接引用具体笔记，就不要输出引用编号。"
     )
 
 
@@ -319,7 +352,9 @@ def _assistant_chat_system_prompt() -> str:
         "如果提供了当前文章上下文，优先依据当前文章的内容分析、抓取文本和 OCR / 帧文字回答。"
         "如果同时提供了知识库笔记，优先使用已有 `summary` / `摘要` 作为辅助，不要机械重复整理。"
         "只能基于提供的上下文回答；若上下文不足，必须明确说明。"
-        "回答请使用中文，保持简洁，并尽量用 [1] [2] 引用编号。"
+        "回答请使用中文，保持简洁。"
+        "只有在你实际引用了某条知识库笔记时，才使用 [1] [2] 引用编号。"
+        "如果没有直接引用具体笔记，就不要输出引用编号。"
     )
 
 
@@ -344,6 +379,8 @@ def _assistant_agent_system_prompt(agent_permissions: list[str], snapshot: Knowl
         "如果某个权限没有开放，或某个工具执行失败，必须直接说明。"
         "只有在工具结果明确成功时，才能说操作已经完成。"
         "回答请使用中文，保持清楚直接。"
+        "只有在你最终说明里直接引用了某条知识库笔记时，才使用 [1] [2] 引用编号。"
+        "如果没有直接引用具体笔记，就不要输出引用编号。"
         f"当前知识库位置：{knowledge_base_hint}。"
         f"当前可用权限：{readable_permissions}。"
     )
@@ -465,6 +502,127 @@ def _sanitize_conversation_messages(messages: list[Any]) -> list[dict[str, str]]
             continue
         sanitized.append({"role": role, "content": content})
     return sanitized
+
+
+def _sanitize_saved_conversation_messages(messages: list[Any]) -> list[dict[str, Any]]:
+    sanitized: list[dict[str, Any]] = []
+    for raw_message in messages[-_SAVED_CHAT_HISTORY_LIMIT:]:
+        payload = raw_message if isinstance(raw_message, dict) else raw_message.model_dump(mode="json")
+        role = _clean_optional_string(payload.get("role"))
+        content = _clean_optional_string(payload.get("content"))
+        if role not in {"user", "assistant"} or not content:
+            continue
+
+        mode = "agent" if _clean_optional_string(payload.get("mode")) == "agent" else "chat"
+        citations = payload.get("citations")
+        tool_events = payload.get("tool_events")
+        created_at = _clean_optional_string(payload.get("created_at"))
+
+        sanitized.append(
+            {
+                "role": role,
+                "content": content,
+                "mode": mode,
+                "citations": citations if isinstance(citations, list) else [],
+                "tool_events": tool_events if isinstance(tool_events, list) else [],
+                "knowledge_base_path": _clean_optional_string(payload.get("knowledge_base_path")),
+                "note_count": max(0, int(payload.get("note_count") or 0)),
+                "insufficient_context": bool(payload.get("insufficient_context")),
+                "is_error": bool(payload.get("is_error")),
+                "created_at": created_at or datetime.utcnow().isoformat(),
+            }
+        )
+    return sanitized
+
+
+def _load_saved_conversation_messages(raw_messages: str | None) -> list[dict[str, Any]]:
+    if not raw_messages:
+        return []
+    try:
+        payload = json.loads(raw_messages)
+    except json.JSONDecodeError:
+        return []
+    if not isinstance(payload, list):
+        return []
+    return _sanitize_saved_conversation_messages(payload)
+
+
+def _derive_conversation_title(
+    messages: list[dict[str, Any]],
+    *,
+    explicit_title: str | None = None,
+    current_item: Item | None = None,
+) -> str:
+    title = _clean_optional_string(explicit_title)
+    if title:
+        return _truncate_text(_normalize_multiline_text(title).split("\n", 1)[0], 80)
+
+    for message in messages:
+        if message.get("role") != "user":
+            continue
+        content = _clean_optional_string(message.get("content"))
+        if content:
+            return _truncate_text(_normalize_multiline_text(content).split("\n", 1)[0], 80)
+
+    if current_item is not None:
+        fallback_title = _clean_optional_string(current_item.title) or f"Item {current_item.id}"
+        return _truncate_text(f"{fallback_title} 对话", 80)
+    return "未命名对话"
+
+
+def _build_conversation_search_text(
+    title: str,
+    *,
+    current_item: Item | None,
+    messages: list[dict[str, Any]],
+) -> str:
+    parts = [title]
+    if current_item is not None:
+        parts.extend(
+            [
+                _clean_optional_string(current_item.title) or "",
+                _clean_optional_string(current_item.source_url) or "",
+                _normalize_multiline_text(current_item.canonical_text),
+            ]
+        )
+    parts.extend(_normalize_multiline_text(message.get("content")) for message in messages)
+    combined = "\n".join(part for part in parts if part)
+    return _truncate_text(combined, 20000)
+
+
+def _conversation_last_message_preview(messages: list[dict[str, Any]]) -> str | None:
+    for message in reversed(messages):
+        content = _clean_optional_string(message.get("content"))
+        if content:
+            return _truncate_text(_normalize_multiline_text(content).replace("\n", " "), 160)
+    return None
+
+
+def _serialize_ai_conversation_summary(conversation: AiConversation) -> AiConversationSummaryResponse:
+    messages = _load_saved_conversation_messages(conversation.messages_json)
+    current_item = getattr(conversation, "current_item", None)
+    current_item_title = _clean_optional_string(current_item.title if current_item else None)
+    return AiConversationSummaryResponse(
+        id=conversation.id,
+        title=_clean_optional_string(conversation.title) or "未命名对话",
+        mode="agent" if _clean_optional_string(conversation.mode) == "agent" else "chat",
+        current_item_id=_clean_optional_string(conversation.current_item_id),
+        current_item_title=current_item_title,
+        message_count=len(messages),
+        last_message_preview=_conversation_last_message_preview(messages),
+        created_at=conversation.created_at or datetime.utcnow(),
+        updated_at=conversation.updated_at or conversation.created_at or datetime.utcnow(),
+        last_message_at=conversation.last_message_at,
+    )
+
+
+def _serialize_ai_conversation(conversation: AiConversation) -> AiConversationResponse:
+    summary = _serialize_ai_conversation_summary(conversation)
+    messages = [
+        AiConversationStoredMessage.model_validate(message)
+        for message in _load_saved_conversation_messages(conversation.messages_json)
+    ]
+    return AiConversationResponse(**summary.model_dump(mode="python"), messages=messages)
 
 
 def _tool_note_result(note: KnowledgeBaseNote, score: float = 0.0) -> dict[str, Any]:
@@ -1090,7 +1248,11 @@ async def _run_agent_assistant(
             return AiAssistantResponse(
                 mode="agent",
                 message=final_message,
-                citations=_serialize_citations(db, user_id, collected_notes),
+                citations=_serialize_citations(
+                    db,
+                    user_id,
+                    _filter_ranked_notes_by_citation_markers(final_message, collected_notes),
+                ),
                 tool_events=tool_events,
                 knowledge_base_path=snapshot.root_path,
                 note_count=snapshot.note_count,
@@ -1161,7 +1323,11 @@ async def _run_agent_assistant(
     return AiAssistantResponse(
         mode="agent",
         message=final_text.strip() or "我已完成当前可执行步骤。",
-        citations=_serialize_citations(db, user_id, collected_notes),
+        citations=_serialize_citations(
+            db,
+            user_id,
+            _filter_ranked_notes_by_citation_markers(final_text, collected_notes),
+        ),
         tool_events=tool_events,
         knowledge_base_path=snapshot.root_path,
         note_count=snapshot.note_count,
@@ -1169,6 +1335,108 @@ async def _run_agent_assistant(
         agent_permissions=agent_permissions,
         updated_items=updated_items,
     )
+
+
+@router.get("/conversations", response_model=AiConversationListResponse)
+def list_ai_conversations(
+    q: str | None = None,
+    current_item_id: str | None = None,
+    limit: int = 40,
+    db: Session = Depends(get_db),
+):
+    user_id = get_current_user_id()
+    query = db.query(AiConversation).filter(AiConversation.user_id == user_id)
+
+    normalized_item_id = _clean_optional_string(current_item_id)
+    if normalized_item_id:
+        query = query.filter(AiConversation.current_item_id == normalized_item_id)
+
+    normalized_query = _clean_optional_string(q)
+    if normalized_query:
+        like_query = f"%{normalized_query.lower()}%"
+        query = query.filter(
+            or_(
+                func.lower(func.coalesce(AiConversation.title, "")).like(like_query),
+                func.lower(func.coalesce(AiConversation.search_text, "")).like(like_query),
+            )
+        )
+
+    safe_limit = max(1, min(int(limit or 40), 100))
+    conversations = (
+        query.order_by(
+            func.coalesce(AiConversation.last_message_at, AiConversation.updated_at, AiConversation.created_at).desc(),
+            AiConversation.updated_at.desc(),
+        )
+        .limit(safe_limit)
+        .all()
+    )
+    return AiConversationListResponse(
+        conversations=[_serialize_ai_conversation_summary(conversation) for conversation in conversations]
+    )
+
+
+@router.get("/conversations/{conversation_id}", response_model=AiConversationResponse)
+def get_ai_conversation(conversation_id: str, db: Session = Depends(get_db)):
+    user_id = get_current_user_id()
+    conversation = (
+        db.query(AiConversation)
+        .filter(AiConversation.id == conversation_id, AiConversation.user_id == user_id)
+        .first()
+    )
+    if not conversation:
+        raise HTTPException(status_code=404, detail="Conversation not found")
+    return _serialize_ai_conversation(conversation)
+
+
+@router.post("/conversations", response_model=AiConversationResponse)
+def save_ai_conversation(request: AiConversationSaveRequest, db: Session = Depends(get_db)):
+    user_id = get_current_user_id()
+    current_item_id = _clean_optional_string(request.current_item_id)
+    current_item = _get_user_item(db, user_id, current_item_id) if current_item_id else None
+    if current_item_id and current_item is None:
+        raise HTTPException(status_code=404, detail="Current item not found")
+
+    messages = _sanitize_saved_conversation_messages(request.messages)
+    if not messages:
+        raise HTTPException(status_code=400, detail="messages are required")
+
+    conversation_id = _clean_optional_string(request.conversation_id)
+    if conversation_id:
+        conversation = (
+            db.query(AiConversation)
+            .filter(AiConversation.id == conversation_id, AiConversation.user_id == user_id)
+            .first()
+        )
+        if not conversation:
+            raise HTTPException(status_code=404, detail="Conversation not found")
+    else:
+        conversation = AiConversation(user_id=user_id)
+        db.add(conversation)
+
+    now = datetime.utcnow()
+    conversation.current_item_id = current_item.id if current_item is not None else None
+    if current_item is not None:
+        conversation.workspace_id = current_item.workspace_id
+    conversation.mode = "agent" if _clean_optional_string(request.mode) == "agent" else "chat"
+    conversation.title = _derive_conversation_title(
+        messages,
+        explicit_title=request.title,
+        current_item=current_item,
+    )
+    conversation.messages_json = json.dumps(messages, ensure_ascii=False)
+    conversation.search_text = _build_conversation_search_text(
+        conversation.title,
+        current_item=current_item,
+        messages=messages,
+    )
+    if conversation.created_at is None:
+        conversation.created_at = now
+    conversation.updated_at = now
+    conversation.last_message_at = now
+
+    db.commit()
+    db.refresh(conversation)
+    return _serialize_ai_conversation(conversation)
 
 
 @router.post("/ask", response_model=AiAskResponse)
@@ -1231,7 +1499,11 @@ async def ask_ai(request: AiAskRequest, db: Session = Depends(get_db)):
     return AiAskResponse(
         question=question,
         answer=answer.strip(),
-        citations=_serialize_citations(db, user_id, ranked_notes),
+        citations=_serialize_citations(
+            db,
+            user_id,
+            _filter_ranked_notes_by_citation_markers(answer, ranked_notes),
+        ),
         knowledge_base_path=snapshot.root_path,
         note_count=snapshot.note_count,
         insufficient_context=False,
@@ -1344,7 +1616,11 @@ async def assistant(request: AiAssistantRequest, db: Session = Depends(get_db)):
     return AiAssistantResponse(
         mode="chat",
         message=answer.strip(),
-        citations=_serialize_citations(db, user_id, combined_ranked_notes),
+        citations=_serialize_citations(
+            db,
+            user_id,
+            _filter_ranked_notes_by_citation_markers(answer, combined_ranked_notes),
+        ),
         tool_events=[],
         knowledge_base_path=snapshot.root_path,
         note_count=snapshot.note_count,

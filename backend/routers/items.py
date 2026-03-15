@@ -10,12 +10,16 @@ from fastapi import APIRouter, Depends, HTTPException, Response
 from sqlalchemy import func, or_
 from sqlalchemy.orm import Session
 from database import SessionLocal, get_db
-from models import Folder, Item, ItemFolderLink
+from models import AiConversation, Folder, Item, ItemFolderLink, ItemPageNote
 from schemas import (
     BulkFolderUpdateRequest,
     BulkFolderUpdateResponse,
     ItemFolderUpdateRequest,
     ItemNoteUpdateRequest,
+    ItemPageNoteCreateRequest,
+    ItemPageNoteListResponse,
+    ItemPageNoteResponse,
+    ItemPageNoteUpdateRequest,
     ItemResponse,
     MediaResponse,
 )
@@ -296,6 +300,32 @@ def serialize_items(items: list[Item]) -> list[ItemResponse]:
             media=media_list,
         ))
     return results
+
+
+def _serialize_page_note(note: ItemPageNote) -> ItemPageNoteResponse:
+    return ItemPageNoteResponse(
+        id=note.id,
+        item_id=note.item_id,
+        ai_conversation_id=note.ai_conversation_id,
+        ai_message_index=note.ai_message_index,
+        title=note.title,
+        content=note.content or "",
+        created_at=note.created_at or datetime.utcnow(),
+        updated_at=note.updated_at or note.created_at or datetime.utcnow(),
+    )
+
+
+def _derive_page_note_title(title: str | None, content: str | None) -> str:
+    explicit_title = (title or "").strip()
+    if explicit_title:
+        return explicit_title[:80]
+
+    normalized_content = (content or "").replace("\r\n", "\n").replace("\r", "\n")
+    for raw_line in normalized_content.split("\n"):
+        line = raw_line.strip().strip("#*- ")
+        if line:
+            return line[:80]
+    return f"页面笔记 {datetime.utcnow().strftime('%m-%d %H:%M')}"
 
 
 def apply_platform_filter(query, platform: str):
@@ -841,6 +871,118 @@ def update_item_note(
     db.commit()
     db.refresh(item)
     return serialize_items([item])[0]
+
+
+@router.get("/items/{item_id}/page-notes", response_model=ItemPageNoteListResponse)
+def list_item_page_notes(item_id: str, db: Session = Depends(get_db)):
+    user_id = get_current_user_id()
+    item = db.query(Item).filter(Item.id == item_id, Item.user_id == user_id).first()
+    if not item:
+        raise HTTPException(status_code=404, detail="Item not found")
+
+    notes = (
+        db.query(ItemPageNote)
+        .filter(ItemPageNote.item_id == item_id, ItemPageNote.user_id == user_id)
+        .order_by(ItemPageNote.updated_at.desc(), ItemPageNote.created_at.desc())
+        .all()
+    )
+    return ItemPageNoteListResponse(notes=[_serialize_page_note(note) for note in notes])
+
+
+@router.post("/items/{item_id}/page-notes", response_model=ItemPageNoteResponse)
+def create_item_page_note(
+    item_id: str,
+    request: ItemPageNoteCreateRequest,
+    db: Session = Depends(get_db),
+):
+    user_id = get_current_user_id()
+    item = db.query(Item).filter(Item.id == item_id, Item.user_id == user_id).first()
+    if not item:
+        raise HTTPException(status_code=404, detail="Item not found")
+
+    ai_conversation_id = (request.ai_conversation_id or "").strip() or None
+    if ai_conversation_id:
+        conversation = (
+            db.query(AiConversation)
+            .filter(AiConversation.id == ai_conversation_id, AiConversation.user_id == user_id)
+            .first()
+        )
+        if not conversation:
+            raise HTTPException(status_code=404, detail="Conversation not found")
+
+    now = datetime.utcnow()
+    note = ItemPageNote(
+        item_id=item.id,
+        user_id=user_id,
+        workspace_id=item.workspace_id,
+        ai_conversation_id=ai_conversation_id,
+        ai_message_index=request.ai_message_index,
+        title=_derive_page_note_title(request.title, request.content),
+        content=(request.content or "").strip(),
+        created_at=now,
+        updated_at=now,
+    )
+    db.add(note)
+    db.commit()
+    db.refresh(note)
+    return _serialize_page_note(note)
+
+
+@router.patch("/items/{item_id}/page-notes/{note_id}", response_model=ItemPageNoteResponse)
+def update_item_page_note(
+    item_id: str,
+    note_id: str,
+    request: ItemPageNoteUpdateRequest,
+    db: Session = Depends(get_db),
+):
+    user_id = get_current_user_id()
+    note = (
+        db.query(ItemPageNote)
+        .filter(
+            ItemPageNote.id == note_id,
+            ItemPageNote.item_id == item_id,
+            ItemPageNote.user_id == user_id,
+        )
+        .first()
+    )
+    if not note:
+        raise HTTPException(status_code=404, detail="Page note not found")
+
+    next_content = note.content
+    if request.content is not None:
+        next_content = request.content.strip()
+
+    if request.title is not None:
+        note.title = _derive_page_note_title(request.title, next_content)
+    if request.content is not None:
+        note.content = next_content
+        if request.title is None and not (note.title or "").strip():
+            note.title = _derive_page_note_title(None, note.content)
+    note.updated_at = datetime.utcnow()
+
+    db.commit()
+    db.refresh(note)
+    return _serialize_page_note(note)
+
+
+@router.delete("/items/{item_id}/page-notes/{note_id}", status_code=204)
+def delete_item_page_note(item_id: str, note_id: str, db: Session = Depends(get_db)):
+    user_id = get_current_user_id()
+    note = (
+        db.query(ItemPageNote)
+        .filter(
+            ItemPageNote.id == note_id,
+            ItemPageNote.item_id == item_id,
+            ItemPageNote.user_id == user_id,
+        )
+        .first()
+    )
+    if not note:
+        raise HTTPException(status_code=404, detail="Page note not found")
+
+    db.delete(note)
+    db.commit()
+    return None
 
 @router.delete("/items/{item_id}", status_code=204)
 def delete_item(item_id: str, db: Session = Depends(get_db)):

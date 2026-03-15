@@ -9,6 +9,10 @@
         const aiModeAgentBtn = document.getElementById('aiModeAgentBtn');
         const clearAiChatBtn = document.getElementById('clearAiChatBtn');
         const aiAgentPermissions = document.getElementById('aiAgentPermissions');
+        const aiConversationScope = document.getElementById('aiConversationScope');
+        const aiConversationList = document.getElementById('aiConversationList');
+        const aiHistorySearchInput = document.getElementById('aiHistorySearchInput');
+        const aiNewConversationBtn = document.getElementById('aiNewConversationBtn');
 
         const AI_PERMISSION_LABELS = {
             read_knowledge_base: '读取知识库',
@@ -46,8 +50,15 @@
         let readerAiRequestInFlight = false;
         let aiAssistantMode = 'chat';
         let aiConversation = [];
+        let aiConversationId = null;
+        let aiConversationHistory = [];
+        let aiHistorySearchQuery = '';
+        let aiHistoryLoading = false;
+        let aiHistoryRequestId = 0;
         let aiSettingsLoadPromise = null;
         let currentAiContextItemId = null;
+        const readerAiConversationIdByItem = new Map();
+        const readerAiConversationLoadedByItem = new Set();
         const readerAiConversationByItem = new Map();
         const readerAiDraftByItem = new Map();
 
@@ -166,6 +177,185 @@
             updateAskAiInputContextUi();
         }
 
+        function formatAiRelativeTime(value) {
+            const timestamp = value ? new Date(value) : null;
+            if (!timestamp || Number.isNaN(timestamp.getTime())) return '刚刚';
+            const diffMs = Date.now() - timestamp.getTime();
+            const diffMinutes = Math.max(0, Math.round(diffMs / 60000));
+            if (diffMinutes < 1) return '刚刚';
+            if (diffMinutes < 60) return `${diffMinutes} 分钟前`;
+            const diffHours = Math.round(diffMinutes / 60);
+            if (diffHours < 24) return `${diffHours} 小时前`;
+            const diffDays = Math.round(diffHours / 24);
+            if (diffDays < 7) return `${diffDays} 天前`;
+            return `${timestamp.getMonth() + 1}/${timestamp.getDate()}`;
+        }
+
+        function normalizeStoredConversationMessage(entry = {}) {
+            return {
+                role: entry.role === 'user' ? 'user' : 'assistant',
+                mode: entry.mode === 'agent' ? 'agent' : 'chat',
+                content: stripAiReasoningBlocks(entry.content || ''),
+                citations: Array.isArray(entry.citations) ? entry.citations : [],
+                toolEvents: Array.isArray(entry.tool_events) ? entry.tool_events : (Array.isArray(entry.toolEvents) ? entry.toolEvents : []),
+                insufficientContext: Boolean(entry.insufficient_context ?? entry.insufficientContext),
+                knowledgeBasePath: entry.knowledge_base_path || entry.knowledgeBasePath || '',
+                noteCount: Number(entry.note_count ?? entry.noteCount ?? 0),
+                isError: Boolean(entry.is_error ?? entry.isError),
+                createdAt: entry.created_at || entry.createdAt || '',
+            };
+        }
+
+        function serializeConversationForSave(conversation = []) {
+            return conversation
+                .filter((entry) => (entry.role === 'user' || entry.role === 'assistant') && String(entry.content || '').trim())
+                .map((entry) => ({
+                    role: entry.role,
+                    mode: entry.mode === 'agent' ? 'agent' : 'chat',
+                    content: stripAiReasoningBlocks(entry.content || ''),
+                    citations: Array.isArray(entry.citations) ? entry.citations : [],
+                    tool_events: Array.isArray(entry.toolEvents) ? entry.toolEvents : [],
+                    insufficient_context: Boolean(entry.insufficientContext),
+                    knowledge_base_path: entry.knowledgeBasePath || '',
+                    note_count: Number(entry.noteCount || 0),
+                    is_error: Boolean(entry.isError),
+                    created_at: entry.createdAt || new Date().toISOString(),
+                }));
+        }
+
+        function syncAiConversationScope() {
+            if (!aiConversationScope) return;
+            const currentItem = getCurrentAiContextItem();
+            aiConversationScope.textContent = currentItem
+                ? `当前内容：${getDisplayItemTitle(currentItem) || '未命名内容'}`
+                : '全部对话';
+        }
+
+        function renderAiConversationHistory() {
+            if (!aiConversationList) return;
+            syncAiConversationScope();
+
+            if (aiHistoryLoading && !aiConversationHistory.length) {
+                aiConversationList.innerHTML = '<div class="ai-history-empty">正在加载对话历史...</div>';
+                return;
+            }
+
+            if (!aiConversationHistory.length) {
+                aiConversationList.innerHTML = `<div class="ai-history-empty">${escapeHtml(aiHistorySearchQuery ? '没有匹配到相关对话。' : '还没有保存过 AI 对话。开始一段新对话后，这里会保留历史并支持搜索。')}</div>`;
+                return;
+            }
+
+            aiConversationList.innerHTML = aiConversationHistory.map((conversation) => {
+                const metaBits = [];
+                if (conversation.current_item_title) {
+                    metaBits.push(`<span class="ai-history-item-chip">${escapeHtml(conversation.current_item_title)}</span>`);
+                }
+                metaBits.push(`<span>${escapeHtml(formatAiRelativeTime(conversation.last_message_at || conversation.updated_at))}</span>`);
+                return `
+                    <button
+                        class="ai-history-item${conversation.id === aiConversationId ? ' is-active' : ''}"
+                        type="button"
+                        data-conversation-id="${escapeAttribute(conversation.id)}"
+                    >
+                        <div class="ai-history-item-title">${escapeHtml(conversation.title || '未命名对话')}</div>
+                        <div class="ai-history-item-preview">${escapeHtml(conversation.last_message_preview || '点击继续这段对话')}</div>
+                        <div class="ai-history-item-meta">${metaBits.join('')}</div>
+                    </button>
+                `;
+            }).join('');
+
+            aiConversationList.querySelectorAll('[data-conversation-id]').forEach((button) => {
+                button.addEventListener('click', async () => {
+                    const conversationId = button.getAttribute('data-conversation-id');
+                    if (!conversationId || conversationId === aiConversationId) return;
+                    try {
+                        await loadAiConversationById(conversationId);
+                    } catch (error) {
+                        showToast(`对话加载失败：${error.message}`, 'error');
+                    }
+                });
+            });
+        }
+
+        async function loadAiConversationHistory() {
+            if (!(await ensureAiSessionReady({ allowRecovery: true }))) {
+                return [];
+            }
+
+            const requestId = ++aiHistoryRequestId;
+            aiHistoryLoading = true;
+            renderAiConversationHistory();
+
+            try {
+                const params = new URLSearchParams();
+                params.set('limit', '60');
+                if (aiHistorySearchQuery) {
+                    params.set('q', aiHistorySearchQuery);
+                }
+                if (currentAiContextItemId) {
+                    params.set('current_item_id', currentAiContextItemId);
+                }
+                const response = await fetch(`/api/ai/conversations?${params.toString()}`);
+                const data = await response.json().catch(() => ({}));
+                if (!response.ok) throw new Error(data.detail || '历史对话加载失败');
+                if (requestId !== aiHistoryRequestId) return aiConversationHistory;
+                aiConversationHistory = Array.isArray(data.conversations) ? data.conversations : [];
+                return aiConversationHistory;
+            } catch (error) {
+                if (requestId === aiHistoryRequestId) {
+                    aiConversationHistory = [];
+                }
+                showToast(`历史对话加载失败：${error.message}`, 'error');
+                return [];
+            } finally {
+                if (requestId === aiHistoryRequestId) {
+                    aiHistoryLoading = false;
+                    renderAiConversationHistory();
+                }
+            }
+        }
+
+        async function loadAiConversationById(conversationId) {
+            if (!(await ensureAiSessionReady({ allowRecovery: true }))) {
+                showToast('无法连接本地会话。', 'error');
+                return;
+            }
+            const response = await fetch(`/api/ai/conversations/${conversationId}`);
+            const data = await response.json().catch(() => ({}));
+            if (!response.ok) {
+                throw new Error(data.detail || '对话加载失败');
+            }
+            aiConversationId = data.id || conversationId;
+            currentAiContextItemId = data.current_item_id || null;
+            aiConversation = Array.isArray(data.messages) ? data.messages.map(normalizeStoredConversationMessage) : [];
+            setAiAssistantMode(data.mode || 'chat');
+            updateAskAiInputContextUi();
+            renderAiConversationHistory();
+            renderAiConversation();
+        }
+
+        async function persistAiConversationSnapshot(conversation, options = {}) {
+            const { conversationId = null, currentItemId = null, mode = aiAssistantMode } = options;
+            const messages = serializeConversationForSave(conversation);
+            if (!messages.length) return null;
+
+            const response = await fetch('/api/ai/conversations', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    conversation_id: conversationId || undefined,
+                    mode,
+                    current_item_id: currentItemId || undefined,
+                    messages,
+                }),
+            });
+            const data = await response.json().catch(() => ({}));
+            if (!response.ok) {
+                throw new Error(data.detail || '对话保存失败');
+            }
+            return data;
+        }
+
         function stripAiReasoningBlocks(value) {
             return String(value || '')
                 .replace(/<think\b[^>]*>[\s\S]*?<\/think>/gi, '')
@@ -223,6 +413,69 @@
             const source = stripAiReasoningBlocks(value).replace(/\r\n/g, '\n').trim();
             if (!source) return '';
 
+            const splitTableRow = (row) => {
+                const trimmed = String(row || '').trim().replace(/^\|/, '').replace(/\|$/, '');
+                const cells = [];
+                let current = '';
+                let escaping = false;
+                for (const char of trimmed) {
+                    if (escaping) {
+                        current += char;
+                        escaping = false;
+                        continue;
+                    }
+                    if (char === '\\') {
+                        escaping = true;
+                        continue;
+                    }
+                    if (char === '|') {
+                        cells.push(current.trim());
+                        current = '';
+                        continue;
+                    }
+                    current += char;
+                }
+                cells.push(current.trim());
+                return cells;
+            };
+
+            const isTableSeparator = (line) => /^\s*\|?(?:\s*:?-{3,}:?\s*\|)+\s*:?-{3,}:?\s*\|?\s*$/.test(String(line || ''));
+            const isTableLine = (line) => {
+                const trimmed = String(line || '').trim();
+                return trimmed.includes('|') && !/^\s*```/.test(trimmed);
+            };
+
+            const renderTable = (headerLine, separatorLine, bodyLines) => {
+                const headers = splitTableRow(headerLine);
+                const alignments = splitTableRow(separatorLine).map((cell) => {
+                    const trimmed = cell.trim();
+                    const starts = trimmed.startsWith(':');
+                    const ends = trimmed.endsWith(':');
+                    if (starts && ends) return 'center';
+                    if (ends) return 'right';
+                    return 'left';
+                });
+                const bodyRows = bodyLines
+                    .map((line) => splitTableRow(line))
+                    .filter((row) => row.length && row.some((cell) => cell));
+                const maxColumns = Math.max(headers.length, ...bodyRows.map((row) => row.length), 0);
+                const normalizedHeaders = Array.from({ length: maxColumns }, (_, index) => headers[index] || '');
+                const normalizedBodyRows = bodyRows.map((row) => Array.from({ length: maxColumns }, (_, index) => row[index] || ''));
+
+                return `
+                    <div class="ai-table-wrap">
+                        <table>
+                            <thead>
+                                <tr>${normalizedHeaders.map((cell, index) => `<th style="text-align:${alignments[index] || 'left'}">${renderInlineMarkdown(cell)}</th>`).join('')}</tr>
+                            </thead>
+                            <tbody>
+                                ${normalizedBodyRows.map((row) => `<tr>${row.map((cell, index) => `<td style="text-align:${alignments[index] || 'left'}">${renderInlineMarkdown(cell)}</td>`).join('')}</tr>`).join('')}
+                            </tbody>
+                        </table>
+                    </div>
+                `;
+            };
+
             const lines = source.split('\n');
             const html = [];
             let paragraph = [];
@@ -255,13 +508,14 @@
             const flushCode = () => {
                 if (!inCodeBlock) return;
                 const langAttr = codeLang ? ` data-lang="${escapeAttribute(codeLang)}"` : '';
-                html.push(`<pre><code${langAttr}>${escapeHtml(codeLines.join('\n'))}</code></pre>`);
+                html.push(`<pre${langAttr}><code>${escapeHtml(codeLines.join('\n'))}</code></pre>`);
                 inCodeBlock = false;
                 codeLang = '';
                 codeLines = [];
             };
 
-            for (const line of lines) {
+            for (let index = 0; index < lines.length; index += 1) {
+                const line = lines[index];
                 const trimmed = line.trim();
 
                 if (inCodeBlock) {
@@ -287,6 +541,23 @@
                     flushParagraph();
                     flushList();
                     flushQuote();
+                    continue;
+                }
+
+                if (isTableLine(line) && isTableSeparator(lines[index + 1])) {
+                    flushParagraph();
+                    flushList();
+                    flushQuote();
+                    const headerLine = line;
+                    const separatorLine = lines[index + 1];
+                    const bodyLines = [];
+                    index += 2;
+                    while (index < lines.length && lines[index].trim() && isTableLine(lines[index])) {
+                        bodyLines.push(lines[index]);
+                        index += 1;
+                    }
+                    index -= 1;
+                    html.push(renderTable(headerLine, separatorLine, bodyLines));
                     continue;
                 }
 
@@ -459,39 +730,39 @@
         }
 
         function buildAiCitationAction(citation) {
-            if (citation.library_item_id) {
-                return `<button class="ai-citation-link" type="button" onclick="openAiCitation('${citation.library_item_id}')">打开笔记</button>`;
+            if (!citation?.library_item_id) {
+                return '';
             }
-            if (citation.source) {
-                const safeUrl = sanitizeAiUrl(citation.source);
-                if (safeUrl) {
-                    return `<a class="ai-citation-link" href="${escapeAttribute(safeUrl)}" target="_blank" rel="noopener noreferrer">原文</a>`;
-                }
-            }
-            return '';
+            const serializedId = JSON.stringify(String(citation.library_item_id));
+            return `
+                <button
+                    class="ai-citation-link"
+                    type="button"
+                    onclick='openAiCitation(${serializedId})'
+                    aria-label="打开笔记"
+                    title="打开笔记"
+                >
+                    <svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                        <path d="M14 5h5v5"></path>
+                        <path d="M10 14 19 5"></path>
+                        <path d="M19 14v4a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1h4"></path>
+                    </svg>
+                </button>
+            `;
+        }
+
+        function getVisibleAiCitations(citations) {
+            if (!Array.isArray(citations)) return [];
+            return citations.filter((citation) => citation && (citation.title || citation.library_item_id));
         }
 
         function buildAiCitationMarkup(citation, compact = false) {
             const title = escapeHtml(citation.title || '未命名笔记');
-            const summary = citation.summary
-                ? `<div class="ai-citation-summary">${escapeHtml(citation.summary)}</div>`
-                : '';
-            const metaParts = [
-                citation.folder ? escapeHtml(citation.folder) : '',
-                citation.relative_path ? escapeHtml(citation.relative_path) : '',
-            ].filter(Boolean);
-            const meta = metaParts.length
-                ? `<div class="ai-citation-meta">${metaParts.join(' · ')}</div>`
-                : '';
             const action = buildAiCitationAction(citation);
             return `
                 <div class="ai-citation-item${compact ? ' is-compact' : ''}">
-                    <div class="ai-citation-main">
-                        <div class="ai-citation-title">${title}</div>
-                        ${summary}
-                        ${meta}
-                    </div>
-                    ${action ? `<div class="ai-citation-side">${action}</div>` : ''}
+                    <div class="ai-citation-title">${title}</div>
+                    ${action}
                 </div>
             `;
         }
@@ -521,6 +792,27 @@
             return metaBits.length
                 ? `<div class="ai-answer-meta">${metaBits.join(' · ')}</div>`
                 : '';
+        }
+
+        function buildAiMessageActionsMarkup(options = {}) {
+            const {
+                itemId = null,
+                conversationId = null,
+                messageIndex = -1,
+                origin = 'main',
+                entry = null,
+            } = options;
+            if (!itemId || !conversationId || !entry || entry.isError || entry.role !== 'assistant' || !String(entry.content || '').trim()) {
+                return '';
+            }
+            const handler = origin === 'reader'
+                ? `saveReaderAiMessageToPageNote(${JSON.stringify(String(itemId))}, ${messageIndex})`
+                : `saveTopAiMessageToPageNote(${messageIndex})`;
+            return `
+                <div class="ai-message-actions">
+                    <button class="ai-message-action-btn" type="button" onclick='${handler}'>加入页面笔记</button>
+                </div>
+            `;
         }
 
         function hasSuccessfulAiMutation(toolEvents = []) {
@@ -579,8 +871,15 @@
             }
         }
 
-        function renderAssistantMessage(entry, compact = false) {
-            const citations = Array.isArray(entry.citations) ? entry.citations : [];
+        function renderAssistantMessage(entry, options = {}) {
+            const {
+                compact = false,
+                itemId = null,
+                conversationId = null,
+                messageIndex = -1,
+                origin = 'main',
+            } = options;
+            const citations = getVisibleAiCitations(entry.citations);
             const citationsMarkup = citations.length
                 ? `
                     <div class="ai-answer-citations">
@@ -591,6 +890,7 @@
                 : '';
             const toolEventsMarkup = buildAiToolEventsMarkup(entry.toolEvents);
             const metaMarkup = buildAiMetaMarkup(entry);
+            const actionsMarkup = buildAiMessageActionsMarkup({ itemId, conversationId, messageIndex, origin, entry });
 
             return `
                 <div class="ai-chat-message${compact ? ' is-compact' : ''}">
@@ -598,6 +898,7 @@
                     <div class="ai-chat-bubble">
                         <div class="ai-answer-text ai-markdown${entry.isError ? ' is-error' : ''}">${renderMarkdown(entry.content || '')}</div>
                         ${metaMarkup}
+                        ${actionsMarkup}
                         ${toolEventsMarkup}
                         ${citationsMarkup}
                     </div>
@@ -656,6 +957,7 @@
             if (!askAiResult) return;
             const currentItem = getCurrentAiContextItem();
             syncAskAiMeta();
+            syncAiConversationScope();
 
             if (!aiConversation.length) {
                 if (!isAiConfigured()) {
@@ -683,7 +985,7 @@
                 return;
             }
 
-            const conversationMarkup = aiConversation.map((entry) => {
+            const conversationMarkup = aiConversation.map((entry, index) => {
                 if (entry.role === 'user') {
                     return `
                         <div class="ai-chat-message is-user">
@@ -692,7 +994,12 @@
                         </div>
                     `;
                 }
-                return renderAssistantMessage(entry);
+                return renderAssistantMessage(entry, {
+                    itemId: currentAiContextItemId,
+                    conversationId: aiConversationId,
+                    messageIndex: index,
+                    origin: 'main',
+                });
             }).join('');
             const loadingMarkup = askAiRequestInFlight
                 ? renderAiLoadingMessage({
@@ -708,6 +1015,20 @@
             window.requestAnimationFrame(() => {
                 askAiResult.scrollTop = askAiResult.scrollHeight;
             });
+        }
+
+        async function persistTopAiConversation() {
+            const saved = await persistAiConversationSnapshot(aiConversation, {
+                conversationId: aiConversationId,
+                currentItemId: currentAiContextItemId,
+                mode: aiAssistantMode,
+            });
+            if (!saved) return null;
+            aiConversationId = saved.id || aiConversationId;
+            aiConversation = Array.isArray(saved.messages) ? saved.messages.map(normalizeStoredConversationMessage) : aiConversation;
+            await loadAiConversationHistory();
+            renderAiConversation();
+            return saved;
         }
 
         async function requestAiAssistant(messages, mode = aiAssistantMode, options = {}) {
@@ -751,6 +1072,90 @@
             throw new Error(normalizeAiRequestError(lastError));
         }
 
+        async function ensureReaderAiConversationLoaded(itemId) {
+            if (!itemId || readerAiConversationLoadedByItem.has(itemId)) return;
+            readerAiConversationLoadedByItem.add(itemId);
+            try {
+                const params = new URLSearchParams({
+                    current_item_id: itemId,
+                    limit: '1',
+                });
+                const listResponse = await fetch(`/api/ai/conversations?${params.toString()}`);
+                const listData = await listResponse.json().catch(() => ({}));
+                if (!listResponse.ok) throw new Error(listData.detail || '历史对话加载失败');
+                const firstConversation = Array.isArray(listData.conversations) ? listData.conversations[0] : null;
+                if (!firstConversation?.id) return;
+
+                const detailResponse = await fetch(`/api/ai/conversations/${firstConversation.id}`);
+                const detailData = await detailResponse.json().catch(() => ({}));
+                if (!detailResponse.ok) throw new Error(detailData.detail || '历史对话加载失败');
+
+                readerAiConversationIdByItem.set(itemId, detailData.id || firstConversation.id);
+                readerAiConversationByItem.set(
+                    itemId,
+                    Array.isArray(detailData.messages) ? detailData.messages.map(normalizeStoredConversationMessage) : []
+                );
+            } catch (error) {
+                readerAiConversationLoadedByItem.delete(itemId);
+                console.error('Failed to load reader AI history', error);
+            }
+        }
+
+        async function persistReaderAiConversation(itemId) {
+            const conversation = getReaderAiConversation(itemId);
+            const saved = await persistAiConversationSnapshot(conversation, {
+                conversationId: readerAiConversationIdByItem.get(itemId) || null,
+                currentItemId: itemId,
+                mode: 'chat',
+            });
+            if (!saved) return null;
+            readerAiConversationIdByItem.set(itemId, saved.id);
+            readerAiConversationByItem.set(
+                itemId,
+                Array.isArray(saved.messages) ? saved.messages.map(normalizeStoredConversationMessage) : conversation
+            );
+            return saved;
+        }
+
+        async function saveTopAiMessageToPageNote(messageIndex) {
+            if (!currentAiContextItemId || !aiConversationId) {
+                showToast('这段对话还没有绑定到具体内容。', 'info');
+                return;
+            }
+            const entry = aiConversation[messageIndex];
+            if (!entry || entry.role !== 'assistant') return;
+            if (typeof window.createReaderPageNote !== 'function') {
+                showToast('页面笔记功能尚未就绪。', 'error');
+                return;
+            }
+            await window.createReaderPageNote(currentAiContextItemId, {
+                content: stripAiReasoningBlocks(entry.content || ''),
+                aiConversationId,
+                aiMessageIndex: messageIndex,
+                successMessage: 'AI 回答已加入页面笔记',
+            });
+        }
+
+        async function saveReaderAiMessageToPageNote(itemId, messageIndex) {
+            const conversation = getReaderAiConversation(itemId);
+            const conversationId = readerAiConversationIdByItem.get(itemId) || null;
+            const entry = conversation[messageIndex];
+            if (!entry || entry.role !== 'assistant' || !conversationId) {
+                showToast('这条 AI 回答还没有保存到历史。', 'info');
+                return;
+            }
+            if (typeof window.createReaderPageNote !== 'function') {
+                showToast('页面笔记功能尚未就绪。', 'error');
+                return;
+            }
+            await window.createReaderPageNote(itemId, {
+                content: stripAiReasoningBlocks(entry.content || ''),
+                aiConversationId: conversationId,
+                aiMessageIndex: messageIndex,
+                successMessage: 'AI 回答已加入页面笔记',
+            });
+        }
+
         async function submitAskAiQuestion() {
             if (!(await ensureAiSessionReady({ allowRecovery: true }))) {
                 showToast('无法初始化本地会话。', 'error');
@@ -773,7 +1178,7 @@
             }
 
             askAiRequestInFlight = true;
-            aiConversation.push({ role: 'user', content: question });
+            aiConversation.push({ role: 'user', content: question, createdAt: new Date().toISOString() });
             askAiInput.value = '';
             renderAiConversation();
             submitAskAiBtn.disabled = true;
@@ -797,8 +1202,10 @@
                     insufficientContext: Boolean(data.insufficient_context),
                     knowledgeBasePath: data.knowledge_base_path || '',
                     noteCount: Number(data.note_count || 0),
+                    createdAt: new Date().toISOString(),
                 });
                 renderAiConversation();
+                await persistTopAiConversation();
             } catch (error) {
                 askAiRequestInFlight = false;
                 aiConversation.push({
@@ -808,8 +1215,14 @@
                     citations: [],
                     toolEvents: [],
                     isError: true,
+                    createdAt: new Date().toISOString(),
                 });
                 renderAiConversation();
+                try {
+                    await persistTopAiConversation();
+                } catch (saveError) {
+                    console.error('Failed to persist failed AI conversation', saveError);
+                }
                 showToast(`AI 失败：${error.message}`, 'error');
             } finally {
                 submitAskAiBtn.disabled = false;
@@ -825,9 +1238,16 @@
                 showToast('无法连接本地会话。', 'error');
                 return;
             }
+            if (resetConversation) {
+                aiHistorySearchQuery = '';
+                if (aiHistorySearchInput) {
+                    aiHistorySearchInput.value = '';
+                }
+            }
             setAskAiContextItemId(itemId, { resetConversation });
             askAiOverlay.classList.add('active');
             await ensureAiSettingsLoaded();
+            await loadAiConversationHistory();
             refreshAiAssistantUi();
             if (askAiInput) {
                 window.setTimeout(() => askAiInput.focus(), 30);
@@ -840,12 +1260,20 @@
 
         function refreshAiAssistantUi() {
             renderAiAssistantPermissions();
+            renderAiConversationHistory();
             renderAiConversation();
         }
 
         function clearAiConversation() {
             aiConversation = [];
+            aiConversationId = null;
             renderAiConversation();
+            renderAiConversationHistory();
+        }
+
+        function startNewAiConversation() {
+            clearAiConversation();
+            askAiInput?.focus();
         }
 
         function openAiCitation(libraryItemId) {
@@ -897,8 +1325,24 @@
                 `;
             }
 
+            if (!conversation.length && !readerAiConversationLoadedByItem.has(item.id)) {
+                ensureReaderAiConversationLoaded(item.id)
+                    .then(() => {
+                        rerenderReaderAiSidebar(item.id);
+                    })
+                    .catch(() => {});
+                return `
+                    <div class="reader-ai-sidebar-shell is-empty">
+                        <div class="reader-ai-empty-state">
+                            <div class="reader-ai-empty-title">正在恢复历史对话</div>
+                            <div class="reader-ai-empty-copy">如果这条内容之前聊过，这里会自动带回最近一次对话。</div>
+                        </div>
+                    </div>
+                `;
+            }
+
             const messagesMarkup = conversation.length
-                ? conversation.map((entry) => {
+                ? conversation.map((entry, index) => {
                     if (entry.role === 'user') {
                         return `
                             <div class="ai-chat-message is-user is-compact">
@@ -907,7 +1351,13 @@
                             </div>
                         `;
                     }
-                    return renderAssistantMessage(entry, true);
+                    return renderAssistantMessage(entry, {
+                        compact: true,
+                        itemId: item.id,
+                        conversationId: readerAiConversationIdByItem.get(item.id) || null,
+                        messageIndex: index,
+                        origin: 'reader',
+                    });
                 }).join('')
                 : '';
 
@@ -980,6 +1430,8 @@
             submitBtn?.addEventListener('click', () => submitReaderAiQuestion());
             clearBtn?.addEventListener('click', () => {
                 readerAiConversationByItem.delete(item.id);
+                readerAiConversationIdByItem.delete(item.id);
+                readerAiConversationLoadedByItem.add(item.id);
                 readerAiDraftByItem.set(item.id, '');
                 rerenderReaderAiSidebar(item.id);
             });
@@ -1020,7 +1472,7 @@
             }
 
             const conversation = getReaderAiConversation(item.id);
-            conversation.push({ role: 'user', content: question });
+            conversation.push({ role: 'user', content: question, createdAt: new Date().toISOString() });
             readerAiConversationByItem.set(item.id, conversation);
             readerAiDraftByItem.set(item.id, '');
             if (input) {
@@ -1045,8 +1497,10 @@
                     insufficientContext: Boolean(data.insufficient_context),
                     knowledgeBasePath: data.knowledge_base_path || '',
                     noteCount: Number(data.note_count || 0),
+                    createdAt: new Date().toISOString(),
                 });
                 readerAiConversationByItem.set(item.id, conversation);
+                await persistReaderAiConversation(item.id);
             } catch (error) {
                 conversation.push({
                     role: 'assistant',
@@ -1055,8 +1509,14 @@
                     citations: [],
                     toolEvents: [],
                     isError: true,
+                    createdAt: new Date().toISOString(),
                 });
                 readerAiConversationByItem.set(item.id, conversation);
+                try {
+                    await persistReaderAiConversation(item.id);
+                } catch (saveError) {
+                    console.error('Failed to persist reader AI conversation', saveError);
+                }
                 showToast(`AI 失败：${error.message}`, 'error');
             } finally {
                 readerAiRequestInFlight = false;
@@ -1074,6 +1534,8 @@
             }
             window.openReaderSidebarPanel?.('ai');
             await ensureAiSettingsLoaded();
+            await ensureReaderAiConversationLoaded(currentOpenItemId);
+            rerenderReaderAiSidebar(currentOpenItemId);
             focusReaderAiComposer();
             window.requestAnimationFrame(() => {
                 focusReaderAiComposer();
@@ -1123,6 +1585,8 @@
         window.bindReaderAiSidebar = bindReaderAiSidebar;
         window.focusReaderAiComposer = focusReaderAiComposer;
         window.submitReaderAiQuestion = submitReaderAiQuestion;
+        window.saveTopAiMessageToPageNote = saveTopAiMessageToPageNote;
+        window.saveReaderAiMessageToPageNote = saveReaderAiMessageToPageNote;
 
         askAiBtn?.addEventListener('click', () => openAskAiModal({ itemId: null, resetConversation: true }));
         openReaderAiBtn?.addEventListener('click', openCurrentItemAiAssistant);
@@ -1147,6 +1611,13 @@
             askAiInput.style.height = `${Math.min(askAiInput.scrollHeight, 120)}px`;
         });
         clearAiChatBtn?.addEventListener('click', clearAiConversation);
+        aiNewConversationBtn?.addEventListener('click', startNewAiConversation);
+        aiHistorySearchInput?.addEventListener('input', () => {
+            aiHistorySearchQuery = String(aiHistorySearchInput.value || '').trim();
+            loadAiConversationHistory().catch((error) => {
+                console.error('Failed to search AI history', error);
+            });
+        });
         askAiOverlay?.addEventListener('click', (event) => {
             if (event.target === askAiOverlay) {
                 closeAskAiDialog();

@@ -1,4 +1,4 @@
-from sqlalchemy import Boolean, Column, String, Integer, Float, DateTime, ForeignKey
+from sqlalchemy import Boolean, Column, String, Integer, Float, DateTime, ForeignKey, Text
 from sqlalchemy.orm import relationship
 from database import Base
 from tenant import DEFAULT_USER_ID, DEFAULT_WORKSPACE_ID
@@ -22,6 +22,8 @@ class Workspace(Base):
     media = relationship("Media", back_populates="workspace")
     folders = relationship("Folder", back_populates="workspace")
     settings = relationship("Settings", back_populates="workspace")
+    ai_conversations = relationship("AiConversation", back_populates="workspace")
+    page_notes = relationship("ItemPageNote", back_populates="workspace")
 
 
 class User(Base):
@@ -46,6 +48,8 @@ class User(Base):
     settings = relationship("Settings", back_populates="user")
     sessions = relationship("AuthSession", back_populates="user")
     verification_codes = relationship("AuthVerificationCode", back_populates="user")
+    ai_conversations = relationship("AiConversation", back_populates="user")
+    page_notes = relationship("ItemPageNote", back_populates="user")
 
 
 class Item(Base):
@@ -85,6 +89,8 @@ class Item(Base):
     media = relationship("Media", back_populates="item", cascade="all, delete-orphan", lazy="joined")
     folder = relationship("Folder", back_populates="items", lazy="joined")
     folder_links = relationship("ItemFolderLink", back_populates="item", cascade="all, delete-orphan", lazy="selectin")
+    ai_conversations = relationship("AiConversation", back_populates="current_item")
+    page_notes = relationship("ItemPageNote", back_populates="item", cascade="all, delete-orphan")
 
 
 class Media(Base):
@@ -159,6 +165,47 @@ class Settings(Base):
 
     user = relationship("User", back_populates="settings", lazy="joined")
     workspace = relationship("Workspace", back_populates="settings", lazy="joined")
+
+
+class AiConversation(Base):
+    __tablename__ = "ai_conversations"
+
+    id = Column(String, primary_key=True, index=True, default=generate_uuid)
+    user_id = Column(String, ForeignKey("users.id"), nullable=False, index=True, default=DEFAULT_USER_ID)
+    workspace_id = Column(String, ForeignKey("workspaces.id"), nullable=False, index=True, default=DEFAULT_WORKSPACE_ID)
+    current_item_id = Column(String, ForeignKey("items.id"), nullable=True, index=True)
+    title = Column(String, nullable=False)
+    mode = Column(String, nullable=False, default="chat")
+    messages_json = Column(Text, nullable=False, default="[]")
+    search_text = Column(Text, nullable=True)
+    created_at = Column(DateTime, default=datetime.datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.datetime.utcnow)
+    last_message_at = Column(DateTime, nullable=True)
+
+    user = relationship("User", back_populates="ai_conversations", lazy="joined")
+    workspace = relationship("Workspace", back_populates="ai_conversations", lazy="joined")
+    current_item = relationship("Item", back_populates="ai_conversations", lazy="joined")
+    page_notes = relationship("ItemPageNote", back_populates="ai_conversation")
+
+
+class ItemPageNote(Base):
+    __tablename__ = "item_page_notes"
+
+    id = Column(String, primary_key=True, index=True, default=generate_uuid)
+    item_id = Column(String, ForeignKey("items.id"), nullable=False, index=True)
+    user_id = Column(String, ForeignKey("users.id"), nullable=False, index=True, default=DEFAULT_USER_ID)
+    workspace_id = Column(String, ForeignKey("workspaces.id"), nullable=False, index=True, default=DEFAULT_WORKSPACE_ID)
+    ai_conversation_id = Column(String, ForeignKey("ai_conversations.id"), nullable=True, index=True)
+    ai_message_index = Column(Integer, nullable=True)
+    title = Column(String, nullable=False)
+    content = Column(Text, nullable=False, default="")
+    created_at = Column(DateTime, default=datetime.datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.datetime.utcnow)
+
+    item = relationship("Item", back_populates="page_notes", lazy="joined")
+    user = relationship("User", back_populates="page_notes", lazy="joined")
+    workspace = relationship("Workspace", back_populates="page_notes", lazy="joined")
+    ai_conversation = relationship("AiConversation", back_populates="page_notes", lazy="joined")
 
 
 class AppConfig(Base):

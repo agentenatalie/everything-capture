@@ -2,6 +2,10 @@
         let isReaderFullscreen = false;
         let readerSidebarOpen = false;
         let readerSidebarTab = 'note';
+        const itemPageNotesByItem = new Map();
+        const itemPageNotesLoadStateByItem = new Map();
+        const itemPageNotesErrorByItem = new Map();
+        const itemPageNoteMutationIds = new Set();
         let readerSidebarResizing = false;
         let readerSidebarStartX = 0;
         let readerSidebarStartWidth = 0;
@@ -9,6 +13,8 @@
         let readerLastScrollTop = 0;
         let readerScrollTicking = false;
         let readerScrollIntent = 0;
+        const READER_SIDEBAR_MIN_WIDTH = 360;
+        const READER_SIDEBAR_MAX_WIDTH = 680;
         const analysisAiSparkIcon = `
             <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" id="Ai-Spark-Generate-Text--Streamline-Outlined-Material-Pro-Free" height="24" width="24" aria-hidden="true" focusable="false">
                 <desc>
@@ -187,6 +193,7 @@
                 ? '正在整理这条内容的分析结果...'
                 : '还没有内容分析，点底部“解析内容”生成。';
             const contentMarkup = analysisMarkup || fallbackMarkup || `<div class="content-empty-state">${escapeHtml(emptyCopy)}</div>`;
+            const pageNotesMarkup = renderPageNotesSection(item);
 
             readerSidebarContent.innerHTML = `
                 <div class="reader-analysis-shell">
@@ -212,6 +219,7 @@
                         <div class="reader-analysis-meta${item?.parse_status === 'processing' ? ' is-processing' : ''}">${escapeHtml(summary)}</div>
                     </div>
                     ${contentMarkup}
+                    ${pageNotesMarkup}
                 </div>
             `;
         }
@@ -230,14 +238,218 @@
                     <div class="reader-ai-empty-state reader-ai-empty-state--loading">
                         <div class="reader-ai-empty-title">Ask AI 正在准备</div>
                         <div class="reader-ai-empty-copy">正在加载当前笔记的 AI 侧栏。</div>
-                        <div class="ai-loading-dots" aria-hidden="true">
-                            <span></span>
-                            <span></span>
-                            <span></span>
-                        </div>
+                        <span class="ai-loading-spinner" aria-hidden="true"></span>
                     </div>
                 </div>
             `;
+        }
+
+        function pageNotesLoadState(itemId) {
+            return itemPageNotesLoadStateByItem.get(itemId) || 'idle';
+        }
+
+        function getItemPageNotes(itemId) {
+            return itemPageNotesByItem.get(itemId) || [];
+        }
+
+        async function loadItemPageNotes(itemId, options = {}) {
+            const { force = false } = options;
+            if (!itemId) return [];
+            if (!force && pageNotesLoadState(itemId) === 'loaded') {
+                return getItemPageNotes(itemId);
+            }
+            itemPageNotesLoadStateByItem.set(itemId, 'loading');
+            itemPageNotesErrorByItem.delete(itemId);
+            if (currentOpenItemId === itemId && readerSidebarOpen && readerSidebarTab === 'note') {
+                renderSidebarNoteContent();
+            }
+
+            try {
+                const response = await fetch(`/api/items/${itemId}/page-notes`);
+                const data = await response.json().catch(() => ({}));
+                if (!response.ok) throw new Error(data.detail || '页面笔记加载失败');
+                const notes = Array.isArray(data.notes) ? data.notes : [];
+                itemPageNotesByItem.set(itemId, notes);
+                itemPageNotesLoadStateByItem.set(itemId, 'loaded');
+                itemPageNotesErrorByItem.delete(itemId);
+                return notes;
+            } catch (error) {
+                itemPageNotesLoadStateByItem.set(itemId, 'error');
+                itemPageNotesErrorByItem.set(itemId, error.message || '页面笔记加载失败');
+                throw error;
+            } finally {
+                if (currentOpenItemId === itemId && readerSidebarOpen && readerSidebarTab === 'note') {
+                    renderSidebarNoteContent();
+                }
+            }
+        }
+
+        function renderPageNotesSection(item) {
+            const loadState = pageNotesLoadState(item.id);
+            const loadError = itemPageNotesErrorByItem.get(item.id) || '';
+            const notes = getItemPageNotes(item.id);
+
+            if (loadState === 'idle') {
+                loadItemPageNotes(item.id).catch(() => {});
+            }
+
+            let listMarkup = '';
+            if (loadState === 'loading' && !notes.length) {
+                listMarkup = '<div class="reader-page-notes-loading">正在加载页面笔记...</div>';
+            } else if (loadState === 'error' && !notes.length) {
+                listMarkup = `<div class="reader-page-notes-empty">${escapeHtml(loadError || '页面笔记加载失败')}</div>`;
+            } else if (!notes.length) {
+                listMarkup = '<div class="reader-page-notes-empty">还没有页面笔记。你可以新建空白笔记，或把 Ask AI 的回答加入这里。</div>';
+            } else {
+                listMarkup = `
+                    <div class="reader-page-notes-list">
+                        ${notes.map((note) => {
+                            const isSaving = itemPageNoteMutationIds.has(note.id);
+                            const noteMeta = note.updated_at ? `最近更新 ${formatDate(note.updated_at)}` : '可编辑';
+                            return `
+                                <article class="reader-page-note-card">
+                                    <input
+                                        id="readerPageNoteTitle-${note.id}"
+                                        class="reader-page-note-title-input"
+                                        type="text"
+                                        value="${escapeAttribute(note.title || '')}"
+                                        placeholder="笔记标题"
+                                    />
+                                    <textarea
+                                        id="readerPageNoteContent-${note.id}"
+                                        class="reader-page-note-textarea"
+                                        placeholder="记录你的补充想法、整理结论或后续动作..."
+                                    >${escapeHtml(note.content || '')}</textarea>
+                                    <div class="reader-page-note-actions">
+                                        <div class="reader-page-note-meta">${escapeHtml(noteMeta)}</div>
+                                        <div class="reader-page-note-action-group">
+                                            <button
+                                                class="reader-page-note-save-btn"
+                                                type="button"
+                                                onclick="saveReaderPageNote('${item.id}', '${note.id}')"
+                                                ${isSaving ? 'disabled' : ''}
+                                            >${isSaving ? '保存中...' : '保存'}</button>
+                                            <button
+                                                class="reader-page-note-delete-btn"
+                                                type="button"
+                                                onclick="deleteReaderPageNote('${item.id}', '${note.id}')"
+                                                ${isSaving ? 'disabled' : ''}
+                                            >删除</button>
+                                        </div>
+                                    </div>
+                                </article>
+                            `;
+                        }).join('')}
+                    </div>
+                `;
+            }
+
+            return `
+                <section class="reader-page-notes">
+                    <div class="reader-page-notes-head">
+                        <div>
+                            <div class="reader-page-notes-title">页面笔记</div>
+                            <div class="reader-page-notes-subtitle">一个内容可以保存多份笔记，每份都能单独编辑。</div>
+                        </div>
+                        <button class="reader-page-note-add-btn" type="button" onclick="createReaderPageNote('${item.id}')">新建笔记</button>
+                    </div>
+                    ${listMarkup}
+                </section>
+            `;
+        }
+
+        async function createReaderPageNote(itemId, options = {}) {
+            if (!itemId) return null;
+            const {
+                title = '',
+                content = '',
+                aiConversationId = null,
+                aiMessageIndex = null,
+                successMessage = '页面笔记已创建',
+            } = options;
+            try {
+                const response = await fetch(`/api/items/${itemId}/page-notes`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        title,
+                        content,
+                        ai_conversation_id: aiConversationId || undefined,
+                        ai_message_index: Number.isFinite(Number(aiMessageIndex)) ? Number(aiMessageIndex) : undefined,
+                    }),
+                });
+                const data = await response.json().catch(() => ({}));
+                if (!response.ok) throw new Error(data.detail || '页面笔记创建失败');
+
+                const existingNotes = getItemPageNotes(itemId);
+                itemPageNotesByItem.set(itemId, [data, ...existingNotes.filter((note) => note.id !== data.id)]);
+                itemPageNotesLoadStateByItem.set(itemId, 'loaded');
+                itemPageNotesErrorByItem.delete(itemId);
+                if (currentOpenItemId === itemId && readerSidebarOpen && readerSidebarTab === 'note') {
+                    renderSidebarNoteContent();
+                }
+                showToast(successMessage, 'success');
+                return data;
+            } catch (error) {
+                showToast(`页面笔记创建失败：${error.message}`, 'error');
+                throw error;
+            }
+        }
+
+        async function saveReaderPageNote(itemId, noteId) {
+            if (!itemId || !noteId || itemPageNoteMutationIds.has(noteId)) return;
+            const titleInput = document.getElementById(`readerPageNoteTitle-${noteId}`);
+            const contentInput = document.getElementById(`readerPageNoteContent-${noteId}`);
+            if (!titleInput || !contentInput) return;
+
+            itemPageNoteMutationIds.add(noteId);
+            renderSidebarNoteContent();
+            try {
+                const response = await fetch(`/api/items/${itemId}/page-notes/${noteId}`, {
+                    method: 'PATCH',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        title: titleInput.value || '',
+                        content: contentInput.value || '',
+                    }),
+                });
+                const data = await response.json().catch(() => ({}));
+                if (!response.ok) throw new Error(data.detail || '页面笔记保存失败');
+
+                const nextNotes = getItemPageNotes(itemId).map((note) => (note.id === noteId ? data : note));
+                itemPageNotesByItem.set(itemId, nextNotes);
+                itemPageNotesLoadStateByItem.set(itemId, 'loaded');
+                showToast('页面笔记已保存', 'success');
+            } catch (error) {
+                showToast(`页面笔记保存失败：${error.message}`, 'error');
+            } finally {
+                itemPageNoteMutationIds.delete(noteId);
+                renderSidebarNoteContent();
+            }
+        }
+
+        async function deleteReaderPageNote(itemId, noteId) {
+            if (!itemId || !noteId || itemPageNoteMutationIds.has(noteId)) return;
+            itemPageNoteMutationIds.add(noteId);
+            renderSidebarNoteContent();
+            try {
+                const response = await fetch(`/api/items/${itemId}/page-notes/${noteId}`, {
+                    method: 'DELETE',
+                });
+                if (!response.ok && response.status !== 204) {
+                    const data = await response.json().catch(() => ({}));
+                    throw new Error(data.detail || '页面笔记删除失败');
+                }
+                const nextNotes = getItemPageNotes(itemId).filter((note) => note.id !== noteId);
+                itemPageNotesByItem.set(itemId, nextNotes);
+                itemPageNotesLoadStateByItem.set(itemId, 'loaded');
+                showToast('页面笔记已删除', 'success');
+            } catch (error) {
+                showToast(`页面笔记删除失败：${error.message}`, 'error');
+            } finally {
+                itemPageNoteMutationIds.delete(noteId);
+                renderSidebarNoteContent();
+            }
         }
 
         async function saveSidebarNote(itemId) {
@@ -281,7 +493,7 @@
             document.addEventListener('mousemove', (e) => {
                 if (!readerSidebarResizing) return;
                 const deltaX = readerSidebarStartX - e.clientX;
-                const newWidth = Math.max(280, Math.min(600, readerSidebarStartWidth + deltaX));
+                const newWidth = Math.max(READER_SIDEBAR_MIN_WIDTH, Math.min(READER_SIDEBAR_MAX_WIDTH, readerSidebarStartWidth + deltaX));
                 readerSidebar.style.width = `${newWidth}px`;
             });
 
@@ -1368,5 +1580,9 @@
         window.closeReaderSidebarPanel = closeReaderSidebarPanel;
         window.renderSidebarAiContent = renderSidebarAiContent;
         window.setReaderChromeHidden = setReaderChromeHidden;
+        window.createReaderPageNote = createReaderPageNote;
+        window.saveReaderPageNote = saveReaderPageNote;
+        window.deleteReaderPageNote = deleteReaderPageNote;
+        window.loadItemPageNotes = loadItemPageNotes;
 
         bootstrapAuth();

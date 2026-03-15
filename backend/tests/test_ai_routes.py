@@ -13,7 +13,13 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")
 
 from models import Folder, Item, Settings  # noqa: E402
 from routers import ai as ai_router  # noqa: E402
-from schemas import AiAskRequest, AiAssistantRequest, AiConversationMessage  # noqa: E402
+from schemas import (  # noqa: E402
+    AiAskRequest,
+    AiAssistantRequest,
+    AiConversationMessage,
+    AiConversationSaveRequest,
+    AiConversationStoredMessage,
+)
 from security import encrypt_secret  # noqa: E402
 from services.knowledge_base import KnowledgeBaseNote, KnowledgeBaseSnapshot, prepare_note_for_similarity  # noqa: E402
 from database import Base  # noqa: E402
@@ -189,7 +195,7 @@ class AiRouteTests(unittest.TestCase):
 
         async def fake_chat_completion(**kwargs):
             captured_messages.append(kwargs["messages"])
-            return "这条内容主要在讨论 AI UI 为什么容易缺少设计一致性，以及如何通过规范和组件表达来改善。"
+            return "这条内容主要在讨论 AI UI 为什么容易缺少设计一致性，以及如何通过规范和组件表达来改善。[1]"
 
         with self.Session() as db:
             with patch.object(ai_router, "get_current_user_id", return_value="local-default-user"), patch.object(
@@ -223,7 +229,7 @@ class AiRouteTests(unittest.TestCase):
                 {
                     "message": {
                         "role": "assistant",
-                        "content": "当前文章主要在讲 AI UI 需要设计规范和后处理打磨。",
+                        "content": "当前文章主要在讲 AI UI 需要设计规范和后处理打磨。[1]",
                     }
                 }
             ]
@@ -334,7 +340,7 @@ class AiRouteTests(unittest.TestCase):
                 {
                     "message": {
                         "role": "assistant",
-                        "content": "我找到了两条最相关的笔记，分别关于 AI UI 打磨和组件表达。",
+                        "content": "我找到了两条最相关的笔记，分别关于 AI UI 打磨和组件表达。[1][2]",
                     }
                 }
             ]
@@ -357,6 +363,28 @@ class AiRouteTests(unittest.TestCase):
         self.assertEqual(response.tool_events[0].name, "search_knowledge_base")
         self.assertGreaterEqual(len(response.citations), 1)
         self.assertIn("两条", response.message)
+
+    def test_assistant_chat_omits_citations_when_answer_has_no_reference_markers(self) -> None:
+        request = AiAssistantRequest(
+            mode="chat",
+            messages=[AiConversationMessage(role="user", content="总结我保存过的 AI UI 设计内容")],
+            top_k=4,
+        )
+
+        with self.Session() as db:
+            with patch.object(ai_router, "get_current_user_id", return_value="local-default-user"), patch.object(
+                ai_router,
+                "load_knowledge_base_snapshot",
+                return_value=self._make_snapshot(),
+            ), patch.object(
+                ai_router,
+                "chat_completion",
+                return_value="你保存过的 AI UI 设计内容主要集中在界面打磨和组件表达两个方向。",
+            ):
+                response = asyncio.run(ai_router.assistant(request, db=db))
+
+        self.assertEqual(response.mode, "chat")
+        self.assertEqual(response.citations, [])
 
     def test_assistant_agent_returns_updated_items_for_mutations(self) -> None:
         request = AiAssistantRequest(
@@ -423,6 +451,35 @@ class AiRouteTests(unittest.TestCase):
         self.assertEqual(response.item_id, "item-ai")
         self.assertEqual(len(response.related), 1)
         self.assertEqual(response.related[0].title, "Vibe Coding 的时候不知道怎么描述 UI？")
+
+    def test_save_and_query_ai_conversation_history(self) -> None:
+        request = AiConversationSaveRequest(
+            mode="chat",
+            current_item_id="item-ai",
+            messages=[
+                AiConversationStoredMessage(role="user", content="帮我总结 AI UI 设计规范"),
+                AiConversationStoredMessage(
+                    role="assistant",
+                    content="这批内容主要在讨论 AI UI 生成之后，为什么还需要统一设计规范与后处理。",
+                    note_count=2,
+                    knowledge_base_path="/tmp/Sources.base",
+                ),
+            ],
+        )
+
+        with self.Session() as db:
+            with patch.object(ai_router, "get_current_user_id", return_value="local-default-user"):
+                saved = ai_router.save_ai_conversation(request, db=db)
+                listed = ai_router.list_ai_conversations(q="设计规范", current_item_id="item-ai", db=db)
+                loaded = ai_router.get_ai_conversation(saved.id, db=db)
+
+        self.assertEqual(saved.current_item_id, "item-ai")
+        self.assertEqual(saved.title, "帮我总结 AI UI 设计规范")
+        self.assertEqual(len(saved.messages), 2)
+        self.assertEqual(len(listed.conversations), 1)
+        self.assertEqual(listed.conversations[0].id, saved.id)
+        self.assertEqual(loaded.messages[1].note_count, 2)
+        self.assertIn("统一设计规范", loaded.messages[1].content)
 
 
 if __name__ == "__main__":

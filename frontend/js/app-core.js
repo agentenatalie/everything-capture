@@ -57,29 +57,9 @@
         const folderCreateInput = document.getElementById('folderCreateInput');
         const folderCreateConfirmBtn = document.getElementById('folderCreateConfirmBtn');
         const folderContextMenu = document.getElementById('folderContextMenu');
-        const authOverlay = document.getElementById('authOverlay');
-        const authGoogleBtn = document.getElementById('authGoogleBtn');
-        const authModeEmailBtn = document.getElementById('authModeEmailBtn');
-        const authModePhoneBtn = document.getElementById('authModePhoneBtn');
-        const emailAuthForm = document.getElementById('emailAuthForm');
-        const phoneAuthForm = document.getElementById('phoneAuthForm');
-        const authEmailInput = document.getElementById('authEmailInput');
-        const authEmailCodeInput = document.getElementById('authEmailCodeInput');
-        const authEmailRequestBtn = document.getElementById('authEmailRequestBtn');
-        const authEmailVerifyBtn = document.getElementById('authEmailVerifyBtn');
-        const authEmailStatus = document.getElementById('authEmailStatus');
-        const authPhoneInput = document.getElementById('authPhoneInput');
-        const authPhoneCodeInput = document.getElementById('authPhoneCodeInput');
-        const authPhoneRequestBtn = document.getElementById('authPhoneRequestBtn');
-        const authPhoneVerifyBtn = document.getElementById('authPhoneVerifyBtn');
-        const authPhoneStatus = document.getElementById('authPhoneStatus');
-        const authProviderHint = document.getElementById('authProviderHint');
-        const sidebarAvatarImage = document.getElementById('sidebarAvatarImage');
-        const sidebarUserStatusDot = document.getElementById('sidebarUserStatusDot');
         const sidebarUserName = document.getElementById('sidebarUserName');
         const sidebarUserSubtitle = document.getElementById('sidebarUserSubtitle');
         const sidebarSettingsBtn = document.getElementById('sidebarSettingsBtn');
-        const sidebarLogoutBtn = document.getElementById('sidebarLogoutBtn');
 
         // Settings elements
         const settingsBtn = document.getElementById('settingsBtn');
@@ -152,21 +132,8 @@
         let hasWindowFocusedOnce = false;
         let scrollIdleTimer = null;
         let latestSettings = null;
-        let authState = {
-            authenticated: false,
-            user: null,
-            providers: {
-                google_enabled: false,
-                email_enabled: false,
-                phone_enabled: false,
-                email_delivery_mode: 'disabled',
-                phone_delivery_mode: 'disabled',
-            },
-        };
-        let authMode = 'email';
         let hasLoadedAuthenticatedData = false;
         let authBootstrapComplete = false;
-        let authUnauthorizedNoticeShown = false;
         let mobileCaptureAutomationStarted = false;
         let mobileClipboardPollTimer = null;
         let lastAutoCapturedClipboardText = '';
@@ -222,6 +189,148 @@
         }
         window.fetch = apiFetch;
 
+        function createLocalAuthState(overrides = {}) {
+            return {
+                authenticated: true,
+                user: {
+                    id: 'local-default-user',
+                    display_name: '本地收录库',
+                    email: null,
+                    phone_e164: null,
+                    avatar_url: null,
+                },
+                providers: {
+                    google_enabled: false,
+                    email_enabled: false,
+                    phone_enabled: false,
+                    email_delivery_mode: 'disabled',
+                    phone_delivery_mode: 'disabled',
+                },
+                ...overrides,
+            };
+        }
+
+        let authState = createLocalAuthState();
+
+        function applyAuthState(sessionData = {}) {
+            authState = createLocalAuthState(sessionData || {});
+            const user = authState.user || {};
+            if (sidebarUserName) {
+                sidebarUserName.textContent = user.display_name || '本地收录库';
+            }
+            if (sidebarUserSubtitle) {
+                sidebarUserSubtitle.textContent = '本地模式';
+            }
+        }
+
+        function resetAuthenticatedAppState(message = '正在加载本地资料库...') {
+            hasLoadedAuthenticatedData = false;
+            latestSettings = null;
+            itemsData = [];
+            filteredEntries = [];
+            commandSearchResults = [];
+            foldersData = [];
+            totalFolderCount = 0;
+            unfiledFolderCount = 0;
+            latestVisibleCount = 0;
+            latestReturnedCount = 0;
+            latestTotalCount = 0;
+            currentFolderScope = 'all';
+            currentFolderId = null;
+            if (commandOverlay.classList.contains('active')) closeCommandPalette();
+            if (folderPickerOverlay.classList.contains('active')) closeFolderPickerDialog();
+            if (settingsOverlay.classList.contains('active')) {
+                if (typeof closeSettingsPanel === 'function') closeSettingsPanel();
+                else settingsOverlay.classList.remove('active');
+            }
+            if (modalOverlay.classList.contains('active')) closeModalDialog();
+            setStatsMessage('加载本地资料库中');
+            grid.className = currentView === 'gallery' ? 'grid' : 'list-view';
+            grid.innerHTML = `<div class="empty-state">${message}</div>`;
+            folderList.innerHTML = '<div class="folder-loading">正在加载本地文件夹...</div>';
+            folderMobileStrip.innerHTML = '';
+        }
+
+        function ensureAuthenticated() {
+            return true;
+        }
+
+        async function refreshAuthSession() {
+            applyAuthState();
+            return authState;
+        }
+
+        async function provisionLocalSession() {
+            applyAuthState();
+            return authState;
+        }
+
+        async function bootstrapAuthenticatedData(options = {}) {
+            const { force = false } = options;
+            if (hasLoadedAuthenticatedData && !force) return;
+            hasLoadedAuthenticatedData = true;
+            await Promise.all([loadSettings({ includeNotionDatabases: false }), fetchFolders(), fetchItems()]);
+        }
+
+        function openSettingsPanel() {
+            settingsOverlay.scrollTop = 0;
+            settingsOverlay.classList.add('active');
+            window.setReaderChromeHidden?.(false);
+            const settingsMainGrid = document.querySelector('.settings-main-grid');
+            if (settingsMainGrid) {
+                settingsMainGrid.scrollTop = 0;
+            }
+            loadSettings({ includeNotionDatabases: true });
+        }
+
+        async function handleUrlCallbacks(currentSession = authState) {
+            const urlParams = new URLSearchParams(window.location.search);
+            const notionAuth = urlParams.get('notion_auth');
+            let handled = false;
+
+            if (notionAuth === 'success') {
+                handled = true;
+                const settings = await loadSettings({ includeNotionDatabases: false });
+                if (settings?.notion_ready) {
+                    showToast('Notion 授权成功，已可直接同步。', 'success');
+                } else {
+                    showToast('Notion 授权成功，但还需要选择一个同步目标才能同步。', 'info');
+                }
+            } else if (notionAuth === 'partial') {
+                handled = true;
+                await loadSettings({ includeNotionDatabases: false });
+                showToast('Notion 授权成功，但当前还缺少同步目标。请在设置里选择一个页面或数据库。', 'info');
+            } else if (notionAuth === 'failed') {
+                handled = true;
+                const errorStr = urlParams.get('error') || 'Unknown error';
+                showToast(`Notion Authentication Failed: ${errorStr}`, 'error');
+            }
+
+            if (handled) {
+                window.history.replaceState({}, document.title, window.location.pathname);
+            }
+        }
+
+        async function bootstrapAuth() {
+            applyAuthState();
+            resetAuthenticatedAppState();
+            updateSidebarState();
+            updateCommandPaletteState();
+            if (typeof startMobileCaptureAutomation === 'function' && window.matchMedia('(max-width: 860px)').matches) {
+                startMobileCaptureAutomation();
+            }
+
+            try {
+                await bootstrapAuthenticatedData({ force: true });
+                if (typeof flushMobileCaptureQueue === 'function') {
+                    await flushMobileCaptureQueue({ silent: true });
+                }
+                await handleUrlCallbacks(authState);
+            } finally {
+                authBootstrapComplete = true;
+            }
+        }
+
         function markScrollActivity() {
             document.body.classList.add(ACTIVE_SCROLL_CLASS);
             window.clearTimeout(scrollIdleTimer);
@@ -236,5 +345,3 @@
         document.addEventListener('scroll', markScrollActivity, { passive: true, capture: true });
         boardShell?.addEventListener('scroll', markScrollActivity, { passive: true });
         boardShell?.addEventListener('wheel', markScrollActivity, { passive: true });
-
-        const defaultSidebarAvatar = sidebarAvatarImage ? sidebarAvatarImage.getAttribute('src') : '';

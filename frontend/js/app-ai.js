@@ -45,6 +45,24 @@
             '它和我已有的哪些笔记相关？',
             '给我 3 个值得继续追问的问题',
         ];
+        const MAIN_AI_STARTERS = [
+            {
+                title: '总结最近保存内容',
+                description: '从知识库里挑出最近最值得继续看的内容。',
+            },
+            {
+                title: '帮我找相关笔记',
+                description: '围绕一个主题串起已有记录和潜在线索。',
+            },
+            {
+                title: '把一条内容拆成行动',
+                description: '从当前笔记里提炼下一步、待办和追问点。',
+            },
+            {
+                title: '让 Agent 直接处理',
+                description: '在你已授权的范围内执行整理、解析或同步动作。',
+            },
+        ];
 
         let askAiRequestInFlight = false;
         let readerAiRequestInFlight = false;
@@ -61,6 +79,72 @@
         const readerAiConversationLoadedByItem = new Set();
         const readerAiConversationByItem = new Map();
         const readerAiDraftByItem = new Map();
+        const aiComposerCompositionState = new WeakMap();
+
+        function setAiComposerComposing(element, isComposing) {
+            if (!element) return;
+            aiComposerCompositionState.set(element, Boolean(isComposing));
+        }
+
+        function isAiComposerComposing(event, element) {
+            return Boolean(
+                event?.isComposing
+                || event?.keyCode === 229
+                || event?.which === 229
+                || (element && aiComposerCompositionState.get(element))
+            );
+        }
+
+        function autoResizeAiComposer(textarea, maxHeight = 120) {
+            if (!textarea) return;
+            textarea.style.height = 'auto';
+            textarea.style.height = `${Math.min(textarea.scrollHeight, maxHeight)}px`;
+        }
+
+        function bindAiComposer(textarea, options = {}) {
+            const {
+                maxHeight = 120,
+                onSubmit = () => {},
+                onInput = null,
+            } = options;
+            if (!textarea || textarea.dataset.aiComposerBound === 'true') {
+                return;
+            }
+
+            textarea.dataset.aiComposerBound = 'true';
+            autoResizeAiComposer(textarea, maxHeight);
+
+            textarea.addEventListener('compositionstart', () => {
+                setAiComposerComposing(textarea, true);
+            });
+
+            textarea.addEventListener('compositionupdate', () => {
+                setAiComposerComposing(textarea, true);
+            });
+
+            textarea.addEventListener('compositionend', () => {
+                setAiComposerComposing(textarea, false);
+                window.requestAnimationFrame(() => autoResizeAiComposer(textarea, maxHeight));
+            });
+
+            textarea.addEventListener('keydown', (event) => {
+                if (event.key !== 'Enter' || event.shiftKey) {
+                    return;
+                }
+                if (isAiComposerComposing(event, textarea)) {
+                    return;
+                }
+                event.preventDefault();
+                onSubmit();
+            });
+
+            textarea.addEventListener('input', () => {
+                autoResizeAiComposer(textarea, maxHeight);
+                if (typeof onInput === 'function') {
+                    onInput(textarea.value || '', textarea);
+                }
+            });
+        }
 
         function isAiNetworkFailure(error) {
             const message = String(error?.message || error || '').trim();
@@ -164,7 +248,7 @@
             }
             askAiMeta.textContent = currentItem
                 ? `当前会带上《${getDisplayItemTitle(currentItem) || '当前内容'}》的内容分析、抓取文本和知识库上下文`
-                : '按 Enter 发送，Shift+Enter 换行';
+                : '按 Enter 发送，Shift+Enter 换行；输入法确认不会直接发送';
         }
 
         function setAskAiContextItemId(itemId, options = {}) {
@@ -940,6 +1024,36 @@
             `;
         }
 
+        function renderAiHome(currentItem) {
+            const title = currentItem ? `围绕《${escapeHtml(getDisplayItemTitle(currentItem) || '当前内容')}》继续` : '今天想处理什么内容？';
+            const description = currentItem
+                ? '我会自动带上这条内容的正文、内容分析和知识库上下文。'
+                : '像 ChatGPT 一样连续对话，像 Codex 一样在你授权后直接执行动作。';
+            const contextMarkup = currentItem
+                ? `
+                    <div class="ai-home-context">
+                        <span class="ai-home-context-label">当前内容</span>
+                        <span class="ai-home-context-value">${escapeHtml(getDisplayItemTitle(currentItem) || '未命名内容')}</span>
+                    </div>
+                `
+                : '';
+            const starterMarkup = MAIN_AI_STARTERS.map((item) => `
+                <button class="ai-home-card" type="button" data-ai-starter="${escapeAttribute(item.title)}">
+                    <div class="ai-home-card-title">${escapeHtml(item.title)}</div>
+                    <div class="ai-home-card-copy">${escapeHtml(item.description)}</div>
+                </button>
+            `).join('');
+
+            return `
+                <div class="ai-home">
+                    ${contextMarkup}
+                    <div class="ai-home-title">${title}</div>
+                    <div class="ai-home-subtitle">${description}</div>
+                    <div class="ai-home-grid">${starterMarkup}</div>
+                </div>
+            `;
+        }
+
         function normalizeConversationForRequest() {
             return aiConversation
                 .filter((entry) => (entry.role === 'user' || entry.role === 'assistant') && !entry.isError)
@@ -962,26 +1076,24 @@
             if (!aiConversation.length) {
                 if (!isAiConfigured()) {
                     askAiResult.innerHTML = `
-                        <div class="ai-welcome">
-                            <div class="ai-welcome-icon">
-                                <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M12 4.25 13.8 8.2 17.75 10 13.8 11.8 12 15.75 10.2 11.8 6.25 10 10.2 8.2 12 4.25Z"></path><path d="M18.25 15.25 19 16.9 20.65 17.65 19 18.4 18.25 20.05 17.5 18.4 15.85 17.65 17.5 16.9 18.25 15.25Z"></path></svg>
-                            </div>
-                            <div class="ai-welcome-title">先配置 AI</div>
-                            <div class="ai-welcome-desc">在设置页填好 API Key 后，就可以基于知识库对话或让 Agent 执行操作。</div>
+                        <div class="ai-home ai-home--setup">
+                            <div class="ai-home-title">先完成 AI 设置</div>
+                            <div class="ai-home-subtitle">填好 Base URL、模型和密钥后，这里会像 ChatGPT 一样开始连续对话，也能像 Codex 一样在权限允许时直接执行动作。</div>
                         </div>
                     `;
                     return;
                 }
 
-                askAiResult.innerHTML = `
-                    <div class="ai-welcome">
-                        <div class="ai-welcome-icon">
-                            <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M12 4.25 13.8 8.2 17.75 10 13.8 11.8 12 15.75 10.2 11.8 6.25 10 10.2 8.2 12 4.25Z"></path><path d="M18.25 15.25 19 16.9 20.65 17.65 19 18.4 18.25 20.05 17.5 18.4 15.85 17.65 17.5 16.9 18.25 15.25Z"></path></svg>
-                        </div>
-                        <div class="ai-welcome-title">${currentItem ? `围绕《${escapeHtml(getDisplayItemTitle(currentItem) || '当前内容')}》提问` : '从知识库开始'}</div>
-                        <div class="ai-welcome-desc">${currentItem ? '会自动带上当前文章的内容分析、抓取文本和 OCR / 帧文字，再结合知识库回答。' : '直接提问，或切到 Agent 让它在权限允许范围内执行真实操作。'}</div>
-                    </div>
-                `;
+                askAiResult.innerHTML = renderAiHome(currentItem);
+                askAiResult.querySelectorAll('[data-ai-starter]').forEach((button) => {
+                    button.addEventListener('click', () => {
+                        const starter = String(button.getAttribute('data-ai-starter') || '').trim();
+                        if (!starter || !askAiInput) return;
+                        askAiInput.value = starter;
+                        autoResizeAiComposer(askAiInput, 120);
+                        askAiInput.focus();
+                    });
+                });
                 return;
             }
 
@@ -1180,6 +1292,7 @@
             askAiRequestInFlight = true;
             aiConversation.push({ role: 'user', content: question, createdAt: new Date().toISOString() });
             askAiInput.value = '';
+            autoResizeAiComposer(askAiInput, 120);
             renderAiConversation();
             submitAskAiBtn.disabled = true;
             submitAskAiBtn.classList.add('is-loading');
@@ -1250,6 +1363,7 @@
             await loadAiConversationHistory();
             refreshAiAssistantUi();
             if (askAiInput) {
+                autoResizeAiComposer(askAiInput, 120);
                 window.setTimeout(() => askAiInput.focus(), 30);
             }
         }
@@ -1273,7 +1387,11 @@
 
         function startNewAiConversation() {
             clearAiConversation();
-            askAiInput?.focus();
+            if (askAiInput) {
+                askAiInput.value = '';
+                autoResizeAiComposer(askAiInput, 120);
+                askAiInput.focus();
+            }
         }
 
         function openAiCitation(libraryItemId) {
@@ -1366,13 +1484,16 @@
             )).join('');
             const contextMarkup = `
                 <div class="reader-ai-context">
-                    <div class="reader-ai-context-label">当前上下文</div>
+                    <div class="reader-ai-context-label">当前内容</div>
                     <div class="reader-ai-context-title">${escapeHtml(getDisplayItemTitle(item) || '未命名内容')}</div>
-                    <div class="reader-ai-context-copy">会自动带上当前文章的内容分析、抓取正文和 OCR / 帧文字，不需要你重复粘贴上下文。</div>
+                    <div class="reader-ai-context-copy">自动附带正文、内容分析和知识库上下文。</div>
                 </div>
             `;
             const quickActionsSectionMarkup = `
-                <div class="reader-ai-quick-actions">${quickActionsMarkup}</div>
+                <div class="reader-ai-quick-actions">
+                    <div class="reader-ai-quick-actions-title">建议提问</div>
+                    <div class="reader-ai-quick-actions-list">${quickActionsMarkup}</div>
+                </div>
             `;
             const loadingMarkup = isBusy
                 ? renderAiLoadingMessage({
@@ -1414,17 +1535,12 @@
             const messages = document.getElementById('readerAiMessages');
             const quickActions = document.querySelectorAll('[data-reader-ai-prompt]');
 
-            input?.addEventListener('input', () => {
-                readerAiDraftByItem.set(item.id, input.value || '');
-                input.style.height = 'auto';
-                input.style.height = `${Math.min(input.scrollHeight, 180)}px`;
-            });
-
-            input?.addEventListener('keydown', (event) => {
-                if (event.key === 'Enter' && !event.shiftKey) {
-                    event.preventDefault();
-                    submitReaderAiQuestion();
-                }
+            bindAiComposer(input, {
+                maxHeight: 180,
+                onSubmit: () => submitReaderAiQuestion(),
+                onInput: (value) => {
+                    readerAiDraftByItem.set(item.id, value);
+                },
             });
 
             submitBtn?.addEventListener('click', () => submitReaderAiQuestion());
@@ -1559,6 +1675,7 @@
             openAskAiModal({ itemId, resetConversation: true });
             if (!askAiInput) return;
             askAiInput.value = '';
+            autoResizeAiComposer(askAiInput, 120);
             askAiInput.focus();
         }
 
@@ -1600,15 +1717,9 @@
         submitAskAiBtn?.addEventListener('click', submitAskAiQuestion);
         aiModeChatBtn?.addEventListener('click', () => setAiAssistantMode('chat'));
         aiModeAgentBtn?.addEventListener('click', () => setAiAssistantMode('agent'));
-        askAiInput?.addEventListener('keydown', (event) => {
-            if (event.key === 'Enter' && !event.shiftKey) {
-                event.preventDefault();
-                submitAskAiQuestion();
-            }
-        });
-        askAiInput?.addEventListener('input', () => {
-            askAiInput.style.height = 'auto';
-            askAiInput.style.height = `${Math.min(askAiInput.scrollHeight, 120)}px`;
+        bindAiComposer(askAiInput, {
+            maxHeight: 120,
+            onSubmit: submitAskAiQuestion,
         });
         clearAiChatBtn?.addEventListener('click', clearAiConversation);
         aiNewConversationBtn?.addEventListener('click', startNewAiConversation);

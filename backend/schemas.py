@@ -206,6 +206,7 @@ class AiAssistantRequest(BaseModel):
     mode: str = "chat"
     messages: list[AiConversationMessage] = Field(default_factory=list)
     top_k: int = 6
+    current_item_id: Optional[str] = None
 
 
 class AiToolEventResponse(BaseModel):
@@ -223,6 +224,7 @@ class AiAssistantResponse(BaseModel):
     note_count: int = 0
     insufficient_context: bool = False
     agent_permissions: list[str] = Field(default_factory=list)
+    updated_items: list[ItemResponse] = Field(default_factory=list)
 
 
 class FolderResponse(BaseModel):

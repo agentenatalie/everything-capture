@@ -11,7 +11,7 @@ from sqlalchemy.orm import sessionmaker
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
-from models import Item, Settings  # noqa: E402
+from models import Folder, Item, Settings  # noqa: E402
 from routers import ai as ai_router  # noqa: E402
 from schemas import AiAskRequest, AiAssistantRequest, AiConversationMessage  # noqa: E402
 from security import encrypt_secret  # noqa: E402
@@ -34,6 +34,9 @@ class AiRouteTests(unittest.TestCase):
                     title="AI 写的 UI 太丑？这个 Skill 救了我",
                     source_url="https://example.com/ui",
                     canonical_text="AI 生成 UI 缺乏设计一致性，需要设计规范和打磨。",
+                    extracted_text="内容分析：这条内容强调 AI 做 UI 的问题不只是模型能力，而是缺少统一视觉规范。",
+                    ocr_text="AI UI 设计规范",
+                    parse_status="completed",
                     platform="generic",
                     status="ready",
                 )
@@ -45,6 +48,14 @@ class AiRouteTests(unittest.TestCase):
                     ai_api_key=encrypt_secret("test-ai-key"),
                     ai_base_url="https://api.example.com/v1",
                     ai_model="test-model",
+                )
+            )
+            db.add(
+                Folder(
+                    id="folder-ai",
+                    user_id="local-default-user",
+                    workspace_id="local-default-workspace",
+                    name="AI 设计",
                 )
             )
             db.commit()
@@ -161,6 +172,138 @@ class AiRouteTests(unittest.TestCase):
         self.assertEqual(len(response.citations), 2)
         self.assertFalse(response.insufficient_context)
 
+    def test_assistant_chat_can_answer_from_current_item_context_without_kb(self) -> None:
+        request = AiAssistantRequest(
+            mode="chat",
+            current_item_id="item-ai",
+            messages=[AiConversationMessage(role="user", content="请总结当前这条内容")],
+            top_k=4,
+        )
+        captured_messages: list[list[dict]] = []
+
+        empty_snapshot = KnowledgeBaseSnapshot(
+            root_path="/tmp/Sources.base",
+            notes=[],
+            loaded_at=datetime.utcnow(),
+        )
+
+        async def fake_chat_completion(**kwargs):
+            captured_messages.append(kwargs["messages"])
+            return "这条内容主要在讨论 AI UI 为什么容易缺少设计一致性，以及如何通过规范和组件表达来改善。"
+
+        with self.Session() as db:
+            with patch.object(ai_router, "get_current_user_id", return_value="local-default-user"), patch.object(
+                ai_router,
+                "load_knowledge_base_snapshot",
+                return_value=empty_snapshot,
+            ), patch.object(
+                ai_router,
+                "chat_completion",
+                side_effect=fake_chat_completion,
+            ):
+                response = asyncio.run(ai_router.assistant(request, db=db))
+
+        self.assertEqual(response.mode, "chat")
+        self.assertIn("AI UI", response.message)
+        self.assertEqual(len(response.citations), 1)
+        self.assertEqual(response.citations[0].library_item_id, "item-ai")
+        self.assertFalse(response.insufficient_context)
+        self.assertEqual([message.get("role") for message in captured_messages[0]], ["system", "user"])
+        self.assertIn("下面是当前文章上下文", captured_messages[0][0]["content"])
+
+    def test_assistant_agent_includes_current_item_context(self) -> None:
+        request = AiAssistantRequest(
+            mode="agent",
+            current_item_id="item-ai",
+            messages=[AiConversationMessage(role="user", content="请总结当前文章，并说明怎么处理这类内容")],
+        )
+        captured_messages: list[list[dict]] = []
+        final_payload = {
+            "choices": [
+                {
+                    "message": {
+                        "role": "assistant",
+                        "content": "当前文章主要在讲 AI UI 需要设计规范和后处理打磨。",
+                    }
+                }
+            ]
+        }
+
+        async def fake_create_chat_completion(**kwargs):
+            captured_messages.append(kwargs["messages"])
+            return final_payload
+
+        with self.Session() as db:
+            with patch.object(ai_router, "get_current_user_id", return_value="local-default-user"), patch.object(
+                ai_router,
+                "load_knowledge_base_snapshot",
+                return_value=KnowledgeBaseSnapshot(
+                    root_path="/tmp/Sources.base",
+                    notes=[],
+                    loaded_at=datetime.utcnow(),
+                ),
+            ), patch.object(
+                ai_router,
+                "create_chat_completion",
+                side_effect=fake_create_chat_completion,
+            ):
+                response = asyncio.run(ai_router.assistant(request, db=db))
+
+        self.assertEqual(response.mode, "agent")
+        self.assertEqual(len(response.citations), 1)
+        self.assertEqual(response.citations[0].library_item_id, "item-ai")
+        self.assertIn("设计规范", response.message)
+        self.assertEqual([message.get("role") for message in captured_messages[0]], ["system", "user"])
+        self.assertIn("当前文章 item_id：item-ai", str(captured_messages[0][0].get("content", "")))
+
+    def test_organize_item_analysis_persists_updated_extracted_text(self) -> None:
+        captured_user_prompt = ""
+
+        async def fake_chat_completion(**kwargs):
+            nonlocal captured_user_prompt
+            messages = kwargs.get("messages") or []
+            captured_user_prompt = next(
+                (str(message.get("content", "")) for message in messages if message.get("role") == "user"),
+                "",
+            )
+            return (
+                "<think>\n先写内部推理\n</think>\n\n"
+                "[detected_title]\nAI UI 为什么总差最后一口气\n\n"
+                "[body]\n解析内容\n\n摘要\nAI 生成 UI 的核心问题是缺少统一设计规范。\n\n"
+                "核心要点\n1. 问题不只是模型能力，而是缺设计系统。\n2. 后处理打磨很关键。"
+            )
+
+        with self.Session() as db:
+            with patch.object(ai_router, "get_current_user_id", return_value="local-default-user"), patch.object(
+                ai_router,
+                "chat_completion",
+                side_effect=fake_chat_completion,
+            ):
+                response = asyncio.run(ai_router.organize_item_analysis("item-ai", db=db))
+
+        self.assertEqual(response.id, "item-ai")
+        self.assertEqual(response.parse_status, "completed")
+        self.assertIn("[detected_title]", response.extracted_text or "")
+        self.assertIn("AI UI 为什么总差最后一口气", response.extracted_text or "")
+        self.assertNotIn("<think>", response.extracted_text or "")
+        self.assertNotIn("\n解析内容\n\n摘要", response.extracted_text or "")
+        self.assertIn("当前文章已有的内容分析文本", captured_user_prompt)
+        self.assertNotIn("当前文章抓取到的正文文本", captured_user_prompt)
+        self.assertNotIn("当前文章额外抓取到的 OCR / 帧文字", captured_user_prompt)
+
+    def test_organize_item_analysis_requires_existing_analysis_text(self) -> None:
+        with self.Session() as db:
+            item = db.query(Item).filter(Item.id == "item-ai").one()
+            item.extracted_text = ""
+            db.commit()
+
+            with patch.object(ai_router, "get_current_user_id", return_value="local-default-user"):
+                with self.assertRaises(ai_router.HTTPException) as ctx:
+                    asyncio.run(ai_router.organize_item_analysis("item-ai", db=db))
+
+        self.assertEqual(ctx.exception.status_code, 400)
+        self.assertEqual(ctx.exception.detail, "No current item analysis available for organization")
+
     def test_assistant_agent_executes_tool_and_returns_tool_events(self) -> None:
         request = AiAssistantRequest(
             mode="agent",
@@ -214,6 +357,59 @@ class AiRouteTests(unittest.TestCase):
         self.assertEqual(response.tool_events[0].name, "search_knowledge_base")
         self.assertGreaterEqual(len(response.citations), 1)
         self.assertIn("两条", response.message)
+
+    def test_assistant_agent_returns_updated_items_for_mutations(self) -> None:
+        request = AiAssistantRequest(
+            mode="agent",
+            messages=[AiConversationMessage(role="user", content="把这条内容放到 AI 设计 文件夹")],
+        )
+        tool_payload = {
+            "choices": [
+                {
+                    "message": {
+                        "role": "assistant",
+                        "content": "",
+                        "tool_calls": [
+                            {
+                                "id": "tool-assign",
+                                "type": "function",
+                                "function": {
+                                    "name": "assign_item_folders",
+                                    "arguments": '{"item_id":"item-ai","folder_names":["AI 设计"]}',
+                                },
+                            }
+                        ],
+                    }
+                }
+            ]
+        }
+        final_payload = {
+            "choices": [
+                {
+                    "message": {
+                        "role": "assistant",
+                        "content": "已经调整好了文件夹。",
+                    }
+                }
+            ]
+        }
+
+        with self.Session() as db:
+            with patch.object(ai_router, "get_current_user_id", return_value="local-default-user"), patch.object(
+                ai_router,
+                "load_knowledge_base_snapshot",
+                return_value=self._make_snapshot(),
+            ), patch.object(
+                ai_router,
+                "create_chat_completion",
+                side_effect=[tool_payload, final_payload],
+            ):
+                response = asyncio.run(ai_router.assistant(request, db=db))
+
+        self.assertEqual(response.mode, "agent")
+        self.assertEqual(len(response.updated_items), 1)
+        self.assertEqual(response.updated_items[0].id, "item-ai")
+        self.assertEqual(response.updated_items[0].folder_names, ["AI 设计"])
 
     def test_related_notes_uses_local_knowledge_base_even_without_ai_call(self) -> None:
         with self.Session() as db:

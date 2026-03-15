@@ -8,6 +8,17 @@
         let readerChromeHidden = false;
         let readerLastScrollTop = 0;
         let readerScrollTicking = false;
+        let readerScrollIntent = 0;
+        const analysisAiSparkIcon = `
+            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" id="Ai-Spark-Generate-Text--Streamline-Outlined-Material-Pro-Free" height="24" width="24" aria-hidden="true" focusable="false">
+                <desc>
+                    Ai Spark Generate Text Streamline Icon: https://streamlinehq.com
+                </desc>
+                <g id="ai-spark-generate-text">
+                    <path id="Union" fill="#000000" d="M20 20H4v-2h16zm0 -4H4v-2h16zm-7 -4H4v-2h9zm6 -10.5c0 1.93297 1.567 3.49998 3.5 3.5v2l-0.1748 0.00391c-1.7922 0.08816 -3.2297 1.52481 -3.3203 3.31639L19 10.5h-2c0 -1.87274 -1.4708 -3.4016 -3.3203 -3.49512L13.5 7V5l0.1797 -0.00488C15.5292 4.90158 17 3.37271 17 1.5zM10 8H4V6h6z" stroke-width="1"></path>
+                </g>
+            </svg>
+        `;
 
         function setReaderFullscreen(nextState) {
             isReaderFullscreen = Boolean(nextState);
@@ -37,6 +48,7 @@
                 modalContent.scrollTop = 0;
             }
             readerLastScrollTop = modalContent?.scrollTop || 0;
+            readerScrollIntent = 0;
             setReaderChromeHidden(false);
         }
 
@@ -48,27 +60,53 @@
             if (settingsOverlay.classList.contains('active') || folderPickerOverlay.classList.contains('active') || commandOverlay.classList.contains('active')) {
                 setReaderChromeHidden(false);
                 readerLastScrollTop = modalContent?.scrollTop || 0;
+                readerScrollIntent = 0;
                 return;
             }
             const currentScrollTop = Math.max(0, modalContent?.scrollTop || 0);
+            const scrollHeight = Math.max(0, modalContent?.scrollHeight || 0);
+            const clientHeight = Math.max(0, modalContent?.clientHeight || 0);
+            const maxScrollTop = Math.max(0, scrollHeight - clientHeight);
             const delta = currentScrollTop - readerLastScrollTop;
             readerLastScrollTop = currentScrollTop;
 
+            if (maxScrollTop <= 220) {
+                readerScrollIntent = 0;
+                setReaderChromeHidden(false);
+                return;
+            }
+
             if (currentScrollTop <= 24) {
+                readerScrollIntent = 0;
                 setReaderChromeHidden(false);
                 return;
             }
 
-            if (Math.abs(delta) < 4) return;
+            if (Math.abs(delta) < 3) return;
 
-            if (delta > 0 && currentScrollTop > 96) {
-                setReaderChromeHidden(true);
+            if (readerChromeHidden) {
+                if (delta < 0) {
+                    readerScrollIntent += Math.abs(delta);
+                    if (readerScrollIntent >= 32) {
+                        readerScrollIntent = 0;
+                        setReaderChromeHidden(false);
+                    }
+                    return;
+                }
+                readerScrollIntent = 0;
                 return;
             }
 
-            if (delta < 0) {
-                setReaderChromeHidden(false);
+            if (delta > 0) {
+                readerScrollIntent += delta;
+                if (currentScrollTop > 120 && readerScrollIntent >= 48) {
+                    readerScrollIntent = 0;
+                    setReaderChromeHidden(true);
+                }
+                return;
             }
+
+            readerScrollIntent = 0;
         }
 
         function openReaderSidebarPanel(tab = 'note') {
@@ -125,6 +163,8 @@
             const summary = formatParseStatusSummary(item);
             const detectedTitle = typeof getExtractedDisplayTitle === 'function' ? getExtractedDisplayTitle(item) : '';
             const extractedText = String(item?.extracted_text || '').trim();
+            const isOrganizingAnalysis = analysisOrganizeInFlightItemId === item.id;
+            const analysisAiTitle = isOrganizingAnalysis ? 'AI 正在整理内容分析' : 'AI 重新整理当前内容分析';
             const analysisMarkup = typeof renderExtractedSections === 'function'
                 ? renderExtractedSections(item, { asPrimary: true, kicker: '内容分析' })
                 : '';
@@ -151,9 +191,23 @@
             readerSidebarContent.innerHTML = `
                 <div class="reader-analysis-shell">
                     <div class="reader-analysis-header">
-                        <div class="reader-analysis-header-copy">
-                            <div class="reader-analysis-label">内容分析</div>
-                            <div class="reader-analysis-title">${escapeHtml(detectedTitle || getDisplayItemTitle(item) || '未命名内容')}</div>
+                        <div class="reader-analysis-header-top">
+                            <div class="reader-analysis-header-copy">
+                                <div class="reader-analysis-label">内容分析</div>
+                                <div class="reader-analysis-title">${escapeHtml(detectedTitle || getDisplayItemTitle(item) || '未命名内容')}</div>
+                            </div>
+                            <button
+                                class="reader-analysis-ai-btn${isOrganizingAnalysis ? ' is-loading' : ''}"
+                                type="button"
+                                onclick="organizeItemAnalysis('${item.id}', event)"
+                                title="${escapeAttribute(analysisAiTitle)}"
+                                aria-label="${escapeAttribute(analysisAiTitle)}"
+                                ${isOrganizingAnalysis || item?.parse_status === 'processing' ? 'disabled' : ''}
+                            >
+                                <span class="reader-analysis-ai-btn-icon" aria-hidden="true">
+                                    ${isOrganizingAnalysis ? '<span class="reader-analysis-ai-spinner"></span>' : analysisAiSparkIcon}
+                                </span>
+                            </button>
                         </div>
                         <div class="reader-analysis-meta${item?.parse_status === 'processing' ? ' is-processing' : ''}">${escapeHtml(summary)}</div>
                     </div>
@@ -171,7 +225,19 @@
                 window.bindReaderAiSidebar?.(item);
                 return;
             }
-            readerSidebarContent.innerHTML = '<div class="ai-empty-copy" style="padding: 16px;">AI 正在初始化...</div>';
+            readerSidebarContent.innerHTML = `
+                <div class="reader-ai-sidebar-shell is-empty">
+                    <div class="reader-ai-empty-state reader-ai-empty-state--loading">
+                        <div class="reader-ai-empty-title">Ask AI 正在准备</div>
+                        <div class="reader-ai-empty-copy">正在加载当前笔记的 AI 侧栏。</div>
+                        <div class="ai-loading-dots" aria-hidden="true">
+                            <span></span>
+                            <span></span>
+                            <span></span>
+                        </div>
+                    </div>
+                </div>
+            `;
         }
 
         async function saveSidebarNote(itemId) {
@@ -919,6 +985,50 @@
             }
         }
 
+        async function organizeItemAnalysis(itemId, event = null) {
+            event?.stopPropagation?.();
+            if (!itemId || analysisOrganizeInFlightItemId === itemId) return;
+
+            const currentItem = getItemById(itemId);
+            if (!currentItem) return;
+            if (currentItem.parse_status === 'processing') {
+                showToast('内容还在解析中，稍后再整理。', 'info');
+                return;
+            }
+
+            analysisOrganizeInFlightItemId = itemId;
+            if (currentOpenItemId === itemId) {
+                openModalByItem(currentItem, { keepNotePanel: isNotePanelOpen, preserveSidebarTab: true });
+            }
+
+            try {
+                const response = await fetch(`/api/ai/items/${itemId}/organize-analysis`, { method: 'POST' });
+                const data = await response.json().catch(() => ({}));
+                if (!response.ok) {
+                    const detail = String(data.detail || '整理失败');
+                    if (/AI settings are incomplete/i.test(detail)) {
+                        openSettingsPanel();
+                    }
+                    throw new Error(detail);
+                }
+
+                mergeUpdatedItem(data);
+                patchRenderedItemsById(itemId);
+                if (currentOpenItemId === itemId) {
+                    openModalByItem(data, { keepNotePanel: isNotePanelOpen, preserveSidebarTab: true });
+                }
+                showToast('内容分析已整理', 'success');
+            } catch (error) {
+                showToast(`整理失败：${error.message}`, 'error');
+            } finally {
+                analysisOrganizeInFlightItemId = null;
+                const nextItem = getItemById(itemId);
+                if (nextItem && currentOpenItemId === itemId) {
+                    openModalByItem(nextItem, { keepNotePanel: isNotePanelOpen, preserveSidebarTab: true });
+                }
+            }
+        }
+
         async function saveItemNote(itemId) {
             const textarea = document.getElementById('readerNoteTextarea');
             if (!textarea || noteSaveInFlight) return;
@@ -1005,7 +1115,7 @@
                     html += `<div class="modal-media"><video controls preload="metadata" poster="${escapeAttribute(resolveMediaUrl(cover ? cover.url : ''))}"><source src="${escapeAttribute(resolveMediaUrl(videos[0].url || ''))}" type="video/mp4"></video></div>`;
                 }
                 if (images.length > 0) {
-                    html += `<div class="modal-media"><div class="media-gallery">${images.map((img) => `<img src="${escapeAttribute(resolveMediaUrl(img.url || ''))}" alt="">`).join('')}</div>${images.length > 1 ? '<div class="gallery-hint">← 左右滑动查看更多图片 →</div>' : ''}</div>`;
+                    html += `<div class="modal-media modal-media--carousel"><div class="media-gallery">${images.map((img) => `<img src="${escapeAttribute(resolveMediaUrl(img.url || ''))}" alt="">`).join('')}</div>${images.length > 1 ? '<div class="gallery-hint">← 左右滑动查看更多图片 →</div>' : ''}</div>`;
                 }
                 const plainArticleHtml = typeof renderPlainTextArticle === 'function'
                     ? renderPlainTextArticle(item)
@@ -1122,6 +1232,7 @@
             document.body.style.overflow = '';
             currentOpenItemId = null;
             noteSaveInFlight = false;
+            analysisOrganizeInFlightItemId = null;
             isNotePanelOpen = false;
             toggleReaderFullscreen(false);
             readerSidebarOpen = false;
@@ -1251,6 +1362,7 @@
 
         // Expose functions to window for onclick handlers
         window.saveSidebarNote = saveSidebarNote;
+        window.organizeItemAnalysis = organizeItemAnalysis;
         window.toggleReaderFullscreen = toggleReaderFullscreen;
         window.openReaderSidebarPanel = openReaderSidebarPanel;
         window.closeReaderSidebarPanel = closeReaderSidebarPanel;

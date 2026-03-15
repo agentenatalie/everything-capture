@@ -111,6 +111,7 @@
         let isNotePanelOpen = false;
         let noteSaveInFlight = false;
         let manualParseInFlightItemId = null;
+        let analysisOrganizeInFlightItemId = null;
         let latestVisibleCount = 0;
         let latestReturnedCount = 0;
         let latestTotalCount = 0;

@@ -4,6 +4,7 @@
         const askAiInput = document.getElementById('askAiInput');
         const askAiResult = document.getElementById('askAiResult');
         const submitAskAiBtn = document.getElementById('submitAskAiBtn');
+        const askAiMeta = document.getElementById('askAiMeta');
         const aiModeChatBtn = document.getElementById('aiModeChatBtn');
         const aiModeAgentBtn = document.getElementById('aiModeAgentBtn');
         const clearAiChatBtn = document.getElementById('clearAiChatBtn');
@@ -28,6 +29,12 @@
             sync_item_to_obsidian: '同步到 Obsidian',
             sync_item_to_notion: '同步到 Notion',
         };
+        const AI_MUTATING_TOOLS = new Set([
+            'assign_item_folders',
+            'parse_item_content',
+            'sync_item_to_obsidian',
+            'sync_item_to_notion',
+        ]);
         const READER_AI_SUGGESTIONS = [
             '总结这条笔记的核心观点',
             '这条内容为什么值得保存？',
@@ -40,6 +47,7 @@
         let aiAssistantMode = 'chat';
         let aiConversation = [];
         let aiSettingsLoadPromise = null;
+        let currentAiContextItemId = null;
         const readerAiConversationByItem = new Map();
         const readerAiDraftByItem = new Map();
 
@@ -119,8 +127,54 @@
             return Boolean(latestSettings?.ai_ready);
         }
 
+        function getCurrentAiContextItem() {
+            if (!currentAiContextItemId || typeof getItemById !== 'function') return null;
+            return getItemById(currentAiContextItemId);
+        }
+
+        function updateAskAiInputContextUi() {
+            const currentItem = getCurrentAiContextItem();
+            if (askAiInput) {
+                askAiInput.placeholder = currentItem
+                    ? `围绕《${getDisplayItemTitle(currentItem) || '当前内容'}》提问...`
+                    : '输入问题...';
+            }
+            syncAskAiMeta();
+        }
+
+        function syncAskAiMeta() {
+            if (!askAiMeta) return;
+            const currentItem = getCurrentAiContextItem();
+            if (askAiRequestInFlight) {
+                askAiMeta.textContent = aiAssistantMode === 'agent'
+                    ? 'Agent 正在检索知识库并执行已授权动作...'
+                    : 'AI 正在整理当前上下文并生成回答...';
+                return;
+            }
+            askAiMeta.textContent = currentItem
+                ? `当前会带上《${getDisplayItemTitle(currentItem) || '当前内容'}》的内容分析、抓取文本和知识库上下文`
+                : '按 Enter 发送，Shift+Enter 换行';
+        }
+
+        function setAskAiContextItemId(itemId, options = {}) {
+            const { resetConversation = false } = options;
+            const nextId = String(itemId || '').trim() || null;
+            currentAiContextItemId = nextId;
+            if (resetConversation) {
+                clearAiConversation();
+            }
+            updateAskAiInputContextUi();
+        }
+
+        function stripAiReasoningBlocks(value) {
+            return String(value || '')
+                .replace(/<think\b[^>]*>[\s\S]*?<\/think>/gi, '')
+                .replace(/\n{3,}/g, '\n\n')
+                .trim();
+        }
+
         function escapeAiText(value) {
-            return escapeHtml(String(value || '')).replace(/\n/g, '<br>');
+            return escapeHtml(stripAiReasoningBlocks(value)).replace(/\n/g, '<br>');
         }
 
         function renderAiEmptyState(message) {
@@ -166,7 +220,7 @@
         }
 
         function renderMarkdown(value) {
-            const source = String(value || '').replace(/\r\n/g, '\n').trim();
+            const source = stripAiReasoningBlocks(value).replace(/\r\n/g, '\n').trim();
             if (!source) return '';
 
             const lines = source.split('\n');
@@ -311,6 +365,78 @@
             return permissions;
         }
 
+        function normalizeAiContextText(value) {
+            return String(value || '')
+                .replace(/\r\n/g, '\n')
+                .replace(/\r/g, '\n')
+                .replace(/\u0000/g, '')
+                .replace(/[ \t]+\n/g, '\n')
+                .replace(/\n{3,}/g, '\n\n')
+                .trim();
+        }
+
+        function truncateAiContextText(value, limit = 1200) {
+            const normalized = normalizeAiContextText(value);
+            if (!normalized || normalized.length <= limit) return normalized;
+            return `${normalized.slice(0, Math.max(0, limit - 1)).trimEnd()}…`;
+        }
+
+        function buildItemAiContextSnippet(item, limit = 1200) {
+            if (!item) return '';
+            const candidates = [
+                item?.extracted_text,
+                item?.canonical_text,
+                item?.ocr_text,
+                Array.isArray(item?.frame_texts)
+                    ? item.frame_texts
+                        .map((entry) => normalizeAiContextText(entry?.text || entry?.content || ''))
+                        .filter(Boolean)
+                        .join('\n')
+                    : '',
+            ];
+            for (const candidate of candidates) {
+                const snippet = truncateAiContextText(candidate, limit);
+                if (snippet) return snippet;
+            }
+            return '';
+        }
+
+        function buildItemContextLines(item, options = {}) {
+            const {
+                snippetLimit = 1200,
+                includeSnippet = true,
+                closingLine = '请优先基于这条内容和我的知识库回答；若证据不足，直接说明。',
+            } = options;
+            if (!item) {
+                return ['请基于我的知识库帮我分析当前这条笔记。'];
+            }
+
+            const lines = [
+                `当前笔记：${getDisplayItemTitle(item) || '未命名内容'}`,
+            ];
+            const folderNames = Array.isArray(item.folder_names) ? item.folder_names.filter(Boolean) : [];
+            if (folderNames.length) {
+                lines.push(`文件夹：${folderNames.join(' / ')}`);
+            }
+            const detectedTitle = typeof getExtractedDisplayTitle === 'function' ? getExtractedDisplayTitle(item) : '';
+            if (detectedTitle) {
+                lines.push(`检测标题：${detectedTitle}`);
+            }
+            if (item?.parse_status === 'completed') {
+                lines.push('当前状态：已有内容分析。');
+            } else if (item?.parse_status === 'processing') {
+                lines.push('当前状态：内容仍在解析中。');
+            }
+            if (includeSnippet) {
+                const snippet = buildItemAiContextSnippet(item, snippetLimit);
+                if (snippet) {
+                    lines.push(`当前内容片段：\n${snippet}`);
+                }
+            }
+            lines.push(closingLine);
+            return lines;
+        }
+
         function setAiAssistantMode(mode) {
             aiAssistantMode = mode === 'agent' ? 'agent' : 'chat';
             aiModeChatBtn?.classList.toggle('is-active', aiAssistantMode === 'chat');
@@ -397,6 +523,62 @@
                 : '';
         }
 
+        function hasSuccessfulAiMutation(toolEvents = []) {
+            return Array.isArray(toolEvents) && toolEvents.some((event) => (
+                event
+                && AI_MUTATING_TOOLS.has(String(event.name || ''))
+                && String(event.status || 'completed') !== 'failed'
+            ));
+        }
+
+        async function applyAiAssistantSideEffects(responseData) {
+            const updatedItems = Array.isArray(responseData?.updated_items) ? responseData.updated_items : [];
+            const toolEvents = Array.isArray(responseData?.tool_events) ? responseData.tool_events : [];
+            const needsMutationRefresh = hasSuccessfulAiMutation(toolEvents);
+            const needsFolderRefresh = toolEvents.some((event) => (
+                event
+                && String(event.name || '') === 'assign_item_folders'
+                && String(event.status || 'completed') !== 'failed'
+            ));
+
+            updatedItems.forEach((item) => {
+                if (!item?.id) return;
+                if (typeof mergeUpdatedItem === 'function') {
+                    mergeUpdatedItem(item);
+                }
+                if (typeof patchRenderedItemsById === 'function') {
+                    patchRenderedItemsById(item.id);
+                }
+            });
+
+            const currentUpdatedItem = currentOpenItemId
+                ? updatedItems.find((item) => item?.id === currentOpenItemId)
+                : null;
+            if (currentUpdatedItem && modalOverlay?.classList.contains('active') && typeof openModalByItem === 'function') {
+                openModalByItem(currentUpdatedItem, { preserveSidebarTab: true });
+            }
+
+            if (!needsMutationRefresh) return;
+
+            const refreshTasks = [];
+            if (typeof fetchItems === 'function') {
+                refreshTasks.push(fetchItems());
+            }
+            if (needsFolderRefresh && typeof fetchFolders === 'function') {
+                refreshTasks.push(fetchFolders());
+            }
+            if (refreshTasks.length) {
+                await Promise.all(refreshTasks);
+            }
+
+            if (currentOpenItemId && modalOverlay?.classList.contains('active') && typeof getItemById === 'function' && typeof openModalByItem === 'function') {
+                const refreshedItem = getItemById(currentOpenItemId);
+                if (refreshedItem) {
+                    openModalByItem(refreshedItem, { preserveSidebarTab: true });
+                }
+            }
+        }
+
         function renderAssistantMessage(entry, compact = false) {
             const citations = Array.isArray(entry.citations) ? entry.citations : [];
             const citationsMarkup = citations.length
@@ -423,12 +605,48 @@
             `;
         }
 
+        function renderAiLoadingMessage(options = {}) {
+            const {
+                mode = 'chat',
+                compact = false,
+                label = '',
+                description = '',
+            } = options;
+            const title = label || (mode === 'agent' ? 'Agent 正在执行' : 'AI 正在思考');
+            const copy = description || (mode === 'agent'
+                ? '正在读取知识库，并按当前权限准备动作。'
+                : '正在整理上下文、检索知识库并生成回答。');
+
+            return `
+                <div class="ai-chat-message ai-chat-message--loading${compact ? ' is-compact' : ''}" aria-live="polite">
+                    <div class="ai-chat-avatar">AI</div>
+                    <div class="ai-chat-bubble ai-chat-bubble--loading">
+                        <div class="ai-loading-row">
+                            <div class="ai-loading-label">${escapeHtml(title)}</div>
+                            <div class="ai-loading-dots" aria-hidden="true">
+                                <span></span>
+                                <span></span>
+                                <span></span>
+                            </div>
+                        </div>
+                        <div class="ai-loading-copy">${escapeHtml(copy)}</div>
+                        <div class="ai-loading-bars" aria-hidden="true">
+                            <span></span>
+                            <span></span>
+                        </div>
+                    </div>
+                </div>
+            `;
+        }
+
         function normalizeConversationForRequest() {
             return aiConversation
                 .filter((entry) => (entry.role === 'user' || entry.role === 'assistant') && !entry.isError)
                 .map((entry) => ({
                     role: entry.role,
-                    content: String(entry.content || '').trim(),
+                    content: entry.role === 'assistant'
+                        ? stripAiReasoningBlocks(entry.content || '')
+                        : String(entry.content || '').trim(),
                 }))
                 .filter((entry) => entry.content)
                 .slice(-10);
@@ -436,16 +654,18 @@
 
         function renderAiConversation() {
             if (!askAiResult) return;
+            const currentItem = getCurrentAiContextItem();
+            syncAskAiMeta();
 
             if (!aiConversation.length) {
                 if (!isAiConfigured()) {
                     askAiResult.innerHTML = `
                         <div class="ai-welcome">
                             <div class="ai-welcome-icon">
-                                <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M12 3.75l1.93 4.32 4.32 1.93-4.32 1.93L12 16.25l-1.93-4.32-4.32-1.93 4.32-1.93L12 3.75z"/><path d="M18.35 14.85l.8 1.8 1.8.8-1.8.8-.8 1.8-.8-1.8-1.8-.8 1.8-.8.8-1.8z"/></svg>
+                                <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M12 4.25 13.8 8.2 17.75 10 13.8 11.8 12 15.75 10.2 11.8 6.25 10 10.2 8.2 12 4.25Z"></path><path d="M18.25 15.25 19 16.9 20.65 17.65 19 18.4 18.25 20.05 17.5 18.4 15.85 17.65 17.5 16.9 18.25 15.25Z"></path></svg>
                             </div>
                             <div class="ai-welcome-title">先配置 AI</div>
-                            <div class="ai-welcome-desc">在设置页填写 API Key 后即可使用</div>
+                            <div class="ai-welcome-desc">在设置页填好 API Key 后，就可以基于知识库对话或让 Agent 执行操作。</div>
                         </div>
                     `;
                     return;
@@ -454,16 +674,16 @@
                 askAiResult.innerHTML = `
                     <div class="ai-welcome">
                         <div class="ai-welcome-icon">
-                            <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M12 3.75l1.93 4.32 4.32 1.93-4.32 1.93L12 16.25l-1.93-4.32-4.32-1.93 4.32-1.93L12 3.75z"/><path d="M18.35 14.85l.8 1.8 1.8.8-1.8.8-.8 1.8-.8-1.8-1.8-.8 1.8-.8.8-1.8z"/></svg>
+                            <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M12 4.25 13.8 8.2 17.75 10 13.8 11.8 12 15.75 10.2 11.8 6.25 10 10.2 8.2 12 4.25Z"></path><path d="M18.25 15.25 19 16.9 20.65 17.65 19 18.4 18.25 20.05 17.5 18.4 15.85 17.65 17.5 16.9 18.25 15.25Z"></path></svg>
                         </div>
-                        <div class="ai-welcome-title">问我任何问题</div>
-                        <div class="ai-welcome-desc">支持 Markdown 回复渲染，会优先基于你的知识库作答</div>
+                        <div class="ai-welcome-title">${currentItem ? `围绕《${escapeHtml(getDisplayItemTitle(currentItem) || '当前内容')}》提问` : '从知识库开始'}</div>
+                        <div class="ai-welcome-desc">${currentItem ? '会自动带上当前文章的内容分析、抓取文本和 OCR / 帧文字，再结合知识库回答。' : '直接提问，或切到 Agent 让它在权限允许范围内执行真实操作。'}</div>
                     </div>
                 `;
                 return;
             }
 
-            askAiResult.innerHTML = aiConversation.map((entry) => {
+            const conversationMarkup = aiConversation.map((entry) => {
                 if (entry.role === 'user') {
                     return `
                         <div class="ai-chat-message is-user">
@@ -474,13 +694,24 @@
                 }
                 return renderAssistantMessage(entry);
             }).join('');
+            const loadingMarkup = askAiRequestInFlight
+                ? renderAiLoadingMessage({
+                    mode: aiAssistantMode,
+                    label: aiAssistantMode === 'agent' ? 'Agent 正在执行' : 'AI 正在思考',
+                    description: currentItem
+                        ? '正在结合当前内容与知识库上下文生成回答。'
+                        : '正在检索知识库并生成回答。',
+                })
+                : '';
+            askAiResult.innerHTML = `${conversationMarkup}${loadingMarkup}`;
 
             window.requestAnimationFrame(() => {
                 askAiResult.scrollTop = askAiResult.scrollHeight;
             });
         }
 
-        async function requestAiAssistant(messages, mode = aiAssistantMode) {
+        async function requestAiAssistant(messages, mode = aiAssistantMode, options = {}) {
+            const { currentItemId = null } = options;
             let lastError = null;
 
             for (let attempt = 0; attempt < 2; attempt += 1) {
@@ -494,6 +725,7 @@
                             mode,
                             messages,
                             top_k: 6,
+                            current_item_id: currentItemId || undefined,
                         }),
                     });
                     const data = await response.json().catch(() => ({}));
@@ -540,21 +772,26 @@
                 return;
             }
 
+            askAiRequestInFlight = true;
             aiConversation.push({ role: 'user', content: question });
             askAiInput.value = '';
             renderAiConversation();
-
-            askAiRequestInFlight = true;
             submitAskAiBtn.disabled = true;
             submitAskAiBtn.classList.add('is-loading');
-            submitAskAiBtn.textContent = aiAssistantMode === 'agent' ? '执行中...' : '思考中...';
+            submitAskAiBtn.setAttribute('aria-label', aiAssistantMode === 'agent' ? 'Agent 执行中' : 'AI 思考中');
 
             try {
-                const data = await requestAiAssistant(normalizeConversationForRequest(), aiAssistantMode);
+                const data = await requestAiAssistant(
+                    normalizeConversationForRequest(),
+                    aiAssistantMode,
+                    { currentItemId: currentAiContextItemId }
+                );
+                await applyAiAssistantSideEffects(data);
+                askAiRequestInFlight = false;
                 aiConversation.push({
                     role: 'assistant',
                     mode: data.mode || aiAssistantMode,
-                    content: data.message || '',
+                    content: stripAiReasoningBlocks(data.message || ''),
                     citations: Array.isArray(data.citations) ? data.citations : [],
                     toolEvents: Array.isArray(data.tool_events) ? data.tool_events : [],
                     insufficientContext: Boolean(data.insufficient_context),
@@ -563,6 +800,7 @@
                 });
                 renderAiConversation();
             } catch (error) {
+                askAiRequestInFlight = false;
                 aiConversation.push({
                     role: 'assistant',
                     mode: aiAssistantMode,
@@ -574,44 +812,26 @@
                 renderAiConversation();
                 showToast(`AI 失败：${error.message}`, 'error');
             } finally {
-                askAiRequestInFlight = false;
                 submitAskAiBtn.disabled = false;
                 submitAskAiBtn.classList.remove('is-loading');
-                submitAskAiBtn.textContent = '提问';
+                submitAskAiBtn.setAttribute('aria-label', '发送');
+                syncAskAiMeta();
             }
         }
 
-        async function openAskAiModal() {
+        async function openAskAiModal(options = {}) {
+            const { itemId = null, resetConversation = false } = options;
             if (!(await ensureAiSessionReady({ allowRecovery: true }))) {
                 showToast('无法连接本地会话。', 'error');
                 return;
             }
+            setAskAiContextItemId(itemId, { resetConversation });
             askAiOverlay.classList.add('active');
             await ensureAiSettingsLoaded();
             refreshAiAssistantUi();
             if (askAiInput) {
                 window.setTimeout(() => askAiInput.focus(), 30);
             }
-        }
-
-        function buildItemAssistantPrompt(item) {
-            if (!item) {
-                return '请基于我的知识库帮我分析当前这条笔记。';
-            }
-
-            const lines = [
-                `当前笔记：${getDisplayItemTitle(item) || '未命名内容'}`,
-            ];
-            const folderNames = Array.isArray(item.folder_names) ? item.folder_names.filter(Boolean) : [];
-            if (folderNames.length) {
-                lines.push(`文件夹：${folderNames.join(' / ')}`);
-            }
-            const preview = String(getDisplayItemPreview(item, 240) || '').trim();
-            if (preview) {
-                lines.push(`内容片段：${preview}`);
-            }
-            lines.push('请结合这条笔记以及我的知识库回答。若证据不足，直接说明。');
-            return lines.join('\n');
         }
 
         function closeAskAiDialog() {
@@ -647,22 +867,14 @@
         }
 
         function buildReaderAiRequestMessages(item) {
-            const contextPrefix = buildItemAssistantPrompt(item);
             return getReaderAiConversation(item.id)
                 .filter((entry) => (entry.role === 'user' || entry.role === 'assistant') && !entry.isError)
                 .map((entry) => {
-                    const content = String(entry.content || '').trim();
+                    const content = entry.role === 'assistant'
+                        ? stripAiReasoningBlocks(entry.content || '')
+                        : String(entry.content || '').trim();
                     if (!content) return null;
-                    if (entry.role === 'user') {
-                        return {
-                            role: 'user',
-                            content: `${contextPrefix}\n\n用户问题：${content}`,
-                        };
-                    }
-                    return {
-                        role: 'assistant',
-                        content,
-                    };
+                    return { role: entry.role, content };
                 })
                 .filter(Boolean)
                 .slice(-10);
@@ -697,31 +909,38 @@
                     }
                     return renderAssistantMessage(entry, true);
                 }).join('')
-                : `
-                    <div class="reader-ai-empty-state">
-                        <div class="reader-ai-empty-title">Ask AI</div>
-                        <div class="reader-ai-empty-copy">围绕当前笔记和知识库继续追问。右侧栏会随 reader 一起打开，你可以直接切到这里继续问。</div>
-                    </div>
-                `;
+                : '';
 
             const quickActionsMarkup = READER_AI_SUGGESTIONS.map((prompt) => (
                 `<button class="reader-ai-quick-action" type="button" data-reader-ai-prompt="${escapeAttribute(prompt)}">${escapeHtml(prompt)}</button>`
             )).join('');
+            const contextMarkup = `
+                <div class="reader-ai-context">
+                    <div class="reader-ai-context-label">当前上下文</div>
+                    <div class="reader-ai-context-title">${escapeHtml(getDisplayItemTitle(item) || '未命名内容')}</div>
+                    <div class="reader-ai-context-copy">会自动带上当前文章的内容分析、抓取正文和 OCR / 帧文字，不需要你重复粘贴上下文。</div>
+                </div>
+            `;
+            const quickActionsSectionMarkup = `
+                <div class="reader-ai-quick-actions">${quickActionsMarkup}</div>
+            `;
+            const loadingMarkup = isBusy
+                ? renderAiLoadingMessage({
+                    mode: 'chat',
+                    compact: true,
+                    label: 'Ask AI 正在思考',
+                    description: '正在结合当前笔记的内容分析与知识库上下文生成回答。',
+                })
+                : '';
 
             return `
                 <div class="reader-ai-sidebar-shell">
-                    <div class="reader-ai-context">
-                        <div class="reader-ai-context-label">当前上下文</div>
-                        <div class="reader-ai-context-title">${escapeHtml(getDisplayItemTitle(item) || '未命名内容')}</div>
-                        <div class="reader-ai-context-copy">会自动带上当前笔记摘要、文件夹和正文片段，不需要你重复粘贴上下文。</div>
-                    </div>
-                    <div class="reader-ai-quick-actions">${quickActionsMarkup}</div>
-                    <div class="reader-ai-messages" id="readerAiMessages">${messagesMarkup}</div>
-                    <div class="reader-ai-composer">
+                    <div class="reader-ai-messages" id="readerAiMessages">${contextMarkup}${quickActionsSectionMarkup}${messagesMarkup}${loadingMarkup}</div>
+                    <div class="reader-ai-composer${isBusy ? ' is-loading' : ''}">
                         <textarea id="readerAiInput" class="reader-ai-input" placeholder="问这条笔记、问关联内容，或让 AI 帮你整理下一步..." ${isBusy ? 'disabled' : ''}>${escapeHtml(draft)}</textarea>
                         <div class="reader-ai-composer-actions">
                             <button id="readerAiClearBtn" class="reader-ai-secondary-btn" type="button" ${conversation.length ? '' : 'disabled'}>清空</button>
-                            <button id="readerAiSubmitBtn" class="reader-ai-submit" type="button" ${isBusy ? 'disabled' : ''}>${isBusy ? '思考中...' : '发送'}</button>
+                            <button id="readerAiSubmitBtn" class="reader-ai-submit${isBusy ? ' is-loading' : ''}" type="button" ${isBusy ? 'disabled' : ''}>${isBusy ? '思考中...' : '发送'}</button>
                         </div>
                     </div>
                 </div>
@@ -811,11 +1030,16 @@
             rerenderReaderAiSidebar(item.id);
 
             try {
-                const data = await requestAiAssistant(buildReaderAiRequestMessages(item), 'chat');
+                const data = await requestAiAssistant(
+                    buildReaderAiRequestMessages(item),
+                    'chat',
+                    { currentItemId: item.id }
+                );
+                await applyAiAssistantSideEffects(data);
                 conversation.push({
                     role: 'assistant',
                     mode: data.mode || 'chat',
-                    content: data.message || '',
+                    content: stripAiReasoningBlocks(data.message || ''),
                     citations: Array.isArray(data.citations) ? data.citations : [],
                     toolEvents: Array.isArray(data.tool_events) ? data.tool_events : [],
                     insufficientContext: Boolean(data.insufficient_context),
@@ -869,16 +1093,11 @@
                 openReaderAiSidebarForCurrentItem();
                 return;
             }
-            const item = typeof getItemById === 'function' ? getItemById(itemId) : null;
             setAiAssistantMode('chat');
-            openAskAiModal();
+            openAskAiModal({ itemId, resetConversation: true });
             if (!askAiInput) return;
-            askAiInput.value = buildItemAssistantPrompt(item);
+            askAiInput.value = '';
             askAiInput.focus();
-            const caret = askAiInput.value.length;
-            if (typeof askAiInput.setSelectionRange === 'function') {
-                askAiInput.setSelectionRange(caret, caret);
-            }
         }
 
         function openCurrentItemAiAssistant(event) {
@@ -905,7 +1124,7 @@
         window.focusReaderAiComposer = focusReaderAiComposer;
         window.submitReaderAiQuestion = submitReaderAiQuestion;
 
-        askAiBtn?.addEventListener('click', openAskAiModal);
+        askAiBtn?.addEventListener('click', () => openAskAiModal({ itemId: null, resetConversation: true }));
         openReaderAiBtn?.addEventListener('click', openCurrentItemAiAssistant);
         openReaderAiBtn?.addEventListener('keydown', (event) => {
             if (event.key === 'Enter' || event.key === ' ') {
@@ -950,7 +1169,8 @@
                 return;
             }
 
-            openAskAiModal();
+            openAskAiModal({ itemId: null, resetConversation: true });
         });
 
         setAiAssistantMode('chat');
+        updateAskAiInputContextUi();

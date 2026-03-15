@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import re
+from datetime import datetime
 from typing import Any, Optional
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -19,6 +20,7 @@ from schemas import (
     AiItemAnalysisResponse,
     AiRelatedNotesResponse,
     AiToolEventResponse,
+    ItemResponse,
 )
 from security import decrypt_secret
 from services.ai_client import (
@@ -105,6 +107,31 @@ def _truncate_text(value: str | None, limit: int) -> str:
     return text[: limit - 1].rstrip() + "…"
 
 
+def _normalize_multiline_text(value: str | None) -> str:
+    return re.sub(r"\n{3,}", "\n\n", str(value or "").replace("\r\n", "\n").replace("\r", "\n")).strip()
+
+
+def _load_frame_texts(item: Item) -> list[str]:
+    raw = getattr(item, "frame_texts_json", None)
+    if not raw:
+        return []
+    try:
+        payload = json.loads(raw)
+    except json.JSONDecodeError:
+        return []
+    if not isinstance(payload, list):
+        return []
+
+    texts: list[str] = []
+    for entry in payload:
+        if not isinstance(entry, dict):
+            continue
+        text = _clean_optional_string(entry.get("text") or entry.get("content"))
+        if text:
+            texts.append(text)
+    return texts
+
+
 def _serialize_citations(
     db: Session,
     user_id: str,
@@ -151,6 +178,69 @@ def _build_note_context_lines(note: KnowledgeBaseNote, index: int) -> str:
             f"[{index}] 正文摘录: {_truncate_text(note.excerpt or note.body, 800) or '无'}",
         ]
     )
+
+
+def _build_current_item_context(item: Item, note: KnowledgeBaseNote | None = None) -> str:
+    folder_names = _extract_item_folder_names(item)
+    analysis_text = _normalize_multiline_text(item.extracted_text)
+    canonical_text = _normalize_multiline_text(item.canonical_text)
+    ocr_text = _normalize_multiline_text(item.ocr_text)
+    frame_text = _normalize_multiline_text("\n".join(_load_frame_texts(item)))
+    note_summary = _clean_optional_string(note.summary if note else None)
+
+    lines = [
+        f"当前文章 item_id：{item.id}",
+        f"当前文章标题：{_clean_optional_string(item.title) or f'Item {item.id}'}",
+        f"当前文章来源：{_clean_optional_string(item.source_url) or '无'}",
+        f"当前文章文件夹：{' / '.join(folder_names) if folder_names else '未归档'}",
+        f"当前文章解析状态：{item.parse_status or 'idle'}",
+    ]
+
+    if note_summary:
+        lines.extend([
+            "",
+            "这篇内容在知识库里的已有摘要：",
+            _truncate_text(note_summary, 1200),
+        ])
+
+    if analysis_text:
+        lines.extend([
+            "",
+            "当前文章的内容分析 / 解析结果：",
+            _truncate_text(analysis_text, 5000),
+        ])
+
+    if canonical_text:
+        lines.extend([
+            "",
+            "当前文章抓取到的正文文本：",
+            _truncate_text(canonical_text, 7000),
+        ])
+
+    supplemental_parts = [part for part in [ocr_text, frame_text] if part]
+    if supplemental_parts:
+        lines.extend([
+            "",
+            "当前文章额外抓取到的 OCR / 帧文字：",
+            _truncate_text("\n\n".join(supplemental_parts), 4000),
+        ])
+
+    return "\n".join(lines).strip()
+
+
+def _build_analysis_organizer_context(item: Item) -> str:
+    analysis_text = _normalize_multiline_text(item.extracted_text)
+    if not analysis_text:
+        return ""
+
+    lines = [
+        f"当前文章 item_id：{item.id}",
+        f"当前文章标题：{_clean_optional_string(item.title) or f'Item {item.id}'}",
+        "",
+        "当前文章已有的内容分析文本：",
+        _truncate_text(analysis_text, 8000),
+    ]
+    return "\n".join(lines).strip()
 
 
 def _extract_item_folder_names(item: Item) -> list[str]:
@@ -225,9 +315,10 @@ def _analysis_system_prompt() -> str:
 def _assistant_chat_system_prompt() -> str:
     return (
         "你是用户网站里的 AI chatbot。"
-        "你的职责是和用户的个人知识库对话，而不是泛泛聊天。"
-        "优先依据用户笔记里已有的 `summary` / `摘要`，不要重复整理。"
-        "只能基于提供的知识库上下文回答；若上下文不足，必须明确说明。"
+        "你的职责是和用户的个人知识库以及当前打开的文章对话，而不是泛泛聊天。"
+        "如果提供了当前文章上下文，优先依据当前文章的内容分析、抓取文本和 OCR / 帧文字回答。"
+        "如果同时提供了知识库笔记，优先使用已有 `summary` / `摘要` 作为辅助，不要机械重复整理。"
+        "只能基于提供的上下文回答；若上下文不足，必须明确说明。"
         "回答请使用中文，保持简洁，并尽量用 [1] [2] 引用编号。"
     )
 
@@ -258,6 +349,26 @@ def _assistant_agent_system_prompt(agent_permissions: list[str], snapshot: Knowl
     )
 
 
+def _compose_system_message(*parts: str | None) -> str:
+    sections = [str(part).strip() for part in parts if str(part or "").strip()]
+    return "\n\n".join(sections).strip()
+
+
+def _analysis_organizer_system_prompt() -> str:
+    return (
+        "你是一个内容整理助手。"
+        "你的任务是把当前文章已有的内容分析文字整理成适合阅读侧栏直接展示的结构化文本。"
+        "不要整理正文，不要改写抓取正文、OCR 或帧文字，也不要把正文重新誊写进结果里。"
+        "只允许基于提供的内容整理，不要补外部知识，不要编造。"
+        "输出必须是纯文本，不要解释，不要加代码块。"
+        "如果原文里已经有像 [detected_title]、[urls]、[qr_links] 这样的结构标记，优先保留并整理它们。"
+        "优先输出以下结构："
+        "[detected_title] 对整理后的标题；"
+        "[body] 对整理后的内容分析。"
+        "[body] 内请按“摘要 / 核心要点 / 链接与待确认”组织内容，修正乱换行、重复片段和层级混乱。"
+    )
+
+
 def _extract_json_object(text: str) -> dict:
     stripped = _JSON_FENCE_PATTERN.sub("", (text or "").strip())
     start = stripped.find("{")
@@ -273,6 +384,72 @@ def _coerce_text_list(value: object, *, limit: int = 6) -> list[str]:
         return [entry for entry in cleaned if entry][:limit]
     cleaned = _clean_optional_string(value)
     return [cleaned] if cleaned else []
+
+
+def _strip_code_fence(text: str) -> str:
+    stripped = (text or "").strip()
+    if not stripped.startswith("```"):
+        return stripped
+    lines = stripped.splitlines()
+    if lines and lines[0].lstrip().startswith("```"):
+        lines = lines[1:]
+    if lines and lines[-1].strip() == "```":
+        lines = lines[:-1]
+    return "\n".join(lines).strip()
+
+
+def _strip_reasoning_blocks(text: str | None) -> str:
+    return re.sub(r"<think\b[^>]*>[\s\S]*?</think>", "", str(text or ""), flags=re.IGNORECASE).strip()
+
+
+def _strip_leading_analysis_heading(text: str | None) -> str:
+    lines = str(text or "").splitlines()
+    while lines:
+        normalized = re.sub(r"[*_#`~>\-\s:：]+", "", lines[0]).strip().lower()
+        if normalized in {"解析内容", "内容分析"}:
+            lines.pop(0)
+            continue
+        break
+    return "\n".join(lines).strip()
+
+
+def _normalize_organized_analysis_text(text: str, fallback_title: str | None = None) -> str:
+    normalized = _normalize_multiline_text(_strip_leading_analysis_heading(_strip_reasoning_blocks(_strip_code_fence(text))))
+    if not normalized:
+        return ""
+    if re.search(r"(?im)^\[[a-z_]+\]\s*$", normalized):
+        sections: list[tuple[str, list[str]]] = []
+        current_key = ""
+        current_lines: list[str] = []
+        for line in normalized.splitlines():
+            match = re.match(r"^\[([a-z_]+)\]\s*$", line.strip(), flags=re.IGNORECASE)
+            if match:
+                if current_key:
+                    sections.append((current_key, current_lines))
+                current_key = match.group(1).lower()
+                current_lines = []
+                continue
+            current_lines.append(line)
+        if current_key:
+            sections.append((current_key, current_lines))
+
+        if sections:
+            normalized_sections: list[str] = []
+            for key, lines in sections:
+                value = _normalize_multiline_text("\n".join(lines))
+                if key == "body":
+                    value = _normalize_multiline_text(_strip_leading_analysis_heading(value))
+                if not value and key != "detected_title":
+                    continue
+                normalized_sections.append(f"[{key}]\n{value}".rstrip())
+            normalized = "\n\n".join(section for section in normalized_sections if section.strip()).strip()
+        return normalized
+
+    sections: list[str] = []
+    if fallback_title:
+        sections.append(f"[detected_title]\n{fallback_title}")
+    sections.append(f"[body]\n{normalized}")
+    return "\n\n".join(section for section in sections if section.strip()).strip()
 
 
 def _sanitize_conversation_messages(messages: list[Any]) -> list[dict[str, str]]:
@@ -330,6 +507,19 @@ def _append_unique_ranked_notes(
             continue
         bucket.append((note, score))
         seen.add(note.note_id)
+
+
+def _append_unique_updated_items(
+    bucket: list[dict[str, Any]],
+    updated_items: list[dict[str, Any]],
+) -> None:
+    seen_ids = {str(item.get("id") or "") for item in bucket}
+    for item in updated_items:
+        item_id = str(item.get("id") or "")
+        if not item_id or item_id in seen_ids:
+            continue
+        bucket.append(item)
+        seen_ids.add(item_id)
 
 
 def _agent_permission_flags(settings: Settings | None) -> dict[str, bool]:
@@ -597,14 +787,14 @@ async def _execute_agent_tool(
     user_id: str,
     snapshot: KnowledgeBaseSnapshot,
     agent_permissions: list[str],
-) -> tuple[dict[str, Any], AiToolEventResponse, list[tuple[KnowledgeBaseNote, float]]]:
+) -> tuple[dict[str, Any], AiToolEventResponse, list[tuple[KnowledgeBaseNote, float]], list[dict[str, Any]]]:
     limit = max(1, min(int(arguments.get("limit") or 5), 10))
 
     if tool_name == "search_knowledge_base":
         query = _clean_optional_string(arguments.get("query"))
         if not query:
             result = {"status": "error", "message": "query is required"}
-            return result, AiToolEventResponse(name=tool_name, status="failed", summary="知识库检索失败：缺少 query"), []
+            return result, AiToolEventResponse(name=tool_name, status="failed", summary="知识库检索失败：缺少 query"), [], []
         ranked = rank_notes_for_query(snapshot, query, limit=limit) if snapshot.note_count else []
         result = {
             "status": "ok",
@@ -614,13 +804,13 @@ async def _execute_agent_tool(
             "note_count": snapshot.note_count,
         }
         summary = f"知识库检索完成，找到 {len(ranked)} 条相关笔记"
-        return result, AiToolEventResponse(name=tool_name, summary=summary), ranked
+        return result, AiToolEventResponse(name=tool_name, summary=summary), ranked, []
 
     if tool_name == "search_library_items":
         query = _clean_optional_string(arguments.get("query"))
         if not query:
             result = {"status": "error", "message": "query is required"}
-            return result, AiToolEventResponse(name=tool_name, status="failed", summary="站内搜索失败：缺少 query"), []
+            return result, AiToolEventResponse(name=tool_name, status="failed", summary="站内搜索失败：缺少 query"), [], []
         from routers.items import rank_search_rows
 
         candidate_rows = (
@@ -651,18 +841,18 @@ async def _execute_agent_tool(
             "results": [_tool_item_result(item, snapshot.notes_by_item_id.get(item.id) if snapshot.note_count else None) for item in ordered_items],
         }
         summary = f"站内内容搜索完成，找到 {len(ordered_items)} 条结果"
-        return result, AiToolEventResponse(name=tool_name, summary=summary), ranked_notes
+        return result, AiToolEventResponse(name=tool_name, summary=summary), ranked_notes, []
 
     if tool_name == "get_item_details":
         item_id = _clean_optional_string(arguments.get("item_id"))
         item = _get_user_item(db, user_id, item_id or "")
         if not item:
             result = {"status": "error", "message": "Item not found"}
-            return result, AiToolEventResponse(name=tool_name, status="failed", summary="读取笔记详情失败：Item not found"), []
+            return result, AiToolEventResponse(name=tool_name, status="failed", summary="读取笔记详情失败：Item not found"), [], []
         note = snapshot.notes_by_item_id.get(item.id) if snapshot.note_count else None
         ranked = [(note, 1.0)] if note else []
         result = {"status": "ok", "item": _tool_item_result(item, note)}
-        return result, AiToolEventResponse(name=tool_name, summary=f"已读取《{item.title or item.id}》的详情"), ranked
+        return result, AiToolEventResponse(name=tool_name, summary=f"已读取《{item.title or item.id}》的详情"), ranked, []
 
     if tool_name == "list_recent_notes":
         if snapshot.note_count:
@@ -673,7 +863,7 @@ async def _execute_agent_tool(
                 "knowledge_base_path": snapshot.root_path,
             }
             summary = f"已列出最近 {len(ranked)} 条知识库笔记"
-            return result, AiToolEventResponse(name=tool_name, summary=summary), ranked
+            return result, AiToolEventResponse(name=tool_name, summary=summary), ranked, []
 
         items = (
             db.query(Item)
@@ -684,14 +874,14 @@ async def _execute_agent_tool(
         )
         result = {"status": "ok", "results": [_tool_item_result(item) for item in items]}
         summary = f"当前知识库为空，已列出最近 {len(items)} 条站内内容"
-        return result, AiToolEventResponse(name=tool_name, summary=summary), []
+        return result, AiToolEventResponse(name=tool_name, summary=summary), [], []
 
     if tool_name == "get_related_notes":
         item_id = _clean_optional_string(arguments.get("item_id"))
         item = _get_user_item(db, user_id, item_id or "")
         if not item:
             result = {"status": "error", "message": "Item not found"}
-            return result, AiToolEventResponse(name=tool_name, status="failed", summary="查找相关笔记失败：Item not found"), []
+            return result, AiToolEventResponse(name=tool_name, status="failed", summary="查找相关笔记失败：Item not found"), [], []
         existing_note = snapshot.notes_by_item_id.get(item.id) if snapshot.note_count else None
         seed_note = _build_seed_note_from_item(item, existing_note)
         ranked = rank_related_notes(snapshot, seed_note, limit=limit) if snapshot.note_count else []
@@ -701,7 +891,7 @@ async def _execute_agent_tool(
             "results": [_tool_note_result(note, score) for note, score in ranked],
         }
         summary = f"已找到 {len(ranked)} 条相关笔记"
-        return result, AiToolEventResponse(name=tool_name, summary=summary), ranked
+        return result, AiToolEventResponse(name=tool_name, summary=summary), ranked, []
 
     if tool_name == "list_folders":
         folders = (
@@ -722,30 +912,31 @@ async def _execute_agent_tool(
             ],
         }
         summary = f"已列出 {len(folders)} 个文件夹"
-        return result, AiToolEventResponse(name=tool_name, summary=summary), []
+        return result, AiToolEventResponse(name=tool_name, summary=summary), [], []
 
     if tool_name == "assign_item_folders":
         if "manage_folders" not in agent_permissions:
             result = {"status": "error", "message": "Permission denied"}
-            return result, AiToolEventResponse(name=tool_name, status="failed", summary="没有开放文件夹管理权限"), []
+            return result, AiToolEventResponse(name=tool_name, status="failed", summary="没有开放文件夹管理权限"), [], []
         item_id = _clean_optional_string(arguments.get("item_id"))
         item = _get_user_item(db, user_id, item_id or "")
         if not item:
             result = {"status": "error", "message": "Item not found"}
-            return result, AiToolEventResponse(name=tool_name, status="failed", summary="移动文件夹失败：Item not found"), []
+            return result, AiToolEventResponse(name=tool_name, status="failed", summary="移动文件夹失败：Item not found"), [], []
         folder_ids = [value for value in _coerce_text_list(arguments.get("folder_ids"), limit=12)]
         folder_names = [value for value in _coerce_text_list(arguments.get("folder_names"), limit=12)]
         folders, missing_names = _resolve_tool_target_folders(db, user_id, folder_ids, folder_names)
         if missing_names:
             result = {"status": "error", "message": f"Unknown folders: {', '.join(missing_names)}"}
-            return result, AiToolEventResponse(name=tool_name, status="failed", summary=f"找不到文件夹：{', '.join(missing_names)}"), []
+            return result, AiToolEventResponse(name=tool_name, status="failed", summary=f"找不到文件夹：{', '.join(missing_names)}"), [], []
 
-        from routers.items import sync_item_folder_assignments
+        from routers.items import serialize_items, sync_item_folder_assignments
 
         sync_item_folder_assignments(item, folders)
         db.commit()
         db.refresh(item)
         note = snapshot.notes_by_item_id.get(item.id) if snapshot.note_count else None
+        updated_item = serialize_items([item])[0].model_dump(mode="json")
         result = {
             "status": "ok",
             "item": _tool_item_result(item, note),
@@ -753,19 +944,19 @@ async def _execute_agent_tool(
         folder_text = "、".join(_extract_item_folder_names(item)) or "未归档"
         summary = f"已更新《{item.title or item.id}》的文件夹为：{folder_text}"
         ranked = [(note, 1.0)] if note else []
-        return result, AiToolEventResponse(name=tool_name, summary=summary), ranked
+        return result, AiToolEventResponse(name=tool_name, summary=summary), ranked, [updated_item]
 
     if tool_name == "parse_item_content":
         if "parse_content" not in agent_permissions:
             result = {"status": "error", "message": "Permission denied"}
-            return result, AiToolEventResponse(name=tool_name, status="failed", summary="没有开放内容解析权限"), []
+            return result, AiToolEventResponse(name=tool_name, status="failed", summary="没有开放内容解析权限"), [], []
         item_id = _clean_optional_string(arguments.get("item_id"))
         item = _get_user_item(db, user_id, item_id or "")
         if not item:
             result = {"status": "error", "message": "Item not found"}
-            return result, AiToolEventResponse(name=tool_name, status="failed", summary="内容解析失败：Item not found"), []
+            return result, AiToolEventResponse(name=tool_name, status="failed", summary="内容解析失败：Item not found"), [], []
 
-        from routers.items import _store_item_parse_failure, parse_item_content_for_item
+        from routers.items import _store_item_parse_failure, parse_item_content_for_item, serialize_items
 
         try:
             item.parse_status = "processing"
@@ -776,13 +967,14 @@ async def _execute_agent_tool(
             db.commit()
             db.refresh(item)
             note = snapshot.notes_by_item_id.get(item.id) if snapshot.note_count else None
+            updated_item = serialize_items([item])[0].model_dump(mode="json")
             result = {
                 "status": "ok",
                 "item": _tool_item_result(item, note),
             }
             summary = f"已完成《{item.title or item.id}》的内容解析"
             ranked = [(note, 1.0)] if note else []
-            return result, AiToolEventResponse(name=tool_name, summary=summary), ranked
+            return result, AiToolEventResponse(name=tool_name, summary=summary), ranked, [updated_item]
         except Exception as exc:
             db.rollback()
             item = _get_user_item(db, user_id, item_id or "")
@@ -790,54 +982,60 @@ async def _execute_agent_tool(
                 _store_item_parse_failure(item, str(exc))
                 db.commit()
             result = {"status": "error", "message": str(exc)}
-            return result, AiToolEventResponse(name=tool_name, status="failed", summary=f"内容解析失败：{exc}"), []
+            return result, AiToolEventResponse(name=tool_name, status="failed", summary=f"内容解析失败：{exc}"), [], []
 
     if tool_name == "sync_item_to_obsidian":
         if "sync_obsidian" not in agent_permissions:
             result = {"status": "error", "message": "Permission denied"}
-            return result, AiToolEventResponse(name=tool_name, status="failed", summary="没有开放 Obsidian 同步权限"), []
+            return result, AiToolEventResponse(name=tool_name, status="failed", summary="没有开放 Obsidian 同步权限"), [], []
         item_id = _clean_optional_string(arguments.get("item_id"))
         item = _get_user_item(db, user_id, item_id or "")
         if not item:
             result = {"status": "error", "message": "Item not found"}
-            return result, AiToolEventResponse(name=tool_name, status="failed", summary="Obsidian 同步失败：Item not found"), []
+            return result, AiToolEventResponse(name=tool_name, status="failed", summary="Obsidian 同步失败：Item not found"), [], []
 
         from routers.connect import _sync_item_to_obsidian
+        from routers.items import serialize_items
 
         try:
             result = await _sync_item_to_obsidian(item, db)
+            db.refresh(item)
             summary = f"已触发《{item.title or item.id}》同步到 Obsidian"
             note = snapshot.notes_by_item_id.get(item.id) if snapshot.note_count else None
             ranked = [(note, 1.0)] if note else []
-            return result, AiToolEventResponse(name=tool_name, summary=summary), ranked
+            updated_item = serialize_items([item])[0].model_dump(mode="json")
+            return result, AiToolEventResponse(name=tool_name, summary=summary), ranked, [updated_item]
         except HTTPException as exc:
             result = {"status": "error", "message": str(exc.detail)}
-            return result, AiToolEventResponse(name=tool_name, status="failed", summary=f"Obsidian 同步失败：{exc.detail}"), []
+            return result, AiToolEventResponse(name=tool_name, status="failed", summary=f"Obsidian 同步失败：{exc.detail}"), [], []
 
     if tool_name == "sync_item_to_notion":
         if "sync_notion" not in agent_permissions:
             result = {"status": "error", "message": "Permission denied"}
-            return result, AiToolEventResponse(name=tool_name, status="failed", summary="没有开放 Notion 同步权限"), []
+            return result, AiToolEventResponse(name=tool_name, status="failed", summary="没有开放 Notion 同步权限"), [], []
         item_id = _clean_optional_string(arguments.get("item_id"))
         item = _get_user_item(db, user_id, item_id or "")
         if not item:
             result = {"status": "error", "message": "Item not found"}
-            return result, AiToolEventResponse(name=tool_name, status="failed", summary="Notion 同步失败：Item not found"), []
+            return result, AiToolEventResponse(name=tool_name, status="failed", summary="Notion 同步失败：Item not found"), [], []
 
         from routers.connect import _sync_item_to_notion
+        from routers.items import serialize_items
 
         try:
             result = await _sync_item_to_notion(item, db)
+            db.refresh(item)
             summary = f"已触发《{item.title or item.id}》同步到 Notion"
             note = snapshot.notes_by_item_id.get(item.id) if snapshot.note_count else None
             ranked = [(note, 1.0)] if note else []
-            return result, AiToolEventResponse(name=tool_name, summary=summary), ranked
+            updated_item = serialize_items([item])[0].model_dump(mode="json")
+            return result, AiToolEventResponse(name=tool_name, summary=summary), ranked, [updated_item]
         except HTTPException as exc:
             result = {"status": "error", "message": str(exc.detail)}
-            return result, AiToolEventResponse(name=tool_name, status="failed", summary=f"Notion 同步失败：{exc.detail}"), []
+            return result, AiToolEventResponse(name=tool_name, status="failed", summary=f"Notion 同步失败：{exc.detail}"), [], []
 
     result = {"status": "error", "message": f"Unknown tool: {tool_name}"}
-    return result, AiToolEventResponse(name=tool_name, status="failed", summary=f"未知工具：{tool_name}"), []
+    return result, AiToolEventResponse(name=tool_name, status="failed", summary=f"未知工具：{tool_name}"), [], []
 
 
 async def _run_agent_assistant(
@@ -848,15 +1046,26 @@ async def _run_agent_assistant(
     settings: Settings | None,
     snapshot: KnowledgeBaseSnapshot,
     conversation: list[dict[str, str]],
+    current_item: Item | None = None,
+    current_item_note: KnowledgeBaseNote | None = None,
 ) -> AiAssistantResponse:
     agent_permissions = _agent_permissions(settings)
     tools = _build_agent_tools(agent_permissions)
-    model_messages: list[dict[str, Any]] = [
-        {"role": "system", "content": _assistant_agent_system_prompt(agent_permissions, snapshot)},
-        *conversation,
-    ]
+    current_item_context = _build_current_item_context(current_item, current_item_note) if current_item is not None else ""
+    system_message = _compose_system_message(
+        _assistant_agent_system_prompt(agent_permissions, snapshot),
+        (
+            "下面是当前文章上下文。若用户提到当前文章、这篇内容、这条笔记等指代，优先以这里为准；"
+            "如果需要调用工具操作当前文章，请直接使用这里给出的 item_id。\n\n"
+            f"{current_item_context}"
+        ) if current_item_context else "",
+    )
+    model_messages: list[dict[str, Any]] = [{"role": "system", "content": system_message}, *conversation]
     tool_events: list[AiToolEventResponse] = []
     collected_notes: list[tuple[KnowledgeBaseNote, float]] = []
+    if current_item_note is not None:
+        collected_notes.append((current_item_note, 1.0))
+    updated_items: list[dict[str, Any]] = []
 
     for _ in range(_AGENT_TOOL_STEP_LIMIT):
         try:
@@ -887,6 +1096,7 @@ async def _run_agent_assistant(
                 note_count=snapshot.note_count,
                 insufficient_context=False,
                 agent_permissions=agent_permissions,
+                updated_items=updated_items,
             )
 
         model_messages.append(
@@ -909,8 +1119,9 @@ async def _run_agent_assistant(
                 result = {"status": "error", "message": "Invalid JSON arguments"}
                 event = AiToolEventResponse(name=tool_name, status="failed", summary=f"{tool_name} 参数解析失败")
                 ranked_notes: list[tuple[KnowledgeBaseNote, float]] = []
+                changed_items: list[dict[str, Any]] = []
             else:
-                result, event, ranked_notes = await _execute_agent_tool(
+                result, event, ranked_notes, changed_items = await _execute_agent_tool(
                     tool_name=tool_name,
                     arguments=arguments,
                     db=db,
@@ -920,6 +1131,7 @@ async def _run_agent_assistant(
                 )
             tool_events.append(event)
             _append_unique_ranked_notes(collected_notes, ranked_notes)
+            _append_unique_updated_items(updated_items, changed_items)
             model_messages.append(
                 {
                     "role": "tool",
@@ -955,6 +1167,7 @@ async def _run_agent_assistant(
         note_count=snapshot.note_count,
         insufficient_context=False,
         agent_permissions=agent_permissions,
+        updated_items=updated_items,
     )
 
 
@@ -1036,6 +1249,12 @@ async def assistant(request: AiAssistantRequest, db: Session = Depends(get_db)):
     ai_config = _resolve_ai_config(settings)
     snapshot = load_knowledge_base_snapshot()
     mode = "agent" if (request.mode or "").strip().lower() == "agent" else "chat"
+    current_item_id = _clean_optional_string(request.current_item_id)
+    current_item = _get_user_item(db, user_id, current_item_id) if current_item_id else None
+    current_item_note = None
+    if current_item:
+        current_item_note = snapshot.notes_by_item_id.get(current_item.id) if snapshot.note_count else None
+        current_item_note = _build_seed_note_from_item(current_item, current_item_note)
 
     if mode == "agent":
         return await _run_agent_assistant(
@@ -1045,6 +1264,8 @@ async def assistant(request: AiAssistantRequest, db: Session = Depends(get_db)):
             settings=settings,
             snapshot=snapshot,
             conversation=conversation,
+            current_item=current_item,
+            current_item_note=current_item_note,
         )
 
     latest_question = ""
@@ -1055,7 +1276,7 @@ async def assistant(request: AiAssistantRequest, db: Session = Depends(get_db)):
     if not latest_question:
         raise HTTPException(status_code=400, detail="At least one user message is required")
 
-    if snapshot.note_count == 0:
+    if snapshot.note_count == 0 and current_item_note is None:
         return AiAssistantResponse(
             mode="chat",
             message="当前没有检测到可读取的 Obsidian 知识库笔记，所以我现在还不能基于知识库回答。",
@@ -1064,11 +1285,23 @@ async def assistant(request: AiAssistantRequest, db: Session = Depends(get_db)):
             note_count=0,
             insufficient_context=True,
             agent_permissions=_agent_permissions(settings),
+            updated_items=[],
         )
 
     top_k = max(3, min(int(request.top_k or 6), 10))
-    ranked_notes = rank_notes_for_query(snapshot, latest_question, limit=top_k)
-    if not ranked_notes:
+    ranked_notes = rank_notes_for_query(snapshot, latest_question, limit=top_k) if snapshot.note_count else []
+    combined_ranked_notes: list[tuple[KnowledgeBaseNote, float]] = []
+    if current_item_note is not None:
+        combined_ranked_notes.append((current_item_note, 1.0))
+    for note, score in ranked_notes:
+        if current_item_note is not None and note.note_id == current_item_note.note_id:
+            continue
+        combined_ranked_notes.append((note, score))
+
+    if not combined_ranked_notes and current_item is not None:
+        combined_ranked_notes.append((_build_seed_note_from_item(current_item, current_item_note), 1.0))
+
+    if not combined_ranked_notes:
         return AiAssistantResponse(
             mode="chat",
             message="知识库里没有找到足够相关的笔记，因此我不能基于现有笔记回答这个问题。",
@@ -1077,23 +1310,26 @@ async def assistant(request: AiAssistantRequest, db: Session = Depends(get_db)):
             note_count=snapshot.note_count,
             insufficient_context=True,
             agent_permissions=_agent_permissions(settings),
+            updated_items=[],
         )
 
     note_context = "\n\n".join(
         _build_note_context_lines(note, index + 1)
-        for index, (note, _) in enumerate(ranked_notes)
+        for index, (note, _) in enumerate(combined_ranked_notes)
     )
-    model_messages: list[dict[str, Any]] = [
-        {"role": "system", "content": _assistant_chat_system_prompt()},
-        {
-            "role": "system",
-            "content": (
-                "下面是本轮回答可用的知识库上下文。请优先使用已有 summary / 摘要，不要重复整理。\n\n"
-                f"{note_context}"
-            ),
-        },
-        *conversation,
-    ]
+    current_item_context = _build_current_item_context(current_item, current_item_note) if current_item is not None else ""
+    system_message = _compose_system_message(
+        _assistant_chat_system_prompt(),
+        (
+            "下面是当前文章上下文。回答当前文章相关问题时，优先依据这里的内容分析、抓取文本和 OCR / 帧文字。\n\n"
+            f"{current_item_context}"
+        ) if current_item_context else "",
+        (
+            "下面是本轮回答可用的知识库上下文。请把这些笔记作为辅助参考，优先使用已有 summary / 摘要，不要重复整理。\n\n"
+            f"{note_context}"
+        ) if note_context else "",
+    )
+    model_messages: list[dict[str, Any]] = [{"role": "system", "content": system_message}, *conversation]
     try:
         answer = await chat_completion(
             api_key=ai_config["api_key"],
@@ -1108,12 +1344,13 @@ async def assistant(request: AiAssistantRequest, db: Session = Depends(get_db)):
     return AiAssistantResponse(
         mode="chat",
         message=answer.strip(),
-        citations=_serialize_citations(db, user_id, ranked_notes),
+        citations=_serialize_citations(db, user_id, combined_ranked_notes),
         tool_events=[],
         knowledge_base_path=snapshot.root_path,
         note_count=snapshot.note_count,
         insufficient_context=False,
         agent_permissions=_agent_permissions(settings),
+        updated_items=[],
     )
 
 
@@ -1135,6 +1372,63 @@ def related_notes(item_id: str, limit: int = 5, db: Session = Depends(get_db)):
         knowledge_base_path=snapshot.root_path,
         note_count=snapshot.note_count,
     )
+
+
+@router.post("/items/{item_id}/organize-analysis", response_model=ItemResponse)
+async def organize_item_analysis(item_id: str, db: Session = Depends(get_db)):
+    user_id = get_current_user_id()
+    item = _get_user_item(db, user_id, item_id)
+    if not item:
+        raise HTTPException(status_code=404, detail="Item not found")
+    if (item.parse_status or "").strip().lower() == "processing":
+        raise HTTPException(status_code=409, detail="Item content is still processing")
+
+    settings = _get_user_settings(db, user_id)
+    ai_config = _resolve_ai_config(settings)
+
+    if not _clean_optional_string(item.extracted_text):
+        raise HTTPException(status_code=400, detail="No current item analysis available for organization")
+    source_context = _build_analysis_organizer_context(item)
+
+    try:
+        response_text = await chat_completion(
+            api_key=ai_config["api_key"],
+            base_url=ai_config["base_url"],
+            model=ai_config["model"],
+            messages=[
+                {"role": "system", "content": _analysis_organizer_system_prompt()},
+                {
+                    "role": "user",
+                    "content": (
+                        "请直接整理下面这条“内容分析”文本，并输出最终可保存的内容分析文本。\n\n"
+                        f"{source_context}"
+                    ),
+                },
+            ],
+            temperature=0.2,
+        )
+    except AiClientError as exc:
+        raise _ai_request_failed(exc) from exc
+
+    organized_text = _normalize_organized_analysis_text(
+        response_text,
+        fallback_title=_clean_optional_string(item.title) or f"Item {item.id}",
+    )
+    if not organized_text:
+        raise HTTPException(status_code=502, detail="AI returned empty organized analysis")
+
+    item.extracted_text = organized_text
+    item.parse_status = "completed"
+    item.parse_error = None
+    if item.parsed_at is None:
+        item.parsed_at = datetime.utcnow()
+
+    db.commit()
+    db.refresh(item)
+
+    from routers.items import serialize_items
+
+    return serialize_items([item])[0]
 
 
 @router.post("/items/{item_id}/analysis", response_model=AiItemAnalysisResponse)

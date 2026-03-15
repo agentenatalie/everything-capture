@@ -16,7 +16,7 @@
     <link
         href="https://fonts.googleapis.com/css2?family=Manrope:wght@500;600;700&family=Noto+Sans+SC:wght@400;500;600;700&display=swap"
         rel="stylesheet">
-    <link rel="stylesheet" href="css/index.css?v=20260313settingsnarrow2">
+    <link rel="stylesheet" href="css/index.css?v=20260314aiload1">
 </head>
 
 <body>
@@ -251,12 +251,7 @@
                             <div class="settings-section" id="settingsSectionAi">
                                 <div class="settings-section-head">
                                     <div class="settings-section-head-main">
-                                        <span class="settings-section-mark" aria-hidden="true">
-                                            <svg viewBox="0 0 24 24" fill="none" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
-                                                <path d="M12 4.25 13.8 8.2 17.75 10 13.8 11.8 12 15.75 10.2 11.8 6.25 10 10.2 8.2 12 4.25Z"></path>
-                                                <path d="M18.25 15.25 19 16.9 20.65 17.65 19 18.4 18.25 20.05 17.5 18.4 15.85 17.65 17.5 16.9 18.25 15.25Z"></path>
-                                            </svg>
-                                        </span>
+                                        <span class="settings-section-mark" aria-hidden="true">01</span>
                                         <div>
                                             <h3>AI</h3>
                                             <div class="settings-section-copy">先把 AI 接好，再决定它能读取和操作什么。</div>
@@ -322,14 +317,7 @@
                             <div class="settings-section" id="settingsSectionNotion">
                                 <div class="settings-section-head">
                                     <div class="settings-section-head-main">
-                                        <span class="settings-section-mark" aria-hidden="true">
-                                            <svg viewBox="0 0 24 24" fill="none" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
-                                                <path d="M7 5.75h10a1.5 1.5 0 0 1 1.5 1.5v9.5a1.5 1.5 0 0 1-1.5 1.5H7a1.5 1.5 0 0 1-1.5-1.5v-9.5a1.5 1.5 0 0 1 1.5-1.5Z"></path>
-                                                <path d="M9 8.75h6"></path>
-                                                <path d="M9 12h6"></path>
-                                                <path d="M9 15.25h4"></path>
-                                            </svg>
-                                        </span>
+                                        <span class="settings-section-mark" aria-hidden="true">02</span>
                                         <div>
                                             <h3>Notion</h3>
                                             <div class="settings-section-copy">连上后直接选同步目标，减少多余配置。</div>
@@ -385,12 +373,7 @@
                             <div class="settings-section" id="settingsSectionObsidian">
                                 <div class="settings-section-head">
                                     <div class="settings-section-head-main">
-                                        <span class="settings-section-mark" aria-hidden="true">
-                                            <svg viewBox="0 0 24 24" fill="none" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
-                                                <path d="M7 6.75h6.5l3.75 3.75v6.75A1.75 1.75 0 0 1 15.5 19H8.5A1.75 1.75 0 0 1 6.75 17.25V8.5A1.75 1.75 0 0 1 8.5 6.75Z"></path>
-                                                <path d="M13.5 6.75v3.75h3.75"></path>
-                                            </svg>
-                                        </span>
+                                        <span class="settings-section-mark" aria-hidden="true">03</span>
                                         <div>
                                             <h3>Obsidian</h3>
                                             <div class="settings-section-copy">设好接口和写入位置，笔记就会按当前格式同步进去。</div>
@@ -426,14 +409,7 @@
                             <div class="settings-section" id="settingsSectionSync">
                                 <div class="settings-section-head">
                                     <div class="settings-section-head-main">
-                                        <span class="settings-section-mark" aria-hidden="true">
-                                            <svg viewBox="0 0 24 24" fill="none" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
-                                                <path d="M6.75 8.5a5.25 5.25 0 0 1 9-3.71"></path>
-                                                <path d="M17.25 15.5a5.25 5.25 0 0 1-9 3.71"></path>
-                                                <path d="M15.75 3.75v4.25H11.5"></path>
-                                                <path d="M8.25 20.25V16H12.5"></path>
-                                            </svg>
-                                        </span>
+                                        <span class="settings-section-mark" aria-hidden="true">04</span>
                                         <div>
                                             <h3>同步</h3>
                                             <div class="settings-section-copy">自动同步和一次性补同步放在一起，减少来回切换。</div>
@@ -507,10 +483,18 @@
     <div class="modal-overlay" id="askAiOverlay">
         <div class="ai-chat-modal" role="dialog" aria-modal="true" aria-label="Ask AI">
             <div class="ai-chat-header">
-                <div class="ai-chat-title">Ask AI</div>
-                <div class="ai-chat-mode">
-                    <button id="aiModeChatBtn" class="ai-mode-btn is-active" type="button">Chat</button>
-                    <button id="aiModeAgentBtn" class="ai-mode-btn" type="button">Agent</button>
+                <div class="ai-chat-headline">
+                    <div class="ai-chat-title-row">
+                        <div class="ai-chat-title">Ask AI</div>
+                    </div>
+                    <div class="ai-chat-subtitle">先基于你的知识库回答；切到 Agent 后会在权限允许时直接执行实际操作。</div>
+                </div>
+                <div class="ai-chat-header-actions">
+                    <button id="clearAiChatBtn" class="ai-chat-ghost-btn" type="button">清空</button>
+                    <div class="ai-chat-mode">
+                        <button id="aiModeChatBtn" class="ai-mode-btn is-active" type="button">Chat</button>
+                        <button id="aiModeAgentBtn" class="ai-mode-btn" type="button">Agent</button>
+                    </div>
                 </div>
                 <button id="closeAskAiModal" class="ai-chat-close" type="button" aria-label="关闭">
                     <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18M6 6l12 12"/></svg>
@@ -519,10 +503,10 @@
             <div class="ai-chat-messages" id="askAiResult">
                 <div class="ai-welcome">
                     <div class="ai-welcome-icon">
-                        <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M12 3.75l1.93 4.32 4.32 1.93-4.32 1.93L12 16.25l-1.93-4.32-4.32-1.93 4.32-1.93L12 3.75z"/><path d="M18.35 14.85l.8 1.8 1.8.8-1.8.8-.8 1.8-.8-1.8-1.8-.8 1.8-.8.8-1.8z"/></svg>
+                        <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M12 4.25 13.8 8.2 17.75 10 13.8 11.8 12 15.75 10.2 11.8 6.25 10 10.2 8.2 12 4.25Z"></path><path d="M18.25 15.25 19 16.9 20.65 17.65 19 18.4 18.25 20.05 17.5 18.4 15.85 17.65 17.5 16.9 18.25 15.25Z"></path></svg>
                     </div>
-                    <div class="ai-welcome-title">问我任何问题</div>
-                    <div class="ai-welcome-desc">基于你的知识库回答，如果资料不足会直接说明</div>
+                    <div class="ai-welcome-title">从知识库开始</div>
+                    <div class="ai-welcome-desc">你可以直接提问，或切到 Agent 让它按权限执行真实操作。</div>
                 </div>
             </div>
             <div class="ai-chat-input-area">
@@ -538,14 +522,14 @@
         </div>
     </div>
 
-    <script src="js/app-core.js?v=20260313readerai1"></script>
-    <script src="js/app-auth.js?v=20260313escwarm1"></script>
-    <script src="js/app-settings.js?v=20260313escwarm1"></script>
+    <script src="js/app-core.js?v=20260314analysisinline1"></script>
+    <script src="js/app-auth.js?v=20260314askaipopup1"></script>
+    <script src="js/app-settings.js?v=20260314askaipopup1"></script>
     <script src="js/app-command.js?v=20260312n"></script>
     <script src="js/app-folders.js?v=20260312n"></script>
-    <script src="js/app-content.js?v=20260313escwarm1"></script>
-    <script src="js/app-items.js?v=20260313escwarm1"></script>
-    <script src="js/app-ai.js?v=20260313readersidebar1"></script>
+    <script src="js/app-content.js?v=20260314askaipopup1"></script>
+    <script src="js/app-items.js?v=20260314aiload1"></script>
+    <script src="js/app-ai.js?v=20260314aiload1"></script>
 </body>
 
 </html>

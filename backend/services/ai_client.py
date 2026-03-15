@@ -88,10 +88,23 @@ async def create_chat_completion(
     except httpx.HTTPError as exc:
         raise AiClientError(f"AI request failed: {exc}") from exc
 
+    response_text = (response.text or "").strip()
     try:
         response_payload = response.json()
     except json.JSONDecodeError as exc:
-        raise AiClientError("AI returned a non-JSON response") from exc
+        if response.is_success and response_text:
+            return {
+                "choices": [
+                    {
+                        "message": {
+                            "role": "assistant",
+                            "content": response_text,
+                        }
+                    }
+                ]
+            }
+        detail_text = response_text or response.reason_phrase or "AI request failed"
+        raise AiClientError(detail_text if not response.is_success else "AI returned a non-JSON response") from exc
 
     if not response.is_success:
         detail = response_payload.get("error")

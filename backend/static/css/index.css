@@ -5999,6 +5999,18 @@
             color: #334155;
         }
 
+        .reader-sidebar .content-list {
+            margin: 0 0 0 0.95rem;
+            padding-left: 1rem;
+            font-size: 0.89rem;
+            line-height: 1.68;
+            color: #334155;
+        }
+
+        .reader-sidebar .content-list li + li {
+            margin-top: 0.18rem;
+        }
+
         .reader-sidebar .content-empty-state {
             margin-top: 0;
             border-style: solid;

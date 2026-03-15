@@ -397,6 +397,7 @@
             return String(value || '')
                 .replace(/\r\n/g, '\n')
                 .replace(/\r/g, '\n')
+                .replace(/<think\b[^>]*>[\s\S]*?<\/think>/gi, '')
                 .trim();
         }
 
@@ -505,6 +506,73 @@
             return '';
         }
 
+        function renderExtractedMarkdown(value) {
+            const source = String(value || '').replace(/\r\n/g, '\n').replace(/\r/g, '\n').trim();
+            if (!source) return '';
+
+            const lines = source.split('\n');
+            const html = [];
+            let paragraph = [];
+            let listType = '';
+            let listItems = [];
+
+            const flushParagraph = () => {
+                if (!paragraph.length) return;
+                html.push(`<p class="content-para">${renderInlineMarkdown(paragraph.join('\n')).replace(/\n/g, '<br>')}</p>`);
+                paragraph = [];
+            };
+
+            const flushList = () => {
+                if (!listItems.length || !listType) return;
+                const listClass = listType === 'ol' ? 'content-list content-list-ordered' : 'content-list';
+                html.push(
+                    `<${listType} class="${listClass}">${listItems.map((item) => `<li>${renderInlineMarkdown(item).replace(/\n/g, '<br>')}</li>`).join('')}</${listType}>`
+                );
+                listType = '';
+                listItems = [];
+            };
+
+            for (const line of lines) {
+                const trimmed = line.trim();
+                if (!trimmed) {
+                    flushParagraph();
+                    flushList();
+                    continue;
+                }
+
+                const headingMatch = trimmed.match(/^(#{1,6})\s+(.+)$/);
+                if (headingMatch) {
+                    flushParagraph();
+                    flushList();
+                    html.push(`<p class="content-para"><strong>${renderInlineMarkdown(headingMatch[2])}</strong></p>`);
+                    continue;
+                }
+
+                const unorderedMatch = line.match(/^\s*[-*+]\s+(.*)$/);
+                const orderedMatch = line.match(/^\s*\d+\.\s+(.*)$/);
+                if (unorderedMatch || orderedMatch) {
+                    flushParagraph();
+                    const nextType = unorderedMatch ? 'ul' : 'ol';
+                    if (listType && listType !== nextType) {
+                        flushList();
+                    }
+                    listType = nextType;
+                    listItems.push((unorderedMatch || orderedMatch)[1]);
+                    continue;
+                }
+
+                if (listItems.length) {
+                    flushList();
+                }
+
+                paragraph.push(line);
+            }
+
+            flushParagraph();
+            flushList();
+            return html.join('');
+        }
+
         function renderExtractedSectionMarkup(section) {
             if (!section?.value) return '';
 
@@ -526,12 +594,7 @@
                 `;
             }
 
-            return section.value
-                .split(/\n{2,}/)
-                .map((paragraph) => paragraph.trim())
-                .filter(Boolean)
-                .map((paragraph) => `<p class="content-para">${escapeHtml(paragraph).replace(/\n/g, '<br>')}</p>`)
-                .join('');
+            return renderExtractedMarkdown(section.value);
         }
 
         function renderExtractedSections(item, options = {}) {

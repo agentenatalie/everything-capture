@@ -428,7 +428,7 @@
             return {
                 role: entry.role === 'user' ? 'user' : 'assistant',
                 mode: entry.mode === 'agent' ? 'agent' : 'chat',
-                content: stripAiReasoningBlocks(entry.content || ''),
+                content: entry.content || '',
                 citations: Array.isArray(entry.citations) ? entry.citations : [],
                 toolEvents: Array.isArray(entry.tool_events) ? entry.tool_events : (Array.isArray(entry.toolEvents) ? entry.toolEvents : []),
                 insufficientContext: Boolean(entry.insufficient_context ?? entry.insufficientContext),
@@ -445,7 +445,7 @@
                 .map((entry) => ({
                     role: entry.role,
                     mode: entry.mode === 'agent' ? 'agent' : 'chat',
-                    content: stripAiReasoningBlocks(entry.content || ''),
+                    content: entry.content || '',
                     citations: Array.isArray(entry.citations) ? entry.citations : [],
                     tool_events: Array.isArray(entry.toolEvents) ? entry.toolEvents : [],
                     insufficient_context: Boolean(entry.insufficientContext),
@@ -681,6 +681,74 @@
                 .trim();
         }
 
+        /**
+         * Extract thinking blocks and answer from AI response content.
+         * Supports both <think>...</think> tags and JSON {"think": ..., "answer": ...} format.
+         * Returns { thinking: string|null, answer: string }
+         */
+        function extractThinkingAndAnswer(value) {
+            const raw = String(value || '');
+            if (!raw.trim()) return { thinking: null, answer: '' };
+
+            // Try JSON format: {"think": "...", "answer": "..."}
+            const trimmed = raw.trim();
+            if (trimmed.startsWith('{')) {
+                try {
+                    const parsed = JSON.parse(trimmed);
+                    if (parsed && typeof parsed.think === 'string' && typeof parsed.answer === 'string') {
+                        return {
+                            thinking: parsed.think.trim() || null,
+                            answer: parsed.answer.trim(),
+                        };
+                    }
+                } catch (_) {
+                    // Not valid JSON, fall through to <think> tag parsing
+                }
+            }
+
+            // Try <think>...</think> tag format
+            const thinkMatch = raw.match(/<think\b[^>]*>([\s\S]*?)<\/think>/i);
+            if (thinkMatch) {
+                const thinking = thinkMatch[1].trim() || null;
+                const answer = raw
+                    .replace(/<think\b[^>]*>[\s\S]*?<\/think>/gi, '')
+                    .replace(/\n{3,}/g, '\n\n')
+                    .trim();
+                return { thinking, answer };
+            }
+
+            // Check for open <think> tag without closing (streaming in progress)
+            const openThinkMatch = raw.match(/<think\b[^>]*>([\s\S]*)$/i);
+            if (openThinkMatch) {
+                return {
+                    thinking: openThinkMatch[1].trim() || null,
+                    answer: '',
+                    _thinkingInProgress: true,
+                };
+            }
+
+            return { thinking: null, answer: raw };
+        }
+
+        /**
+         * Render a collapsible thinking block.
+         * @param {string} thinking - The thinking content
+         * @param {boolean} inProgress - Whether thinking is still streaming
+         * @returns {string} HTML string
+         */
+        function renderThinkingBlock(thinking, inProgress = false) {
+            if (!thinking) return '';
+            const thinkingHtml = renderMarkdown(thinking);
+            const openAttr = inProgress ? ' open' : '';
+            const statusLabel = inProgress ? ' <span class="ai-thinking-status">思考中…</span>' : '';
+            return `
+                <details class="ai-thinking-toggle"${openAttr}>
+                    <summary class="ai-thinking-summary">思考过程${statusLabel}</summary>
+                    <div class="ai-thinking-content ai-markdown">${thinkingHtml}</div>
+                </details>
+            `;
+        }
+
         function escapeAiText(value) {
             return escapeHtml(stripAiReasoningBlocks(value)).replace(/\n/g, '<br>');
         }
@@ -711,7 +779,16 @@
             html = html.replace(/\[([^\]]+)\]\(([^)]+)\)/g, (_, label, url) => {
                 const safeUrl = sanitizeAiUrl(url);
                 if (!safeUrl) return escapeHtml(label);
-                return `<a href="${escapeAttribute(safeUrl)}" target="_blank" rel="noopener noreferrer">${escapeHtml(label)}</a>`;
+                const token = `\x00AICODE${placeholders.length}\x00`;
+                placeholders.push(`<a href="${escapeAttribute(safeUrl)}" target="_blank" rel="noopener noreferrer">${escapeHtml(label)}</a>`);
+                return token;
+            });
+
+            // Auto-link bare URLs (https://... or http://...)
+            html = html.replace(/(?<![="'\w/])(https?:\/\/[^\s<>)"',;，。、！？》）\]]+)/gi, (match) => {
+                const token = `\x00AICODE${placeholders.length}\x00`;
+                placeholders.push(`<a href="${escapeAttribute(match)}" target="_blank" rel="noopener noreferrer">${match}</a>`);
+                return token;
             });
 
             html = html.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
@@ -1314,16 +1391,22 @@
             const metaMarkup = buildAiMetaMarkup(entry);
             const actionsMarkup = buildAiMessageActionsMarkup({ itemId, conversationId, messageIndex, origin, entry });
 
-            let markdownHtml = renderMarkdown(entry.content || '');
+            // Extract thinking blocks for collapsible display
+            const { thinking, answer } = extractThinkingAndAnswer(entry.content || '');
+            const thinkingMarkup = renderThinkingBlock(thinking);
+
+            const displayContent = answer || entry.content || '';
+            let markdownHtml = renderMarkdown(displayContent);
             // Make [N] references clickable — link to the cited item
             if (citations.length) {
-                markdownHtml = _linkifyCitationRefs(markdownHtml, entry.content, entry.citations);
+                markdownHtml = _linkifyCitationRefs(markdownHtml, displayContent, entry.citations);
             }
 
             return `
                 <div class="ai-msg${compact ? ' is-compact' : ''}">
                     <div class="ai-msg-inner">
                         <div class="ai-msg-content">
+                            ${thinkingMarkup}
                             <div class="ai-markdown${entry.isError ? ' is-error' : ''}">${markdownHtml}</div>
                             ${metaMarkup}
                             ${actionsMarkup}
@@ -1594,10 +1677,44 @@
             if (!askAiResult) return;
             const streamingEl = askAiResult.querySelector('.ai-msg--streaming');
             if (!streamingEl) return;
-            const contentEl = streamingEl.querySelector('.ai-markdown');
+            const contentEl = streamingEl.querySelector('.ai-msg-content > .ai-markdown');
             const statusEl = streamingEl.querySelector('.ai-streaming-status');
+            let thinkingEl = streamingEl.querySelector('.ai-thinking-toggle');
+
+            // Extract thinking blocks from streaming content
+            const { thinking, answer, _thinkingInProgress } = extractThinkingAndAnswer(entry.content || '');
+
+            // Handle thinking block UI
+            if (thinking) {
+                if (!thinkingEl) {
+                    // Insert thinking toggle before the markdown content
+                    const msgContent = streamingEl.querySelector('.ai-msg-content');
+                    if (msgContent && contentEl) {
+                        const thinkHtml = renderThinkingBlock(thinking, _thinkingInProgress);
+                        contentEl.insertAdjacentHTML('beforebegin', thinkHtml);
+                        thinkingEl = streamingEl.querySelector('.ai-thinking-toggle');
+                    }
+                } else {
+                    // Update existing thinking content
+                    const thinkContent = thinkingEl.querySelector('.ai-thinking-content');
+                    if (thinkContent) {
+                        thinkContent.innerHTML = renderMarkdown(thinking);
+                    }
+                    // Update status label
+                    const statusSpan = thinkingEl.querySelector('.ai-thinking-status');
+                    if (_thinkingInProgress && !statusSpan) {
+                        const summary = thinkingEl.querySelector('.ai-thinking-summary');
+                        if (summary) {
+                            summary.innerHTML = '思考过程 <span class="ai-thinking-status">思考中…</span>';
+                        }
+                    } else if (!_thinkingInProgress && statusSpan) {
+                        statusSpan.remove();
+                    }
+                }
+            }
+
             if (contentEl) {
-                contentEl.innerHTML = renderMarkdown(entry.content || '');
+                contentEl.innerHTML = renderMarkdown(answer || '');
             }
             if (statusEl) {
                 statusEl.textContent = entry._streamStatus || '';
@@ -1674,7 +1791,7 @@
                     aiConversation.push({
                         role: 'assistant',
                         mode: data.mode || 'agent',
-                        content: stripAiReasoningBlocks(data.message || ''),
+                        content: data.message || '',
                         citations: Array.isArray(data.citations) ? data.citations : [],
                         toolEvents: Array.isArray(data.tool_events) ? data.tool_events : [],
                         insufficientContext: Boolean(data.insufficient_context),
@@ -1770,7 +1887,7 @@
                             streamEntry.content += event.content || '';
                             _updateStreamingMessage(streamEntry);
                         } else if (event.type === 'done') {
-                            streamEntry.content = stripAiReasoningBlocks(event.message || streamEntry.content);
+                            streamEntry.content = event.message || streamEntry.content;
                             doneCitations = Array.isArray(event.citations) ? event.citations : [];
                             streamEntry.citations = doneCitations;
                             streamEntry.insufficientContext = Boolean(event.insufficient_context);
@@ -2154,7 +2271,7 @@
                 conversation.push({
                     role: 'assistant',
                     mode: data.mode || 'chat',
-                    content: stripAiReasoningBlocks(data.message || ''),
+                    content: data.message || '',
                     citations: Array.isArray(data.citations) ? data.citations : [],
                     toolEvents: Array.isArray(data.tool_events) ? data.tool_events : [],
                     insufficientContext: Boolean(data.insufficient_context),

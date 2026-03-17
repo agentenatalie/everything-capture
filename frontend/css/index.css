@@ -5359,6 +5359,59 @@
         .ai-markdown h3 { font-size: 1.1em; }
         .ai-markdown a { color: #37352f; text-decoration: underline; text-underline-offset: 2px; }
 
+        /* Collapsible thinking process */
+        .ai-thinking-toggle {
+            margin: 0 0 10px;
+        }
+        .ai-thinking-summary {
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+            padding: 0;
+            font-size: 13px;
+            font-weight: 400;
+            color: #94a3b8;
+            cursor: pointer;
+            user-select: none;
+            list-style: none;
+        }
+        .ai-thinking-summary::-webkit-details-marker { display: none; }
+        .ai-thinking-summary::before {
+            content: '▸';
+            display: inline-block;
+            font-size: 11px;
+            transition: transform 0.15s ease;
+        }
+        .ai-thinking-toggle[open] > .ai-thinking-summary::before {
+            transform: rotate(90deg);
+        }
+        .ai-thinking-summary:hover { color: #64748b; }
+        .ai-thinking-status {
+            font-size: 12px;
+            color: #b0b8c4;
+            animation: ai-thinking-pulse 1.5s ease-in-out infinite;
+        }
+        @keyframes ai-thinking-pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
+        }
+        .ai-thinking-content {
+            margin-top: 6px;
+            font-size: 13px;
+            line-height: 1.6;
+            color: #94a3b8;
+            max-height: 320px;
+            overflow-y: auto;
+        }
+        .ai-thinking-content p { margin: 0 0 0.5em; }
+        .ai-thinking-content p:last-child { margin-bottom: 0; }
+        .is-compact .ai-thinking-toggle { margin-bottom: 6px; }
+        .is-compact .ai-thinking-summary { font-size: 12px; }
+        .is-compact .ai-thinking-content {
+            font-size: 12px;
+            max-height: 200px;
+        }
+
         /* Reader AI Panel (in card modal) */
         .reader-ai-panel {
             display: block;

@@ -1781,10 +1781,20 @@
 
         document.addEventListener('keydown', (e) => {
             if (e.key !== 'Escape') return;
-            if (!closeTopmostPopupOnEscape()) return;
-
-            e.preventDefault();
-            e.stopImmediatePropagation();
+            if (closeTopmostPopupOnEscape()) {
+                e.preventDefault();
+                e.stopImmediatePropagation();
+                return;
+            }
+            // No popup open — clear search filter if active
+            if (filterInput && filterInput.value.trim()) {
+                filterInput.value = '';
+                filterInput.blur();
+                fetchItems();
+                e.preventDefault();
+                e.stopImmediatePropagation();
+                return;
+            }
         }, true);
 
         window.addEventListener('everything-capture:open-item', (event) => {

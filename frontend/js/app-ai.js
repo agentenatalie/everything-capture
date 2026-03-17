@@ -703,7 +703,7 @@
             let html = escapeHtml(String(value || ''));
 
             html = html.replace(/`([^`]+)`/g, (_, code) => {
-                const token = `__AI_MD_CODE_${placeholders.length}__`;
+                const token = `\x00AICODE${placeholders.length}\x00`;
                 placeholders.push(`<code>${escapeHtml(code)}</code>`);
                 return token;
             });
@@ -721,7 +721,7 @@
             html = html.replace(/~~([^~]+)~~/g, '<del>$1</del>');
 
             placeholders.forEach((replacement, index) => {
-                html = html.replace(`__AI_MD_CODE_${index}__`, replacement);
+                html = html.replace(`\x00AICODE${index}\x00`, replacement);
             });
 
             return html;
@@ -1256,6 +1256,51 @@
             }
         }
 
+        function _buildCitationRefMap(content, citations) {
+            // Build a map from [N] index → library_item_id
+            // Backend returns citations in the order [N] markers appear in the text
+            // So we parse the unique [N] values from text and pair with citations in order
+            const refMap = {};
+            if (!Array.isArray(citations) || !citations.length) return refMap;
+            const raw = String(content || '');
+            const seen = new Set();
+            const ordered = [];
+            const re = /\[(\d{1,3})\]/g;
+            let m;
+            while ((m = re.exec(raw)) !== null) {
+                const n = parseInt(m[1], 10);
+                if (!seen.has(n)) {
+                    seen.add(n);
+                    ordered.push(n);
+                }
+            }
+            ordered.forEach((n, i) => {
+                const c = citations[i];
+                if (c && c.library_item_id) {
+                    refMap[n] = c;
+                }
+            });
+            return refMap;
+        }
+
+        function _linkifyCitationRefs(html, content, citations) {
+            // Convert [N] in rendered HTML to clickable citation buttons
+            if (!Array.isArray(citations) || !citations.length) return html;
+            const refMap = _buildCitationRefMap(content, citations);
+            if (!Object.keys(refMap).length) return html;
+
+            return html.replace(/\[(\d{1,3})\]/g, (match, num) => {
+                const n = parseInt(num, 10);
+                const citation = refMap[n];
+                if (citation && citation.library_item_id) {
+                    const cId = escapeAttribute(citation.library_item_id);
+                    const cTitle = escapeHtml(citation.title || `引用 ${num}`);
+                    return `<button class="ai-citation-ref" data-ai-citation-id="${cId}" title="${cTitle}" type="button">[${num}]</button>`;
+                }
+                return match;
+            });
+        }
+
         function renderAssistantMessage(entry, options = {}) {
             const {
                 compact = false,
@@ -1265,27 +1310,24 @@
                 origin = 'main',
             } = options;
             const citations = getVisibleAiCitations(entry.citations);
-            const citationsMarkup = citations.length
-                ? `
-                    <div class="ai-citations">
-                        <div class="ai-citation-label">引用内容</div>
-                        <div class="ai-citation-list">${citations.map((citation) => buildAiCitationMarkup(citation, compact)).join('')}</div>
-                    </div>
-                `
-                : '';
             const toolEventsMarkup = buildAiToolEventsMarkup(entry.toolEvents);
             const metaMarkup = buildAiMetaMarkup(entry);
             const actionsMarkup = buildAiMessageActionsMarkup({ itemId, conversationId, messageIndex, origin, entry });
+
+            let markdownHtml = renderMarkdown(entry.content || '');
+            // Make [N] references clickable — link to the cited item
+            if (citations.length) {
+                markdownHtml = _linkifyCitationRefs(markdownHtml, entry.content, entry.citations);
+            }
 
             return `
                 <div class="ai-msg${compact ? ' is-compact' : ''}">
                     <div class="ai-msg-inner">
                         <div class="ai-msg-content">
-                            <div class="ai-markdown${entry.isError ? ' is-error' : ''}">${renderMarkdown(entry.content || '')}</div>
+                            <div class="ai-markdown${entry.isError ? ' is-error' : ''}">${markdownHtml}</div>
                             ${metaMarkup}
                             ${actionsMarkup}
                             ${toolEventsMarkup}
-                            ${citationsMarkup}
                         </div>
                     </div>
                 </div>
@@ -1398,6 +1440,10 @@
             }
 
             const conversationMarkup = aiConversation.map((entry, index) => {
+                if (entry._streamStatus !== undefined) {
+                    // Streaming entry — rendered separately, skip here
+                    return '';
+                }
                 if (entry.role === 'user') {
                     return renderUserMessage(entry);
                 }
@@ -1408,7 +1454,9 @@
                     origin: 'main',
                 });
             }).join('');
-            const loadingMarkup = askAiRequestInFlight
+            // Show old-style loading card only for agent mode (chat mode uses streaming)
+            const isStreamingChat = askAiRequestInFlight && aiAssistantMode === 'chat';
+            const loadingMarkup = (askAiRequestInFlight && !isStreamingChat)
                 ? renderAiLoadingMessage({
                     mode: aiAssistantMode,
                     label: aiAssistantMode === 'agent' ? 'Agent 正在执行' : 'AI 正在思考',
@@ -1542,6 +1590,42 @@
             });
         }
 
+        function _updateStreamingMessage(entry) {
+            if (!askAiResult) return;
+            const streamingEl = askAiResult.querySelector('.ai-msg--streaming');
+            if (!streamingEl) return;
+            const contentEl = streamingEl.querySelector('.ai-markdown');
+            const statusEl = streamingEl.querySelector('.ai-streaming-status');
+            if (contentEl) {
+                contentEl.innerHTML = renderMarkdown(entry.content || '');
+            }
+            if (statusEl) {
+                statusEl.textContent = entry._streamStatus || '';
+                statusEl.style.display = entry._streamStatus ? '' : 'none';
+            }
+            window.requestAnimationFrame(() => {
+                askAiResult.scrollTop = askAiResult.scrollHeight;
+            });
+        }
+
+        async function _streamChatAssistant(messages, currentItemId) {
+            const response = await fetch('/api/ai/assistant/stream', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    mode: 'chat',
+                    messages,
+                    top_k: 6,
+                    current_item_id: currentItemId || undefined,
+                }),
+            });
+            if (!response.ok) {
+                const errData = await response.json().catch(() => ({}));
+                throw new Error(errData.detail || 'AI 请求失败');
+            }
+            return response.body;
+        }
+
         async function submitAskAiQuestion() {
             if (!(await ensureAiSessionReady({ allowRecovery: true }))) {
                 showToast('无法初始化本地会话。', 'error');
@@ -1565,7 +1649,6 @@
 
             askAiRequestInFlight = true;
             aiConversation.push({ role: 'user', content: question, createdAt: new Date().toISOString() });
-            // 同步到对应模式的变量
             if (aiAssistantMode === 'agent') {
                 aiAgentConversation = aiConversation.slice();
             } else {
@@ -1578,56 +1661,146 @@
             submitAskAiBtn.classList.add('is-loading');
             submitAskAiBtn.setAttribute('aria-label', aiAssistantMode === 'agent' ? 'Agent 执行中' : 'AI 思考中');
 
-            try {
-                const data = await requestAiAssistant(
-                    normalizeConversationForRequest(),
-                    aiAssistantMode,
-                    { currentItemId: currentAiContextItemId }
-                );
-                await applyAiAssistantSideEffects(data);
-                askAiRequestInFlight = false;
-                aiConversation.push({
-                    role: 'assistant',
-                    mode: data.mode || aiAssistantMode,
-                    content: stripAiReasoningBlocks(data.message || ''),
-                    citations: Array.isArray(data.citations) ? data.citations : [],
-                    toolEvents: Array.isArray(data.tool_events) ? data.tool_events : [],
-                    insufficientContext: Boolean(data.insufficient_context),
-                    knowledgeBasePath: data.knowledge_base_path || '',
-                    noteCount: Number(data.note_count || 0),
-                    createdAt: new Date().toISOString(),
-                });
-                // 同步到对应模式的变量
-                if (aiAssistantMode === 'agent') {
+            // Agent mode: use the original non-streaming endpoint
+            if (aiAssistantMode === 'agent') {
+                try {
+                    const data = await requestAiAssistant(
+                        normalizeConversationForRequest(),
+                        'agent',
+                        { currentItemId: currentAiContextItemId }
+                    );
+                    await applyAiAssistantSideEffects(data);
+                    askAiRequestInFlight = false;
+                    aiConversation.push({
+                        role: 'assistant',
+                        mode: data.mode || 'agent',
+                        content: stripAiReasoningBlocks(data.message || ''),
+                        citations: Array.isArray(data.citations) ? data.citations : [],
+                        toolEvents: Array.isArray(data.tool_events) ? data.tool_events : [],
+                        insufficientContext: Boolean(data.insufficient_context),
+                        knowledgeBasePath: data.knowledge_base_path || '',
+                        noteCount: Number(data.note_count || 0),
+                        createdAt: new Date().toISOString(),
+                    });
                     aiAgentConversation = aiConversation.slice();
-                } else {
-                    aiChatConversation = aiConversation.slice();
+                    renderAiConversation();
+                    await persistTopAiConversation();
+                } catch (error) {
+                    askAiRequestInFlight = false;
+                    aiConversation.push({
+                        role: 'assistant', mode: 'agent',
+                        content: error.message || 'AI 请求失败',
+                        citations: [], toolEvents: [], isError: true,
+                        createdAt: new Date().toISOString(),
+                    });
+                    aiAgentConversation = aiConversation.slice();
+                    renderAiConversation();
+                    try { await persistTopAiConversation(); } catch (_) {}
+                    showToast(`AI 失败：${error.message}`, 'error');
+                } finally {
+                    submitAskAiBtn.classList.remove('is-loading');
+                    submitAskAiBtn.setAttribute('aria-label', '发送');
+                    syncAskAiMeta();
+                    updateAskAiSubmitState();
                 }
+                return;
+            }
+
+            // Chat mode: streaming
+            const streamEntry = {
+                role: 'assistant',
+                mode: 'chat',
+                content: '',
+                citations: [],
+                toolEvents: [],
+                _streamStatus: '正在检索知识库…',
+                createdAt: new Date().toISOString(),
+            };
+            aiConversation.push(streamEntry);
+            aiChatConversation = aiConversation.slice();
+
+            // Render the streaming placeholder
+            if (askAiResult) {
+                const existingLoading = askAiResult.querySelector('.ai-msg--loading');
+                if (existingLoading) existingLoading.remove();
+                const streamHtml = `
+                    <div class="ai-msg ai-msg--streaming">
+                        <div class="ai-msg-inner">
+                            <div class="ai-msg-content">
+                                <div class="ai-streaming-status" style="color: var(--color-text-secondary); font-size: 0.85em; margin-bottom: 0.5em;">正在检索知识库…</div>
+                                <div class="ai-markdown"></div>
+                            </div>
+                        </div>
+                    </div>
+                `;
+                askAiResult.insertAdjacentHTML('beforeend', streamHtml);
+                window.requestAnimationFrame(() => { askAiResult.scrollTop = askAiResult.scrollHeight; });
+            }
+
+            try {
+                const body = await _streamChatAssistant(
+                    normalizeConversationForRequest(),
+                    currentAiContextItemId,
+                );
+                const reader = body.getReader();
+                const decoder = new TextDecoder();
+                let buffer = '';
+                let doneCitations = [];
+
+                while (true) {
+                    const { done, value } = await reader.read();
+                    if (done) break;
+                    buffer += decoder.decode(value, { stream: true });
+                    const lines = buffer.split('\n');
+                    buffer = lines.pop() || '';
+
+                    for (const line of lines) {
+                        const trimmed = line.trim();
+                        if (!trimmed || !trimmed.startsWith('data: ')) continue;
+                        let event;
+                        try { event = JSON.parse(trimmed.slice(6)); } catch (_) { continue; }
+
+                        if (event.type === 'status') {
+                            streamEntry._streamStatus = event.message || '';
+                            _updateStreamingMessage(streamEntry);
+                        } else if (event.type === 'delta') {
+                            if (streamEntry._streamStatus) {
+                                streamEntry._streamStatus = '';
+                            }
+                            streamEntry.content += event.content || '';
+                            _updateStreamingMessage(streamEntry);
+                        } else if (event.type === 'done') {
+                            streamEntry.content = stripAiReasoningBlocks(event.message || streamEntry.content);
+                            doneCitations = Array.isArray(event.citations) ? event.citations : [];
+                            streamEntry.citations = doneCitations;
+                            streamEntry.insufficientContext = Boolean(event.insufficient_context);
+                        } else if (event.type === 'error') {
+                            throw new Error(event.message || 'AI streaming failed');
+                        }
+                    }
+                }
+
+                // Finalize: remove streaming class, do a full re-render
+                delete streamEntry._streamStatus;
+                askAiRequestInFlight = false;
+                aiChatConversation = aiConversation.slice();
                 renderAiConversation();
                 await persistTopAiConversation();
             } catch (error) {
                 askAiRequestInFlight = false;
-                aiConversation.push({
-                    role: 'assistant',
-                    mode: aiAssistantMode,
-                    content: error.message || 'AI 请求失败',
-                    citations: [],
-                    toolEvents: [],
-                    isError: true,
-                    createdAt: new Date().toISOString(),
-                });
-                // 同步到对应模式的变量
-                if (aiAssistantMode === 'agent') {
-                    aiAgentConversation = aiConversation.slice();
-                } else {
-                    aiChatConversation = aiConversation.slice();
+                // Replace streaming entry with error
+                const idx = aiConversation.indexOf(streamEntry);
+                if (idx >= 0) {
+                    aiConversation[idx] = {
+                        role: 'assistant', mode: 'chat',
+                        content: error.message || 'AI 请求失败',
+                        citations: [], toolEvents: [], isError: true,
+                        createdAt: new Date().toISOString(),
+                    };
                 }
+                aiChatConversation = aiConversation.slice();
                 renderAiConversation();
-                try {
-                    await persistTopAiConversation();
-                } catch (saveError) {
-                    console.error('Failed to persist failed AI conversation', saveError);
-                }
+                try { await persistTopAiConversation(); } catch (_) {}
                 showToast(`AI 失败：${error.message}`, 'error');
             } finally {
                 submitAskAiBtn.classList.remove('is-loading');

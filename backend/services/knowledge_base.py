@@ -490,6 +490,78 @@ def rank_notes_for_query(snapshot: KnowledgeBaseSnapshot, query: str, limit: int
     return [(note, round(score, 4)) for score, note in scored[: max(1, limit)]]
 
 
+def expand_query_from_top_results(
+    snapshot: "KnowledgeBaseSnapshot",
+    query: str,
+    seed_limit: int = 5,
+) -> list[str]:
+    """Local pseudo-relevance feedback: use top TF-IDF results to generate expanded queries.
+
+    1. Run TF-IDF with original query → top seed_limit results
+    2. Extract high-weight terms from those results' titles, tags, summaries
+    3. Filter: prefer terms that appear in multiple seed results (more likely relevant)
+    4. Return original query + expanded keyword strings
+
+    This replaces AI-based query expansion with zero-latency local computation.
+    """
+    seed_results = rank_notes_for_query(snapshot, query, limit=seed_limit)
+    if not seed_results:
+        return [query]
+
+    query_term_set = set(extract_terms(query))
+
+    # Track both score and document frequency for each expansion term
+    expansion_scores: dict[str, float] = defaultdict(float)
+    expansion_doc_freq: dict[str, int] = defaultdict(int)
+
+    for note, score in seed_results:
+        weight = max(0.3, score)
+        seen_in_note: set[str] = set()
+
+        for term in extract_terms(note.title):
+            if term not in query_term_set and len(term) >= 2:
+                expansion_scores[term] += weight * 2.0
+                seen_in_note.add(term)
+        for tag in note.tags:
+            for term in extract_terms(tag):
+                if term not in query_term_set and len(term) >= 2:
+                    expansion_scores[term] += weight * 1.5
+                    seen_in_note.add(term)
+        for term in extract_terms(note.summary):
+            if term not in query_term_set and len(term) >= 2:
+                expansion_scores[term] += weight * 0.5
+                seen_in_note.add(term)
+
+        for term in seen_in_note:
+            expansion_doc_freq[term] += 1
+
+    if not expansion_scores:
+        return [query]
+
+    # Boost terms that appear in multiple seed results (more likely genuinely related)
+    # Filter out CJK bigrams that only appear once (likely noise like "键生", "撼更")
+    final_terms: list[tuple[str, float]] = []
+    for term, score in expansion_scores.items():
+        df = expansion_doc_freq[term]
+        is_cjk_bigram = len(term) == 2 and _CJK_PATTERN.fullmatch(term)
+        if is_cjk_bigram and df < 2:
+            continue  # skip noisy CJK bigrams that only appear in one result
+        boosted_score = score * (1.0 + 0.5 * (df - 1))
+        final_terms.append((term, boosted_score))
+
+    final_terms.sort(key=lambda item: item[1], reverse=True)
+    top_terms = [term for term, _ in final_terms[:20]]
+
+    # Group into 2-3 expansion queries of ~6 terms each
+    expanded_queries = [query]
+    for i in range(0, min(len(top_terms), 18), 6):
+        chunk = top_terms[i:i + 6]
+        if chunk:
+            expanded_queries.append(" ".join(chunk))
+
+    return expanded_queries
+
+
 def rank_notes_for_expanded_queries(
     snapshot: KnowledgeBaseSnapshot,
     queries: list[str],

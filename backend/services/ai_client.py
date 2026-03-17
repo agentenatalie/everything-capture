@@ -134,3 +134,59 @@ async def chat_completion(
         timeout_seconds=timeout_seconds,
     )
     return extract_message_text(extract_assistant_message(payload))
+
+
+async def stream_chat_completion(
+    *,
+    api_key: str,
+    base_url: str,
+    model: str,
+    messages: list[dict[str, Any]],
+    temperature: float = 0.2,
+    timeout_seconds: float = 120.0,
+):
+    """Yield content delta strings from a streaming chat completion (SSE)."""
+    url = _chat_completion_url(base_url)
+    headers = {
+        "Authorization": f"Bearer {api_key}",
+        "Content-Type": "application/json",
+    }
+    payload: dict[str, Any] = {
+        "model": model,
+        "messages": messages,
+        "temperature": temperature,
+        "stream": True,
+    }
+
+    try:
+        async with httpx.AsyncClient(timeout=timeout_seconds) as client:
+            async with client.stream("POST", url, headers=headers, json=payload) as response:
+                if not response.is_success:
+                    body = await response.aread()
+                    detail = body.decode(errors="replace").strip()
+                    raise AiClientError(detail or "AI streaming request failed")
+
+                buffer = ""
+                async for chunk in response.aiter_text():
+                    buffer += chunk
+                    while "\n" in buffer:
+                        line, buffer = buffer.split("\n", 1)
+                        line = line.strip()
+                        if not line or line.startswith(":"):
+                            continue
+                        if line == "data: [DONE]":
+                            return
+                        if line.startswith("data: "):
+                            try:
+                                data = json.loads(line[6:])
+                            except json.JSONDecodeError:
+                                continue
+                            choices = data.get("choices") or []
+                            if not choices:
+                                continue
+                            delta = choices[0].get("delta") or {}
+                            content = delta.get("content")
+                            if content:
+                                yield content
+    except httpx.HTTPError as exc:
+        raise AiClientError(f"AI streaming request failed: {exc}") from exc

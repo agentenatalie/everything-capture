@@ -5,7 +5,8 @@ import re
 from datetime import datetime
 from typing import Any, Optional
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi.responses import StreamingResponse
 from sqlalchemy import func, or_
 from sqlalchemy.orm import Session
 
@@ -35,6 +36,7 @@ from services.ai_client import (
     extract_assistant_message,
     extract_message_text,
     extract_tool_calls,
+    stream_chat_completion,
 )
 from services.ai_defaults import (
     AI_AGENT_DEFAULT_CAN_MANAGE_FOLDERS,
@@ -49,6 +51,7 @@ from services.knowledge_base import (
     KnowledgeBaseNote,
     KnowledgeBaseSnapshot,
     detect_knowledge_base_path,
+    expand_query_from_top_results,
     load_knowledge_base_snapshot,
     prepare_note_for_similarity,
     rank_notes_for_expanded_queries,
@@ -61,7 +64,7 @@ router = APIRouter(prefix="/api/ai", tags=["ai"])
 
 _JSON_FENCE_PATTERN = re.compile(r"^```(?:json)?\s*|\s*```$", re.IGNORECASE)
 _NOTION_ID_RE = re.compile(r"([0-9a-fA-F]{32}|[0-9a-fA-F]{8}(?:-[0-9a-fA-F]{4}){3}-[0-9a-fA-F]{12})")
-_CITATION_INDEX_PATTERN = re.compile(r"\[(\d{1,2})\]")
+_CITATION_INDEX_PATTERN = re.compile(r"\[(\d{1,3})\]")
 _CHAT_HISTORY_LIMIT = 10
 _SAVED_CHAT_HISTORY_LIMIT = 120
 _AGENT_TOOL_STEP_LIMIT = 6
@@ -379,13 +382,24 @@ def _assistant_chat_system_prompt() -> str:
         "回答时要结合正文内容和用户笔记内容一起分析，而不是只看其中一个。"
         "如果同时提供了知识库笔记，优先使用已有 `summary` / `摘要` 作为辅助，不要机械重复整理。"
         "只能基于提供的上下文回答；若上下文不足，必须明确说明。"
-        "回答请使用中文，保持简洁。"
-        "只有在你实际引用了某条知识库笔记时，才使用 [1] [2] 引用编号。"
+        "回答请使用中文。"
+        "只有在你实际引用了某条知识库笔记时，才使用 [编号] 引用标记。"
         "如果没有直接引用具体笔记，就不要输出引用编号。"
         "\n\n"
-        "【重要】仔细审查所有提供的笔记，不要只看标题是否字面匹配用户问题。"
+        "【重要：深度语义检索】\n"
+        "仔细审查所有提供的笔记，不要只看标题是否字面匹配用户问题。"
         "要深入理解每篇笔记的实际内容和用途，判断它是否能间接回答用户的问题。"
-        "例如：用户问'找实习要用什么工具'，一篇关于'简历自动填写'的笔记就是高度相关的。"
+        "运用发散性思维：用户问'找实习要用什么工具'→ 简历工具、求职平台、面试准备、AI 辅助写作等都是相关的。"
+        "尽可能全面地找出相关笔记，宁可多找也不要遗漏。"
+        "\n\n"
+        "【重要：回答风格】\n"
+        "简洁、直接、信息密度高，不要废话和客套。\n"
+        "格式要求：\n"
+        "- 开头一句话直接回答要点，不要重复用户问题。\n"
+        "- 每个要点用「名称 [编号] — 一句话说明核心价值和用法」的格式，不要用表格。\n"
+        "- 如果有实用建议（如工具组合使用方式），在末尾用一段话给出。\n"
+        "- 不要输出'希望对你有帮助'之类的尾巴。\n"
+        "- 不要问'需要我展开吗'，直接把有价值的信息说完。"
     )
 
 
@@ -589,6 +603,48 @@ def _build_unified_snapshot(
     )
 
 
+# ---------------------------------------------------------------------------
+# Cached items-only snapshot — avoids loading Obsidian + rebuilding every request
+# ---------------------------------------------------------------------------
+
+_ITEMS_SNAPSHOT_CACHE: dict[str, tuple[str, KnowledgeBaseSnapshot]] = {}
+
+
+def _items_cache_signature(items: list[Item]) -> str:
+    """Build a lightweight signature from item count + latest timestamp."""
+    if not items:
+        return "0"
+    latest = max(
+        (item.parsed_at or item.created_at or datetime.min)
+        for item in items
+    )
+    return f"{len(items)}:{latest.isoformat()}"
+
+
+def _build_items_only_snapshot(db: Session, user_id: str) -> KnowledgeBaseSnapshot:
+    """Build a searchable snapshot from DB items only (no Obsidian), with caching."""
+    items = _load_all_user_items(db, user_id)
+    sig = _items_cache_signature(items)
+
+    cached = _ITEMS_SNAPSHOT_CACHE.get(user_id)
+    if cached and cached[0] == sig:
+        return cached[1]
+
+    notes: list[KnowledgeBaseNote] = []
+    for item in items:
+        virtual_note = _item_to_virtual_note(item)
+        virtual_note = prepare_note_for_similarity(virtual_note)
+        notes.append(virtual_note)
+
+    snapshot = KnowledgeBaseSnapshot(
+        root_path=None,
+        notes=notes,
+        loaded_at=datetime.utcnow(),
+    )
+    _ITEMS_SNAPSHOT_CACHE[user_id] = (sig, snapshot)
+    return snapshot
+
+
 def _retrieve_candidates(
     unified_snapshot: KnowledgeBaseSnapshot,
     queries: list[str],
@@ -605,6 +661,21 @@ def _retrieve_candidates(
 _RERANKER_SYSTEM_PROMPT = (
     "你是知识库语义精排助手。下面列出了一组候选内容的编号、标题和摘要。"
     "请根据用户的问题，选出所有真正相关的条目编号。\n"
+    "重要规则：\n"
+    "1. 深入理解语义关系，不要只看字面关键词。\n"
+    "2. 例如用户问'申请实习'，'简历工具''求职产品''面试准备'都是相关的。\n"
+    "3. 宁可多选也不要漏掉，最多选10个。\n"
+    "4. 按相关度从高到低排列。\n"
+    "5. 输出格式：只输出编号，用英文逗号分隔，例如：3,7,12\n"
+    "6. 如果没有任何相关内容，输出：无"
+)
+
+# Combined expansion + reranker: one AI call instead of two.
+# AI first expands the query semantically, then picks from candidates.
+_EXPAND_AND_RERANK_SYSTEM_PROMPT = (
+    "你是知识库语义检索助手。你需要完成两步任务：\n"
+    "第一步：理解用户问题的深层含义，联想相关概念和同义词。\n"
+    "第二步：从候选列表中选出所有真正相关的条目。\n\n"
     "重要规则：\n"
     "1. 深入理解语义关系，不要只看字面关键词。\n"
     "2. 例如用户问'申请实习'，'简历工具''求职产品''面试准备'都是相关的。\n"
@@ -639,6 +710,37 @@ def _build_candidate_index(
     return "\n".join(lines), indexed
 
 
+def _parse_rerank_response(
+    response: str,
+    indexed_notes: list[KnowledgeBaseNote],
+    limit: int,
+) -> list[tuple[KnowledgeBaseNote, float]]:
+    """Parse comma-separated indices from AI reranker response."""
+    cleaned = _strip_reasoning_blocks(response).strip()
+    if not cleaned or cleaned == "无":
+        return []
+
+    selected: list[tuple[KnowledgeBaseNote, float]] = []
+    seen_ids: set[str] = set()
+    for raw_number in re.findall(r"\d+", cleaned):
+        try:
+            idx = int(raw_number) - 1
+        except ValueError:
+            continue
+        if idx < 0 or idx >= len(indexed_notes):
+            continue
+        note = indexed_notes[idx]
+        if note.note_id in seen_ids:
+            continue
+        seen_ids.add(note.note_id)
+        relevance = max(0.1, 1.0 - len(selected) * 0.08)
+        selected.append((note, round(relevance, 4)))
+        if len(selected) >= limit:
+            break
+
+    return selected
+
+
 async def _ai_rerank_candidates(
     ai_config: dict[str, str],
     candidates: list[tuple[KnowledgeBaseNote, float]],
@@ -668,29 +770,39 @@ async def _ai_rerank_candidates(
     except AiClientError:
         return candidates[:limit]
 
-    cleaned = _strip_reasoning_blocks(response).strip()
-    if not cleaned or cleaned == "无":
+    return _parse_rerank_response(response, indexed_notes, limit)
+
+
+async def _ai_expand_and_rerank(
+    ai_config: dict[str, str],
+    candidates: list[tuple[KnowledgeBaseNote, float]],
+    question: str,
+    limit: int = 8,
+) -> list[tuple[KnowledgeBaseNote, float]]:
+    """Combined expansion + rerank in a single AI call (saves one round-trip)."""
+    if not candidates:
         return []
 
-    selected: list[tuple[KnowledgeBaseNote, float]] = []
-    seen_ids: set[str] = set()
-    for raw_number in re.findall(r"\d+", cleaned):
-        try:
-            idx = int(raw_number) - 1
-        except ValueError:
-            continue
-        if idx < 0 or idx >= len(indexed_notes):
-            continue
-        note = indexed_notes[idx]
-        if note.note_id in seen_ids:
-            continue
-        seen_ids.add(note.note_id)
-        relevance = max(0.1, 1.0 - len(selected) * 0.08)
-        selected.append((note, round(relevance, 4)))
-        if len(selected) >= limit:
-            break
+    index_text, indexed_notes = _build_candidate_index(candidates)
 
-    return selected
+    try:
+        response = await chat_completion(
+            api_key=ai_config["api_key"],
+            base_url=ai_config["base_url"],
+            model=ai_config["model"],
+            messages=[
+                {"role": "system", "content": _EXPAND_AND_RERANK_SYSTEM_PROMPT},
+                {
+                    "role": "user",
+                    "content": f"候选内容：\n{index_text}\n\n用户问题：{question}",
+                },
+            ],
+            temperature=0.1,
+        )
+    except AiClientError:
+        return candidates[:limit]
+
+    return _parse_rerank_response(response, indexed_notes, limit)
 
 
 # ---------------------------------------------------------------------------
@@ -715,34 +827,57 @@ async def _semantic_rank_notes(
     db: Session | None = None,
     user_id: str | None = None,
 ) -> list[tuple[KnowledgeBaseNote, float]]:
-    """Three-stage semantic search: expand → retrieve → rerank.
+    """Local TF-IDF search with pseudo-relevance feedback expansion.
 
-    Works with any knowledge base size:
-    - Stage 1 (expand): AI generates synonym/related-concept queries (~100 tokens)
-    - Stage 2 (retrieve): TF-IDF across ALL content (Obsidian + DB), takes top 30
-    - Stage 3 (rerank): AI picks the truly relevant ones from 30 candidates (~3k tokens)
+    Used by agent tools for focused retrieval. For main chat/ask endpoints,
+    prefer _build_full_items_index() which gives all items to the AI directly.
     """
-    # Build unified searchable snapshot (Obsidian + DB items)
-    db_items = _load_all_user_items(db, user_id) if db and user_id else None
-    unified = _build_unified_snapshot(snapshot, db_items=db_items)
+    if db and user_id:
+        items_snapshot = _build_items_only_snapshot(db, user_id)
+    else:
+        items_snapshot = snapshot
 
-    # Stage 1: AI query expansion
-    expanded_queries = await _expand_search_queries(ai_config, question)
-
-    # Stage 2: TF-IDF candidate retrieval with expanded queries
-    candidates = _retrieve_candidates(unified, expanded_queries, pool_size=_CANDIDATE_POOL_SIZE)
+    expanded_queries = expand_query_from_top_results(items_snapshot, question)
+    candidates = _retrieve_candidates(items_snapshot, expanded_queries, pool_size=_CANDIDATE_POOL_SIZE)
 
     if not candidates:
         return []
 
-    # Stage 3: AI reranker on the candidate pool
-    reranked = await _ai_rerank_candidates(ai_config, candidates, question, limit=limit)
+    return candidates[:limit]
 
-    # If reranker returned nothing (e.g. API failure), fall back to TF-IDF order
-    if not reranked:
-        return candidates[:limit]
 
-    return reranked
+def _clean_index_summary(text: str) -> str:
+    """Clean summary text for the compact items index — remove structural markers."""
+    cleaned = re.sub(r"\[(?:detected_title|body|ocr_text|urls|qr_links|frame_texts)\]\s*", "", text)
+    cleaned = re.sub(r"\n+", " ", cleaned)
+    return cleaned.strip()
+
+
+def _build_full_items_index(db: Session, user_id: str) -> tuple[str, list[KnowledgeBaseNote]]:
+    """Build a compact index of ALL user items (title + clean summary) for the AI to scan.
+
+    With ~136 items at ~40 tokens each ≈ 5-6K tokens — easily fits in model context.
+    The AI does semantic matching directly, which is far more accurate than TF-IDF
+    for cross-language/cross-concept queries (e.g. "申请实习" → "ai-resume-autofill").
+    """
+    items_snapshot = _build_items_only_snapshot(db, user_id)
+    lines: list[str] = []
+    indexed: list[KnowledgeBaseNote] = []
+
+    for note in items_snapshot.notes:
+        idx = len(indexed) + 1
+        title = (note.title or "").strip()[:80]
+        summary = _clean_index_summary((note.summary or ""))[:150]
+        # Skip the summary if it's just repeating the title
+        if summary and summary.strip().lower() == title.strip().lower():
+            summary = ""
+        parts = [f"[{idx}] {title}"]
+        if summary:
+            parts.append(f"— {summary}")
+        lines.append(" ".join(parts))
+        indexed.append(note)
+
+    return "\n".join(lines), indexed
 
 
 def _match_organized_analysis_heading(line: str | None) -> str | None:
@@ -1834,24 +1969,20 @@ async def ask_ai(request: AiAskRequest, db: Session = Depends(get_db)):
     settings = _get_user_settings(db, user_id)
     ai_config = _resolve_ai_config(settings)
 
-    snapshot = load_knowledge_base_snapshot()
+    # Build full items index — AI scans all items directly (no search needed)
+    index_text, indexed_notes = _build_full_items_index(db, user_id)
+    all_notes_with_scores = [(note, 0.0) for note in indexed_notes]
 
-    top_k = max(3, min(int(request.top_k or 6), 10))
-    ranked_notes = await _semantic_rank_notes(ai_config, snapshot, question, limit=top_k, db=db, user_id=user_id)
-    if not ranked_notes:
+    if not indexed_notes:
         return AiAskResponse(
             question=question,
-            answer="知识库里没有找到足够相关的笔记，因此无法基于现有笔记回答这个问题。",
+            answer="知识库里没有找到任何笔记。",
             citations=[],
-            knowledge_base_path=snapshot.root_path,
-            note_count=snapshot.note_count,
+            knowledge_base_path=None,
+            note_count=0,
             insufficient_context=True,
         )
 
-    note_context = "\n\n".join(
-        _build_note_context_lines(note, index + 1)
-        for index, (note, _) in enumerate(ranked_notes)
-    )
     try:
         answer = await chat_completion(
             api_key=ai_config["api_key"],
@@ -1863,8 +1994,10 @@ async def ask_ai(request: AiAskRequest, db: Session = Depends(get_db)):
                     "role": "user",
                     "content": (
                         f"用户问题：{question}\n\n"
-                        "请基于下面这些笔记回答。若信息不够，请直接说明缺口。\n\n"
-                        f"{note_context}"
+                        "下面是知识库中所有笔记的索引（编号、标题、摘要）。"
+                        "请仔细浏览所有条目，找出与问题相关的笔记并基于它们回答。"
+                        "引用时使用 [编号] 格式。若信息不够，请直接说明缺口。\n\n"
+                        f"{index_text}"
                     ),
                 },
             ],
@@ -1878,10 +2011,10 @@ async def ask_ai(request: AiAskRequest, db: Session = Depends(get_db)):
         citations=_serialize_citations(
             db,
             user_id,
-            _filter_ranked_notes_by_citation_markers(answer, ranked_notes),
+            _filter_ranked_notes_by_citation_markers(answer, all_notes_with_scores),
         ),
-        knowledge_base_path=snapshot.root_path,
-        note_count=snapshot.note_count,
+        knowledge_base_path=None,
+        note_count=len(indexed_notes),
         insufficient_context=False,
     )
 
@@ -1918,43 +2051,10 @@ async def assistant(request: AiAssistantRequest, db: Session = Depends(get_db)):
             current_item_note=current_item_note,
         )
 
-    latest_question = ""
-    for message in reversed(conversation):
-        if message["role"] == "user":
-            latest_question = message["content"]
-            break
-    if not latest_question:
-        raise HTTPException(status_code=400, detail="At least one user message is required")
+    # Build full items index — AI scans all items directly
+    index_text, indexed_notes = _build_full_items_index(db, user_id)
+    all_notes_with_scores = [(note, 0.0) for note in indexed_notes]
 
-    top_k = max(3, min(int(request.top_k or 6), 10))
-    ranked_notes = await _semantic_rank_notes(ai_config, snapshot, latest_question, limit=top_k, db=db, user_id=user_id)
-    combined_ranked_notes: list[tuple[KnowledgeBaseNote, float]] = []
-    if current_item_note is not None:
-        combined_ranked_notes.append((current_item_note, 1.0))
-    for note, score in ranked_notes:
-        if current_item_note is not None and note.note_id == current_item_note.note_id:
-            continue
-        combined_ranked_notes.append((note, score))
-
-    if not combined_ranked_notes and current_item is not None:
-        combined_ranked_notes.append((_build_seed_note_from_item(current_item, current_item_note), 1.0))
-
-    if not combined_ranked_notes:
-        return AiAssistantResponse(
-            mode="chat",
-            message="知识库里没有找到足够相关的笔记，因此我不能基于现有笔记回答这个问题。",
-            citations=[],
-            knowledge_base_path=snapshot.root_path,
-            note_count=snapshot.note_count,
-            insufficient_context=True,
-            agent_permissions=_agent_permissions(settings),
-            updated_items=[],
-        )
-
-    note_context = "\n\n".join(
-        _build_note_context_lines(note, index + 1)
-        for index, (note, _) in enumerate(combined_ranked_notes)
-    )
     current_item_context = _build_current_item_context(current_item, current_item_note, current_page_notes) if current_item is not None else ""
     system_message = _compose_system_message(
         _assistant_chat_system_prompt(),
@@ -1963,9 +2063,11 @@ async def assistant(request: AiAssistantRequest, db: Session = Depends(get_db)):
             f"{current_item_context}"
         ) if current_item_context else "",
         (
-            "下面是本轮回答可用的知识库上下文。请把这些笔记作为辅助参考，优先使用已有 summary / 摘要，不要重复整理。\n\n"
-            f"{note_context}"
-        ) if note_context else "",
+            "下面是用户知识库中所有笔记的索引（编号、标题、摘要）。"
+            "请仔细浏览所有条目，找出与对话相关的笔记作为辅助参考。"
+            "引用时使用 [编号] 格式。\n\n"
+            f"{index_text}"
+        ) if index_text else "",
     )
     model_messages: list[dict[str, Any]] = [{"role": "system", "content": system_message}, *conversation]
     try:
@@ -1985,14 +2087,127 @@ async def assistant(request: AiAssistantRequest, db: Session = Depends(get_db)):
         citations=_serialize_citations(
             db,
             user_id,
-            _filter_ranked_notes_by_citation_markers(answer, combined_ranked_notes),
+            _filter_ranked_notes_by_citation_markers(answer, all_notes_with_scores),
         ),
         tool_events=[],
-        knowledge_base_path=snapshot.root_path,
-        note_count=snapshot.note_count,
+        knowledge_base_path=None,
+        note_count=len(indexed_notes),
         insufficient_context=False,
         agent_permissions=_agent_permissions(settings),
         updated_items=[],
+    )
+
+
+@router.post("/assistant/stream")
+async def assistant_stream(request: AiAssistantRequest, db: Session = Depends(get_db)):
+    """Streaming version of /assistant for chat mode. Sends SSE events."""
+    conversation = _sanitize_conversation_messages(request.messages)
+    if not conversation:
+        raise HTTPException(status_code=400, detail="messages are required")
+
+    user_id = get_current_user_id()
+    settings = _get_user_settings(db, user_id)
+    ai_config = _resolve_ai_config(settings)
+    snapshot = load_knowledge_base_snapshot()
+    current_item_id = _clean_optional_string(request.current_item_id)
+    current_item = _get_user_item(db, user_id, current_item_id) if current_item_id else None
+    current_item_note = None
+    current_page_notes: list[ItemPageNote] = []
+    if current_item:
+        current_item_note = snapshot.notes_by_item_id.get(current_item.id) if snapshot.note_count else None
+        current_item_note = _build_seed_note_from_item(current_item, current_item_note)
+        current_page_notes = _get_item_page_notes(db, user_id, current_item.id)
+
+    async def event_stream():
+        def _sse(data: dict) -> str:
+            return f"data: {json.dumps(data, ensure_ascii=False, default=str)}\n\n"
+
+        # Build full items index instantly — no AI search needed
+        index_text, indexed_notes = _build_full_items_index(db, user_id)
+        all_notes_with_scores = [(note, 0.0) for note in indexed_notes]
+
+        yield _sse({
+            "type": "status",
+            "status": "found",
+            "message": f"已加载 {len(indexed_notes)} 条知识库内容，正在生成回答…",
+        })
+
+        if not indexed_notes:
+            yield _sse({
+                "type": "done",
+                "message": "知识库里没有任何笔记。",
+                "citations": [],
+                "insufficient_context": True,
+            })
+            return
+
+        # Build context and stream the answer
+        current_item_context = _build_current_item_context(current_item, current_item_note, current_page_notes) if current_item is not None else ""
+        system_message = _compose_system_message(
+            _assistant_chat_system_prompt(),
+            (
+                "下面是当前文章上下文（包括正文内容和用户笔记）。回答时请结合正文内容和用户笔记综合分析。\n\n"
+                f"{current_item_context}"
+            ) if current_item_context else "",
+            (
+                "下面是用户知识库中所有笔记的索引（编号、标题、摘要）。"
+                "请仔细浏览所有条目，找出与对话相关的笔记作为辅助参考。"
+                "引用时使用 [编号] 格式。\n\n"
+                f"{index_text}"
+            ) if index_text else "",
+        )
+        model_messages: list[dict[str, Any]] = [{"role": "system", "content": system_message}, *conversation]
+
+        full_answer = ""
+        try:
+            async for delta in stream_chat_completion(
+                api_key=ai_config["api_key"],
+                base_url=ai_config["base_url"],
+                model=ai_config["model"],
+                messages=model_messages,
+                temperature=0.2,
+            ):
+                full_answer += delta
+                yield _sse({"type": "delta", "content": delta})
+        except AiClientError as exc:
+            yield _sse({"type": "error", "message": str(exc)})
+            return
+
+        # Final event with citations — build directly from indexed_notes
+        # without DB query (all notes come from items, so item_id is valid)
+        answer = full_answer.strip()
+        filtered = _filter_ranked_notes_by_citation_markers(answer, all_notes_with_scores)
+        citations = [
+            AiCitationResponse(
+                note_id=note.note_id,
+                library_item_id=note.item_id,
+                title=note.title,
+                summary=note.summary or None,
+                folder=note.folder or None,
+                tags=note.tags or [],
+                source=note.source,
+                relative_path=note.relative_path,
+                created_at=note.created_at,
+                score=score,
+                excerpt=note.excerpt or None,
+            )
+            for note, score in filtered
+        ]
+        yield _sse({
+            "type": "done",
+            "message": answer,
+            "citations": [c.model_dump() if hasattr(c, 'model_dump') else c.dict() for c in citations],
+            "insufficient_context": False,
+        })
+
+    return StreamingResponse(
+        event_stream(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
     )
 
 

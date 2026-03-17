@@ -524,6 +524,23 @@
             let listType = '';
             let listItems = [];
 
+            const isTableSeparator = (l) => /^\s*\|?(?:\s*:?-{3,}:?\s*\|)+\s*:?-{3,}:?\s*\|?\s*$/.test(String(l || ''));
+            const isTableLine = (l) => {
+                const t = String(l || '').trim();
+                return t.includes('|') && !/^\s*[-*+]\s/.test(t) && !/^\s*\d+\.\s/.test(t);
+            };
+            const splitTableRow = (row) => {
+                const trimmed = String(row || '').trim().replace(/^\|/, '').replace(/\|$/, '');
+                const cells = [];
+                let current = '';
+                for (const char of trimmed) {
+                    if (char === '|') { cells.push(current.trim()); current = ''; }
+                    else { current += char; }
+                }
+                cells.push(current.trim());
+                return cells;
+            };
+
             const flushParagraph = () => {
                 if (!paragraph.length) return;
                 html.push(`<p class="content-para">${renderInlineMarkdown(paragraph.join('\n')).replace(/\n/g, '<br>')}</p>`);
@@ -540,11 +557,42 @@
                 listItems = [];
             };
 
-            for (const line of lines) {
+            for (let index = 0; index < lines.length; index += 1) {
+                const line = lines[index];
                 const trimmed = line.trim();
                 if (!trimmed) {
                     flushParagraph();
                     flushList();
+                    continue;
+                }
+
+                // Table: header row followed by separator row
+                if (isTableLine(line) && isTableSeparator(lines[index + 1])) {
+                    flushParagraph();
+                    flushList();
+                    const headerCells = splitTableRow(line);
+                    const alignCells = splitTableRow(lines[index + 1]).map((cell) => {
+                        const t = cell.trim();
+                        if (t.startsWith(':') && t.endsWith(':')) return 'center';
+                        if (t.endsWith(':')) return 'right';
+                        return 'left';
+                    });
+                    index += 2;
+                    const bodyRows = [];
+                    while (index < lines.length && lines[index].trim() && isTableLine(lines[index])) {
+                        bodyRows.push(splitTableRow(lines[index]));
+                        index += 1;
+                    }
+                    index -= 1;
+                    const cols = Math.max(headerCells.length, ...bodyRows.map((r) => r.length), 0);
+                    html.push(`
+                        <div class="ai-table-wrap">
+                            <table>
+                                <thead><tr>${Array.from({ length: cols }, (_, i) => `<th style="text-align:${alignCells[i] || 'left'}">${renderInlineMarkdown(headerCells[i] || '')}</th>`).join('')}</tr></thead>
+                                <tbody>${bodyRows.map((row) => `<tr>${Array.from({ length: cols }, (_, i) => `<td style="text-align:${alignCells[i] || 'left'}">${renderInlineMarkdown(row[i] || '')}</td>`).join('')}</tr>`).join('')}</tbody>
+                            </table>
+                        </div>
+                    `);
                     continue;
                 }
 

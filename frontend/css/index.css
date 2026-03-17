@@ -4780,8 +4780,8 @@
         .ai-msg-content {
             flex: 1;
             width: 100%;
-            font-size: 17px;
-            line-height: 1.74;
+            font-size: 16px;
+            line-height: 1.7;
             color: #0f172a;
             letter-spacing: -0.01em;
         }
@@ -5007,6 +5007,29 @@
             width: 16px;
             height: 16px;
             stroke: currentColor;
+        }
+
+        .ai-citation-ref {
+            display: inline;
+            appearance: none;
+            -webkit-appearance: none;
+            border: none;
+            background: none;
+            color: #2563eb;
+            font-size: inherit;
+            font-weight: 600;
+            font-family: inherit;
+            padding: 0;
+            margin: 0;
+            cursor: pointer;
+            vertical-align: baseline;
+            line-height: inherit;
+            text-decoration: none;
+        }
+
+        .ai-citation-ref:hover {
+            color: #1d4ed8;
+            text-decoration: underline;
         }
 
         .ai-citation-item.is-link:hover .ai-citation-link {
@@ -6149,8 +6172,8 @@
 
         .ai-markdown {
             color: #0f172a;
-            font-size: 1.06rem;
-            line-height: 1.74;
+            font-size: inherit;
+            line-height: inherit;
         }
 
         .ai-markdown.is-error {
@@ -6512,9 +6535,9 @@
 
         .modal.is-fullscreen {
             --reader-content-width: 980px;
-            --reader-sidebar-default-width: 460px;
+            --reader-sidebar-default-width: 30vw;
             --reader-sidebar-min-width: 360px;
-            --reader-sidebar-max-width: 680px;
+            --reader-sidebar-max-width: 720px;
             --reader-carousel-width: 1120px;
             --reader-inline-gutter: clamp(18px, 3vw, 40px);
         }
@@ -6526,16 +6549,10 @@
 
         .modal.is-fullscreen .reader-toolbar,
         .modal.is-fullscreen .modal-footer {
-            overflow: hidden;
-            will-change: transform, opacity, max-height;
+            will-change: transform, opacity;
             transition:
-                transform 0.52s cubic-bezier(0.22, 1, 0.36, 1),
-                opacity 0.28s ease,
-                max-height 0.52s cubic-bezier(0.22, 1, 0.36, 1),
-                padding 0.52s cubic-bezier(0.22, 1, 0.36, 1),
-                border-color 0.28s ease,
-                filter 0.42s ease;
-            filter: blur(0);
+                transform 0.3s cubic-bezier(0.2, 0, 0, 1),
+                opacity 0.2s ease;
         }
 
         .modal.is-fullscreen .reader-toolbar {
@@ -6580,24 +6597,14 @@
         }
 
         .modal.is-fullscreen.is-reader-chrome-hidden .reader-toolbar {
-            max-height: 0;
-            padding-top: 0;
-            padding-bottom: 0;
-            border-bottom-color: transparent;
             opacity: 0;
-            transform: translateY(-18px) scale(0.985);
-            filter: blur(6px);
+            transform: translateY(-100%);
             pointer-events: none;
         }
 
         .modal.is-fullscreen.is-reader-chrome-hidden .modal-footer {
-            max-height: 0;
-            padding-top: 0;
-            padding-bottom: 0;
-            border-top-color: transparent;
             opacity: 0;
-            transform: translateY(24px) scale(0.985);
-            filter: blur(6px);
+            transform: translateY(100%);
             pointer-events: none;
         }
 
@@ -7496,6 +7503,7 @@
             background: #ffffff;
         }
 
+        .ai-table-wrap table,
         .ai-markdown table,
         .article-html table {
             width: 100%;
@@ -7503,6 +7511,7 @@
             font-size: 0.9rem;
         }
 
+        .ai-table-wrap thead th,
         .ai-markdown thead th,
         .article-html thead th {
             background: #f6f8fa;
@@ -7512,6 +7521,8 @@
             border-bottom: 1px solid var(--gh-code-border);
         }
 
+        .ai-table-wrap th,
+        .ai-table-wrap td,
         .ai-markdown th,
         .ai-markdown td,
         .article-html th,
@@ -7522,6 +7533,8 @@
             vertical-align: top;
         }
 
+        .ai-table-wrap th:last-child,
+        .ai-table-wrap td:last-child,
         .ai-markdown th:last-child,
         .ai-markdown td:last-child,
         .article-html th:last-child,

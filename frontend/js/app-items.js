@@ -86,43 +86,56 @@
             const delta = currentScrollTop - readerLastScrollTop;
             readerLastScrollTop = currentScrollTop;
 
+            // Not enough content to scroll — always show bars
             if (maxScrollTop <= 220) {
                 readerScrollIntent = 0;
                 setReaderChromeHidden(false);
                 return;
             }
 
+            // Near the top — always show bars
             if (currentScrollTop <= 24) {
                 readerScrollIntent = 0;
                 setReaderChromeHidden(false);
                 return;
             }
 
-            if (Math.abs(delta) < 3) return;
+            // Near the bottom — always show bars
+            if (currentScrollTop >= maxScrollTop - 24) {
+                readerScrollIntent = 0;
+                setReaderChromeHidden(false);
+                return;
+            }
+
+            // Ignore tiny jitter
+            if (Math.abs(delta) < 2) return;
 
             if (readerChromeHidden) {
+                // Bars hidden: accumulate upward scroll to reveal
                 if (delta < 0) {
                     readerScrollIntent += Math.abs(delta);
-                    if (readerScrollIntent >= 32) {
+                    if (readerScrollIntent >= 24) {
                         readerScrollIntent = 0;
                         setReaderChromeHidden(false);
                     }
-                    return;
+                } else {
+                    // Small downward scroll while hidden — decay intent instead of resetting
+                    readerScrollIntent = Math.max(0, readerScrollIntent - delta);
                 }
-                readerScrollIntent = 0;
                 return;
             }
 
+            // Bars visible: accumulate downward scroll to hide
             if (delta > 0) {
                 readerScrollIntent += delta;
-                if (currentScrollTop > 120 && readerScrollIntent >= 48) {
+                if (currentScrollTop > 80 && readerScrollIntent >= 36) {
                     readerScrollIntent = 0;
                     setReaderChromeHidden(true);
                 }
-                return;
+            } else {
+                // Scrolling up while visible — decay instead of hard reset
+                readerScrollIntent = Math.max(0, readerScrollIntent - Math.abs(delta));
             }
-
-            readerScrollIntent = 0;
         }
 
         function openReaderSidebarPanel(tab = 'note') {

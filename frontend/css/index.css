@@ -4416,10 +4416,10 @@
 
         .ai-history-item-delete {
             position: absolute;
-            right: 8px;
+            right: 10px;
             top: 50%;
             transform: translateY(-50%);
-            font-size: 14px;
+            font-size: 16px;
             color: #94a3b8;
             opacity: 0;
             pointer-events: none;
@@ -4435,6 +4435,61 @@
 
         .ai-history-item-delete:hover {
             color: #ef4444;
+        }
+
+        .ai-history-delete-confirm {
+            position: absolute;
+            inset: 0;
+            display: none;
+            align-items: center;
+            gap: 8px;
+            padding: 0 10px;
+            background: linear-gradient(90deg, rgba(255,255,255,0.85) 0%, #ffffff 30%);
+            backdrop-filter: blur(4px);
+            -webkit-backdrop-filter: blur(4px);
+            border-radius: 8px;
+            z-index: 2;
+        }
+
+        .ai-history-item.is-confirming .ai-history-delete-confirm {
+            display: flex;
+        }
+
+        .ai-history-delete-confirm > span:first-child {
+            flex: 1;
+            font-size: 12px;
+            color: #64748b;
+            letter-spacing: -0.01em;
+        }
+
+        .ai-history-delete-yes,
+        .ai-history-delete-no {
+            flex: none;
+            padding: 3px 10px;
+            border: none;
+            border-radius: 5px;
+            font-size: 11px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: background 0.1s ease;
+        }
+
+        .ai-history-delete-yes {
+            background: #ef4444;
+            color: #fff;
+        }
+
+        .ai-history-delete-yes:hover {
+            background: #dc2626;
+        }
+
+        .ai-history-delete-no {
+            background: transparent;
+            color: #94a3b8;
+        }
+
+        .ai-history-delete-no:hover {
+            color: #64748b;
         }
 
         .ai-history-empty {

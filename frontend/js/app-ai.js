@@ -482,15 +482,38 @@
                         </svg>
                         <span class="ai-history-item-title">${escapeHtml(conversation.title || '未命名')}</span>
                         <span class="ai-history-item-delete" data-delete-id="${escapeAttribute(conversation.id)}" aria-label="删除对话">&times;</span>
+                        <span class="ai-history-delete-confirm">
+                            <span>删除？</span>
+                            <span class="ai-history-delete-yes" data-confirm-id="${escapeAttribute(conversation.id)}">删除</span>
+                            <span class="ai-history-delete-no">取消</span>
+                        </span>
                     </button>
                 `).join('');
 
                 container.querySelectorAll('.ai-history-item-delete').forEach((del) => {
-                    del.addEventListener('click', async (e) => {
+                    del.addEventListener('click', (e) => {
                         e.stopPropagation();
                         e.preventDefault();
-                        const id = del.getAttribute('data-delete-id');
-                        if (!id || !confirm('确定删除这条对话？')) return;
+                        const item = del.closest('.ai-history-item');
+                        if (item) item.classList.add('is-confirming');
+                    });
+                });
+
+                container.querySelectorAll('.ai-history-delete-no').forEach((btn) => {
+                    btn.addEventListener('click', (e) => {
+                        e.stopPropagation();
+                        e.preventDefault();
+                        const item = btn.closest('.ai-history-item');
+                        if (item) item.classList.remove('is-confirming');
+                    });
+                });
+
+                container.querySelectorAll('.ai-history-delete-yes').forEach((btn) => {
+                    btn.addEventListener('click', async (e) => {
+                        e.stopPropagation();
+                        e.preventDefault();
+                        const id = btn.getAttribute('data-confirm-id');
+                        if (!id) return;
                         try {
                             await deleteAiConversation(id);
                         } catch (error) {

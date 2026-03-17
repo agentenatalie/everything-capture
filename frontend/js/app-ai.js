@@ -2011,11 +2011,11 @@
             }
 
             if (item && typeof window.openModalByItem === 'function') {
-                window.openModalByItem(item);
+                window.openModalByItem(item, { pushToNavStack: true });
                 return true;
             }
             if (itemId && typeof window.openModalById === 'function') {
-                window.openModalById(itemId);
+                window.openModalById(itemId, { pushToNavStack: true });
                 return true;
             }
             return false;

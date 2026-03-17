@@ -14,6 +14,7 @@
         let readerSidebarStartWidth = 0;
         let readerChromeHidden = false;
         let readerLastScrollTop = 0;
+        const readerNavStack = []; // stack of item IDs for back-navigation from citations
         let readerScrollTicking = false;
         let readerScrollIntent = 0;
         const READER_SIDEBAR_MIN_WIDTH = 360;
@@ -1515,16 +1516,22 @@
             }
         }
 
-        function openModalById(itemId) {
+        function openModalById(itemId, options) {
             const item = getItemById(itemId);
             if (!item) return;
-            openModalByItem(item);
+            openModalByItem(item, options);
         }
 
         function openModalByItem(item, options = {}) {
             const keepNotePanel = Boolean(options.keepNotePanel);
             const preserveSidebarTab = Boolean(options.preserveSidebarTab);
+            const pushToNavStack = Boolean(options.pushToNavStack);
             const previousOpenItemId = currentOpenItemId;
+
+            // If navigating from a citation and we already have an item open, push it to the stack
+            if (pushToNavStack && previousOpenItemId && previousOpenItemId !== item.id) {
+                readerNavStack.push(previousOpenItemId);
+            }
             currentOpenItemId = item.id;
             const isNewItem = previousOpenItemId !== currentOpenItemId;
             const preferredSidebarTab = preserveSidebarTab ? (readerSidebarTab || 'note') : 'note';
@@ -1673,6 +1680,19 @@
 
         function closeModalDialog() {
             if (modalOverlay.classList.contains('is-closing')) return;
+
+            // If there's a previous item on the nav stack, go back to it instead of closing
+            if (readerNavStack.length > 0) {
+                const prevItemId = readerNavStack.pop();
+                const prevItem = getItemById(prevItemId);
+                if (prevItem) {
+                    openModalByItem(prevItem, { preserveSidebarTab: true });
+                    return;
+                }
+                // If item no longer available, clear stack and close normally
+                readerNavStack.length = 0;
+            }
+
             const previousOpenItemId = currentOpenItemId;
             currentOpenItemId = null;
             noteSaveInFlight = false;
@@ -1689,6 +1709,7 @@
                 readerSidebarOpen = false;
                 readerSidebarTab = 'note';
                 readerLastScrollTop = 0;
+                readerNavStack.length = 0;
 
                 if (readerNotePanel) {
                     readerNotePanel.innerHTML = '';
@@ -1829,13 +1850,14 @@
             const detail = event?.detail || {};
             const item = detail.item || null;
             const itemId = String(detail.itemId || item?.id || '').trim();
+            const options = { pushToNavStack: true };
             if (item) {
-                openModalByItem(item);
+                openModalByItem(item, options);
                 event.preventDefault();
                 return;
             }
             if (itemId) {
-                openModalById(itemId);
+                openModalById(itemId, options);
                 event.preventDefault();
             }
         });

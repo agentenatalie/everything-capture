@@ -152,6 +152,7 @@
                         <input id="filterInput" class="filter-input" type="text" placeholder="搜索标题、正文、链接" />
                     </div>
                     <div class="toolbar-right">
+                        <button id="askAiBtn" class="view-btn" type="button">Ask AI</button>
                         <div class="toolbar-filters">
                             <select id="platformFilter" class="platform-select" aria-label="筛选平台">
                                 <option value="all">全部</option>
@@ -162,7 +163,6 @@
                                 <option value="web">网页</option>
                             </select>
                         </div>
-                        <button id="askAiBtn" class="view-btn ai-entry-btn" type="button">Ask AI</button>
                     </div>
                 </div>
                 <div class="folder-mobile-strip" id="folderMobileStrip"></div>
@@ -528,7 +528,7 @@
                 <div class="ai-content" id="askAiResult">
                     <div class="ai-welcome">
                         <div class="ai-welcome-badge">基于知识库连续对话</div>
-                        <h1 class="ai-welcome-title">有什么需要我一起处理？</h1>
+                        <h1 class="ai-welcome-title">有什么可以帮忙的？</h1>
                         <p class="ai-welcome-subtitle">可以直接提问、总结内容、串联相关笔记，或切到 Agent 执行动作。</p>
                         <div class="ai-welcome-grid" id="aiWelcomeGrid"></div>
                     </div>
@@ -539,7 +539,7 @@
                     <div class="ai-composer-box" id="aiComposerBox">
                         <textarea id="askAiInput" class="ai-composer-input" placeholder="发送消息..." rows="1"></textarea>
                         <button id="submitAskAiBtn" class="ai-send-btn" type="button" disabled aria-label="发送">
-                            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M22 2L11 13M22 2l-7 20-4-9-9-4 20-7z"/></svg>
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19V5M5 12l7-7 7 7"/></svg>
                         </button>
                     </div>
                     <div class="ai-composer-footer">

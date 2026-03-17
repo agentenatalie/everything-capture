@@ -1343,7 +1343,7 @@
         function renderAiHome(currentItem) {
             const title = currentItem
                 ? `围绕《${escapeHtml(getDisplayItemTitle(currentItem) || '当前内容')}》继续`
-                : '有什么需要我一起处理？';
+                : '有什么可以帮忙的？';
             const badge = currentItem
                 ? `<div class="ai-welcome-badge">当前内容 · ${escapeHtml(getDisplayItemTitle(currentItem) || '未命名内容')}</div>`
                 : '<div class="ai-welcome-badge">基于知识库连续对话</div>';

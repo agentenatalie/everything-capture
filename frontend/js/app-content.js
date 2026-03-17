@@ -584,8 +584,34 @@
             return html.join('');
         }
 
+        function cleanOcrText(value) {
+            return value
+                .split('\n')
+                .map((line) => line.trim())
+                .filter((line) => {
+                    if (!line) return true; // keep blank lines for paragraph breaks
+                    // Filter out garbled OCR: lines that are mostly non-CJK non-alpha noise
+                    const alphaOrCjk = line.replace(/[\s\d_`~·\-=+*#@!$%^&()[\]{}<>|\\/:;'",.\u2000-\u206F\u2E00-\u2E7F]/g, '');
+                    if (alphaOrCjk.length === 0) return false;
+                    const noiseRatio = 1 - (alphaOrCjk.length / line.length);
+                    if (noiseRatio > 0.7 && line.length > 3) return false;
+                    // Filter very short garbage fragments (1-2 random chars)
+                    if (line.length <= 2 && !/[\u4e00-\u9fff]/.test(line)) return false;
+                    return true;
+                })
+                .join('\n')
+                .replace(/\n{3,}/g, '\n\n')
+                .trim();
+        }
+
         function renderExtractedSectionMarkup(section) {
             if (!section?.value) return '';
+
+            if (section.key === 'ocr_text') {
+                const cleaned = cleanOcrText(section.value);
+                if (!cleaned) return '';
+                return renderExtractedMarkdown(cleaned);
+            }
 
             if (section.key === 'urls' || section.key === 'qr_links') {
                 const links = uniquePreserveOrder(

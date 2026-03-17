@@ -219,29 +219,26 @@
             const contentMarkup = analysisMarkup || fallbackMarkup || `<div class="content-empty-state">${escapeHtml(emptyCopy)}</div>`;
 
             readerSidebarContent.innerHTML = `
-                <div class="reader-analysis-shell">
-                    <div class="reader-analysis-header">
-                        <div class="reader-analysis-header-top">
-                            <div class="reader-analysis-header-copy">
-                                <div class="reader-analysis-label">内容分析</div>
-                                <div class="reader-analysis-title">${escapeHtml(detectedTitle || getDisplayItemTitle(item) || '未命名内容')}</div>
-                            </div>
-                            <button
-                                class="reader-analysis-ai-btn${isOrganizingAnalysis ? ' is-loading' : ''}"
-                                type="button"
-                                onclick="organizeItemAnalysis('${item.id}', event)"
-                                title="${escapeAttribute(analysisAiTitle)}"
-                                aria-label="${escapeAttribute(analysisAiTitle)}"
-                                ${isOrganizingAnalysis || item?.parse_status === 'processing' ? 'disabled' : ''}
-                            >
-                                <span class="reader-analysis-ai-btn-icon" aria-hidden="true">
-                                    ${isOrganizingAnalysis ? '<span class="reader-analysis-ai-spinner"></span>' : analysisAiSparkIcon}
-                                </span>
-                            </button>
+                <div class="analysis-shell">
+                    <div class="analysis-toolbar">
+                        <div class="analysis-toolbar-info">
+                            <div class="analysis-toolbar-title">${escapeHtml(detectedTitle || getDisplayItemTitle(item) || '未命名内容')}</div>
+                            <div class="analysis-toolbar-meta${item?.parse_status === 'processing' ? ' is-processing' : ''}">${escapeHtml(summary)}</div>
                         </div>
-                        <div class="reader-analysis-meta${item?.parse_status === 'processing' ? ' is-processing' : ''}">${escapeHtml(summary)}</div>
+                        <button
+                            class="analysis-ai-btn${isOrganizingAnalysis ? ' is-loading' : ''}"
+                            type="button"
+                            onclick="organizeItemAnalysis('${item.id}', event)"
+                            title="${escapeAttribute(analysisAiTitle)}"
+                            aria-label="${escapeAttribute(analysisAiTitle)}"
+                            ${isOrganizingAnalysis || item?.parse_status === 'processing' ? 'disabled' : ''}
+                        >
+                            ${isOrganizingAnalysis ? '<span class="analysis-ai-spinner"></span>' : analysisAiSparkIcon}
+                        </button>
                     </div>
-                    ${contentMarkup}
+                    <div class="analysis-content">
+                        ${contentMarkup}
+                    </div>
                 </div>
             `;
         }

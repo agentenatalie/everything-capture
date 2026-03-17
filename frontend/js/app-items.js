@@ -1579,7 +1579,9 @@
                 </div>
             `;
 
+            // Set fullscreen BEFORE active so overlay bg is white from frame 1 (no dark flash)
             toggleReaderFullscreen(true);
+            modalOverlay.classList.remove('is-closing');
             modalOverlay.classList.add('active');
             document.body.style.overflow = 'hidden';
             resetReaderChromeState(isNewItem);
@@ -1670,37 +1672,46 @@
         }
 
         function closeModalDialog() {
+            if (modalOverlay.classList.contains('is-closing')) return;
             const previousOpenItemId = currentOpenItemId;
-            modalOverlay.classList.remove('active');
-            document.body.style.overflow = '';
             currentOpenItemId = null;
             noteSaveInFlight = false;
             analysisOrganizeInFlightItemId = null;
             isNotePanelOpen = false;
-            toggleReaderFullscreen(false);
-            readerSidebarOpen = false;
-            readerSidebarTab = 'note';
-            readerLastScrollTop = 0;
 
-            if (readerNotePanel) {
-                readerNotePanel.innerHTML = '';
-            }
-            if (readerSidebarContent) {
-                readerSidebarContent.innerHTML = '';
-            }
-            readerSidebar?.classList.remove('is-open');
+            // Start close animation
+            modalOverlay.classList.add('is-closing');
 
-            setNotePanelOpen(false);
-            toggleNoteBtn?.classList.remove('is-available');
-            toggleNoteBtn?.classList.remove('is-active');
-            toggleNoteBtn?.setAttribute('title', '查看解析笔记');
-            if (readerMetaLine) {
-                readerMetaLine.textContent = '当前笔记';
-            }
-            readerStatusDots.innerHTML = '';
-            modalFooter.innerHTML = '';
+            const cleanup = () => {
+                modalOverlay.classList.remove('active', 'is-closing');
+                document.body.style.overflow = '';
+                toggleReaderFullscreen(false);
+                readerSidebarOpen = false;
+                readerSidebarTab = 'note';
+                readerLastScrollTop = 0;
 
-            patchRenderedItemsById(previousOpenItemId);
+                if (readerNotePanel) {
+                    readerNotePanel.innerHTML = '';
+                }
+                if (readerSidebarContent) {
+                    readerSidebarContent.innerHTML = '';
+                }
+                readerSidebar?.classList.remove('is-open');
+
+                setNotePanelOpen(false);
+                toggleNoteBtn?.classList.remove('is-available');
+                toggleNoteBtn?.classList.remove('is-active');
+                toggleNoteBtn?.setAttribute('title', '查看解析笔记');
+                if (readerMetaLine) {
+                    readerMetaLine.textContent = '当前笔记';
+                }
+                readerStatusDots.innerHTML = '';
+                modalFooter.innerHTML = '';
+
+                patchRenderedItemsById(previousOpenItemId);
+            };
+
+            window.setTimeout(cleanup, 240);
         }
 
         closeModal?.addEventListener('click', () => {

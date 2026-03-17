@@ -3840,7 +3840,7 @@
 
         .card-title {
             margin-bottom: 12px;
-            font-size: 14px;
+            font-size: 15px;
             font-weight: 600;
             line-height: 1.4;
             color: #2a2c2e;
@@ -4626,6 +4626,10 @@
                 linear-gradient(180deg, #ffffff 0%, #fbfbfa 100%);
         }
 
+        .ai-content.has-messages {
+            background: #ffffff;
+        }
+
         /* 欢迎页 */
         .ai-welcome {
             position: relative;
@@ -4999,6 +5003,12 @@
             pointer-events: none;
         }
 
+        .ai-citation-link svg {
+            width: 16px;
+            height: 16px;
+            stroke: currentColor;
+        }
+
         .ai-citation-item.is-link:hover .ai-citation-link {
             background: rgba(55, 53, 47, 0.06);
             color: #787774;
@@ -5368,7 +5378,7 @@
 
         .reader-ai-meta,
         .ai-panel-summary-hint {
-            font-size: 0.76rem;
+            font-size: 0.82rem;
             line-height: 1.5;
             color: #6b7280;
         }
@@ -5390,14 +5400,14 @@
         }
 
         .ai-block-title {
-            font-size: 0.82rem;
+            font-size: 0.9rem;
             font-weight: 700;
             color: #111827;
         }
 
         .ai-block-copy,
         .ai-panel-copy {
-            font-size: 0.88rem;
+            font-size: 0.94rem;
             line-height: 1.68;
             color: #344054;
         }
@@ -5409,7 +5419,7 @@
             flex-direction: column;
             gap: 6px;
             color: #344054;
-            font-size: 0.86rem;
+            font-size: 0.92rem;
             line-height: 1.6;
         }
 
@@ -5428,7 +5438,7 @@
             background: rgba(241, 245, 249, 0.95);
             border: 1px solid rgba(226, 232, 240, 0.95);
             color: #475467;
-            font-size: 0.78rem;
+            font-size: 0.84rem;
             font-weight: 600;
         }
 
@@ -5598,7 +5608,7 @@
 
         .reader-sidebar-tab {
             padding: 6px 12px;
-            font-size: 0.88rem;
+            font-size: 0.94rem;
             font-weight: 600;
             border-radius: 6px;
             border: none;
@@ -5645,19 +5655,19 @@
         }
 
         .reader-sidebar .reader-note-title {
-            font-size: 0.88rem;
+            font-size: 0.94rem;
             font-weight: 600;
             color: #334155;
         }
 
         .reader-sidebar .reader-note-meta {
-            font-size: 0.82rem;
+            font-size: 0.88rem;
             color: #94a3b8;
             margin-bottom: 10px;
         }
 
         .reader-sidebar .reader-note-textarea {
-            font-size: 0.94rem;
+            font-size: 1rem;
             min-height: 150px;
         }
 

@@ -10,7 +10,7 @@ from sqlalchemy import func, or_
 from sqlalchemy.orm import Session
 
 from database import get_db
-from models import AiConversation, Folder, Item, Settings
+from models import AiConversation, Folder, Item, ItemPageNote, Settings
 from schemas import (
     AiAskRequest,
     AiAskResponse,
@@ -80,6 +80,10 @@ def _get_user_settings(db: Session, user_id: str) -> Settings | None:
 
 def _get_user_item(db: Session, user_id: str, item_id: str) -> Item | None:
     return db.query(Item).filter(Item.user_id == user_id, Item.id == item_id).first()
+
+
+def _get_item_page_notes(db: Session, user_id: str, item_id: str) -> list[ItemPageNote]:
+    return db.query(ItemPageNote).filter(ItemPageNote.user_id == user_id, ItemPageNote.item_id == item_id).all()
 
 
 def _get_setting_secret(settings: Settings | None, field_name: str) -> str | None:
@@ -213,7 +217,7 @@ def _build_note_context_lines(note: KnowledgeBaseNote, index: int) -> str:
     )
 
 
-def _build_current_item_context(item: Item, note: KnowledgeBaseNote | None = None) -> str:
+def _build_current_item_context(item: Item, note: KnowledgeBaseNote | None = None, page_notes: list[ItemPageNote] | None = None) -> str:
     folder_names = _extract_item_folder_names(item)
     analysis_text = _normalize_multiline_text(item.extracted_text)
     canonical_text = _normalize_multiline_text(item.canonical_text)
@@ -257,6 +261,22 @@ def _build_current_item_context(item: Item, note: KnowledgeBaseNote | None = Non
             "当前文章额外抓取到的 OCR / 帧文字：",
             _truncate_text("\n\n".join(supplemental_parts), 4000),
         ])
+
+    if page_notes:
+        user_notes_parts = []
+        for pn in page_notes:
+            title = _clean_optional_string(pn.title) or "无标题"
+            content = _clean_optional_string(pn.content) or ""
+            if content:
+                user_notes_parts.append(f"【{title}】\n{content}")
+            else:
+                user_notes_parts.append(f"【{title}】")
+        if user_notes_parts:
+            lines.extend([
+                "",
+                "用户在这篇文章上的笔记：",
+                _truncate_text("\n\n".join(user_notes_parts), 4000),
+            ])
 
     return "\n".join(lines).strip()
 
@@ -344,6 +364,7 @@ def _analysis_system_prompt() -> str:
     return (
         "你是一个读过用户知识库的研究助理。"
         "当前任务是分析一条笔记，不要机械复述现有摘要。"
+        "分析时要结合正文内容和用户在文章上的笔记内容一起综合判断。"
         "要以现有摘要为锚点，补充更高层次的理解、归类、关联和思考方向。"
         "只基于提供的内容做判断，不要编造。"
         "返回严格 JSON。"
@@ -354,7 +375,8 @@ def _assistant_chat_system_prompt() -> str:
     return (
         "你是用户网站里的 AI chatbot。"
         "你的职责是和用户的个人知识库以及当前打开的文章对话，而不是泛泛聊天。"
-        "如果提供了当前文章上下文，优先依据当前文章的内容分析、抓取文本和 OCR / 帧文字回答。"
+        "如果提供了当前文章上下文，优先依据当前文章的内容分析、抓取文本、OCR / 帧文字以及用户在文章上的笔记综合回答。"
+        "回答时要结合正文内容和用户笔记内容一起分析，而不是只看其中一个。"
         "如果同时提供了知识库笔记，优先使用已有 `summary` / `摘要` 作为辅助，不要机械重复整理。"
         "只能基于提供的上下文回答；若上下文不足，必须明确说明。"
         "回答请使用中文，保持简洁。"
@@ -966,7 +988,15 @@ def _tool_note_result(note: KnowledgeBaseNote, score: float = 0.0) -> dict[str, 
 
 
 def _tool_item_result(item: Item, note: KnowledgeBaseNote | None = None) -> dict[str, Any]:
-    return {
+    page_notes_text = ""
+    if hasattr(item, "page_notes") and item.page_notes:
+        parts = []
+        for pn in item.page_notes:
+            title = _clean_optional_string(pn.title) or "无标题"
+            content = _clean_optional_string(pn.content) or ""
+            parts.append(f"【{title}】{content}" if content else f"【{title}】")
+        page_notes_text = _truncate_text(" | ".join(parts), 500)
+    result: dict[str, Any] = {
         "item_id": item.id,
         "title": _clean_optional_string(item.title) or f"Item {item.id}",
         "folder_names": _extract_item_folder_names(item),
@@ -978,6 +1008,9 @@ def _tool_item_result(item: Item, note: KnowledgeBaseNote | None = None) -> dict
         "obsidian_path": _clean_optional_string(item.obsidian_path),
         "notion_page_id": _clean_optional_string(item.notion_page_id),
     }
+    if page_notes_text:
+        result["user_notes"] = page_notes_text
+    return result
 
 
 def _append_unique_ranked_notes(
@@ -1544,7 +1577,8 @@ async def _run_agent_assistant(
 ) -> AiAssistantResponse:
     agent_permissions = _agent_permissions(settings)
     tools = _build_agent_tools(agent_permissions)
-    current_item_context = _build_current_item_context(current_item, current_item_note) if current_item is not None else ""
+    current_page_notes = _get_item_page_notes(db, user_id, current_item.id) if current_item else []
+    current_item_context = _build_current_item_context(current_item, current_item_note, current_page_notes) if current_item is not None else ""
     system_message = _compose_system_message(
         _assistant_agent_system_prompt(agent_permissions, snapshot),
         (
@@ -1866,9 +1900,11 @@ async def assistant(request: AiAssistantRequest, db: Session = Depends(get_db)):
     current_item_id = _clean_optional_string(request.current_item_id)
     current_item = _get_user_item(db, user_id, current_item_id) if current_item_id else None
     current_item_note = None
+    current_page_notes: list[ItemPageNote] = []
     if current_item:
         current_item_note = snapshot.notes_by_item_id.get(current_item.id) if snapshot.note_count else None
         current_item_note = _build_seed_note_from_item(current_item, current_item_note)
+        current_page_notes = _get_item_page_notes(db, user_id, current_item.id)
 
     if mode == "agent":
         return await _run_agent_assistant(
@@ -1919,11 +1955,11 @@ async def assistant(request: AiAssistantRequest, db: Session = Depends(get_db)):
         _build_note_context_lines(note, index + 1)
         for index, (note, _) in enumerate(combined_ranked_notes)
     )
-    current_item_context = _build_current_item_context(current_item, current_item_note) if current_item is not None else ""
+    current_item_context = _build_current_item_context(current_item, current_item_note, current_page_notes) if current_item is not None else ""
     system_message = _compose_system_message(
         _assistant_chat_system_prompt(),
         (
-            "下面是当前文章上下文。回答当前文章相关问题时，优先依据这里的内容分析、抓取文本和 OCR / 帧文字。\n\n"
+            "下面是当前文章上下文（包括正文内容和用户笔记）。回答时请结合正文内容和用户笔记综合分析。\n\n"
             f"{current_item_context}"
         ) if current_item_context else "",
         (
@@ -2147,6 +2183,19 @@ async def analyze_item(item_id: str, db: Session = Depends(get_db)):
     ) or "无"
     current_note_context = _build_note_context_lines(seed_note, 0)
 
+    page_notes = _get_item_page_notes(db, user_id, item.id)
+    page_notes_context = ""
+    if page_notes:
+        parts = []
+        for pn in page_notes:
+            title = _clean_optional_string(pn.title) or "无标题"
+            content = _clean_optional_string(pn.content) or ""
+            if content:
+                parts.append(f"【{title}】\n{content}")
+            else:
+                parts.append(f"【{title}】")
+        page_notes_context = "\n\n用户在这篇文章上的笔记：\n" + _truncate_text("\n\n".join(parts), 4000)
+
     try:
         response_text = await chat_completion(
             api_key=ai_config["api_key"],
@@ -2157,7 +2206,7 @@ async def analyze_item(item_id: str, db: Session = Depends(get_db)):
                 {
                     "role": "user",
                     "content": (
-                        "请分析当前这条笔记。回答必须是 JSON，对象字段如下：\n"
+                        "请结合正文内容和用户笔记综合分析当前这条笔记。回答必须是 JSON，对象字段如下：\n"
                         "{\n"
                         '  "one_liner": "一句话总结",\n'
                         '  "core_points": ["核心观点1", "核心观点2"],\n'
@@ -2166,7 +2215,7 @@ async def analyze_item(item_id: str, db: Session = Depends(get_db)):
                         '  "thinking_questions": ["问题1", "问题2"]\n'
                         "}\n\n"
                         "当前笔记：\n"
-                        f"{current_note_context}\n\n"
+                        f"{current_note_context}{page_notes_context}\n\n"
                         "相关笔记：\n"
                         f"{related_context}"
                     ),

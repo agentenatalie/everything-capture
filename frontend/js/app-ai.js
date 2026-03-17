@@ -36,10 +36,10 @@
             'sync_item_to_notion',
         ]);
         const READER_AI_SUGGESTIONS = [
-            '总结这条笔记的核心观点',
-            '这条内容为什么值得保存？',
-            '它和我已有的哪些笔记相关？',
-            '给我 3 个值得继续追问的问题',
+            '结合正文和我的笔记，总结核心观点',
+            '综合正文内容和笔记，这条为什么值得保存？',
+            '基于正文和笔记内容，它和我已有的哪些知识相关？',
+            '结合正文和笔记，给我 3 个值得继续追问的问题',
         ];
         const READER_AI_SESSION_STORAGE_KEY = 'everything-capture.reader-ai.sidebar.v1';
         const AI_CODE_COPY_ICON = `
@@ -1378,6 +1378,7 @@
             if (!askAiResult) return;
             const currentItem = getCurrentAiContextItem();
             syncAskAiMeta();
+            askAiResult.classList.toggle('has-messages', aiConversation.length > 0);
 
             if (!aiConversation.length) {
                 if (!isAiConfigured()) {

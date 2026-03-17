@@ -452,6 +452,7 @@ def rank_notes_for_query(snapshot: KnowledgeBaseSnapshot, query: str, limit: int
 
     wants_recent = bool(_RECENT_QUERY_PATTERN.search(normalized_query))
     lowered_query = normalized_query.lower()
+    query_terms = [term for term in lowered_query.split() if len(term) >= 2]
     now = datetime.utcnow()
 
     scored: list[tuple[float, KnowledgeBaseNote]] = []
@@ -463,10 +464,22 @@ def rank_notes_for_query(snapshot: KnowledgeBaseSnapshot, query: str, limit: int
             score += 0.95
         elif lowered_query and lowered_query in summary_lower:
             score += 0.7
-        if note.folder and any(term in note.folder.lower() for term in lowered_query.split() if term):
+        if note.folder and any(term in note.folder.lower() for term in query_terms):
             score += 0.2
-        if note.tags and any(term in " ".join(note.tags).lower() for term in lowered_query.split() if term):
+        if note.tags and any(term in " ".join(note.tags).lower() for term in query_terms):
             score += 0.25
+        # Full-text body substring matching for individual query terms
+        if query_terms:
+            body_lower = note.body.lower()
+            body_hits = sum(1 for term in query_terms if term in body_lower)
+            if body_hits > 0:
+                score += min(0.4, body_hits * 0.12)
+        # Source URL matching (helps find GitHub repos, specific websites, etc.)
+        if note.source and query_terms:
+            source_lower = note.source.lower()
+            source_hits = sum(1 for term in query_terms if term in source_lower)
+            if source_hits > 0:
+                score += min(0.5, source_hits * 0.2)
         if wants_recent and note.created_at:
             age_days = max((now - note.created_at).total_seconds() / 86400.0, 0.0)
             score += max(0.0, 0.55 - age_days * 0.03)
@@ -475,6 +488,29 @@ def rank_notes_for_query(snapshot: KnowledgeBaseSnapshot, query: str, limit: int
 
     scored.sort(key=lambda entry: (entry[0], entry[1].created_at or datetime.min, entry[1].relative_path), reverse=True)
     return [(note, round(score, 4)) for score, note in scored[: max(1, limit)]]
+
+
+def rank_notes_for_expanded_queries(
+    snapshot: KnowledgeBaseSnapshot,
+    queries: list[str],
+    limit: int = 8,
+) -> list[tuple[KnowledgeBaseNote, float]]:
+    """Search with multiple query strings and merge results, keeping the best score per note."""
+    if not queries:
+        return []
+
+    best_scores: dict[str, tuple[KnowledgeBaseNote, float]] = {}
+    expanded_limit = max(limit, limit + 2)
+
+    for query in queries:
+        ranked = rank_notes_for_query(snapshot, query, limit=expanded_limit)
+        for note, score in ranked:
+            existing = best_scores.get(note.note_id)
+            if existing is None or score > existing[1]:
+                best_scores[note.note_id] = (note, score)
+
+    merged = sorted(best_scores.values(), key=lambda entry: entry[1], reverse=True)
+    return [(note, round(score, 4)) for note, score in merged[: max(1, limit)]]
 
 
 def rank_related_notes(

@@ -481,8 +481,23 @@
                             <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
                         </svg>
                         <span class="ai-history-item-title">${escapeHtml(conversation.title || '未命名')}</span>
+                        <span class="ai-history-item-delete" data-delete-id="${escapeAttribute(conversation.id)}" aria-label="删除对话">&times;</span>
                     </button>
                 `).join('');
+
+                container.querySelectorAll('.ai-history-item-delete').forEach((del) => {
+                    del.addEventListener('click', async (e) => {
+                        e.stopPropagation();
+                        e.preventDefault();
+                        const id = del.getAttribute('data-delete-id');
+                        if (!id || !confirm('确定删除这条对话？')) return;
+                        try {
+                            await deleteAiConversation(id);
+                        } catch (error) {
+                            showToast(`删除失败：${error.message}`, 'error');
+                        }
+                    });
+                });
 
                 container.querySelectorAll('[data-conversation-id]').forEach((button) => {
                     button.addEventListener('click', async () => {
@@ -584,6 +599,34 @@
             updateAskAiInputContextUi();
             renderAiConversationHistory();
             renderAiConversation();
+        }
+
+        async function deleteAiConversation(conversationId) {
+            if (!(await ensureAiSessionReady({ allowRecovery: true }))) {
+                showToast('无法连接本地会话。', 'error');
+                return;
+            }
+            const response = await fetch(`/api/ai/conversations/${conversationId}`, { method: 'DELETE' });
+            if (!response.ok) {
+                const data = await response.json().catch(() => ({}));
+                throw new Error(data.detail || '删除失败');
+            }
+            if (conversationId === aiConversationId) {
+                clearAiConversation();
+            }
+            if (conversationId === aiChatConversationId) {
+                aiChatConversationId = null;
+                aiChatConversation = [];
+            }
+            if (conversationId === aiAgentConversationId) {
+                aiAgentConversationId = null;
+                aiAgentConversation = [];
+            }
+            aiChatConversationHistory = aiChatConversationHistory.filter((c) => c.id !== conversationId);
+            aiAgentConversationHistory = aiAgentConversationHistory.filter((c) => c.id !== conversationId);
+            renderAiConversationHistory();
+            renderAiConversation();
+            showToast('对话已删除');
         }
 
         async function persistAiConversationSnapshot(conversation, options = {}) {
@@ -2013,6 +2056,7 @@
         window.submitReaderAiQuestion = submitReaderAiQuestion;
         window.saveTopAiMessageToPageNote = saveTopAiMessageToPageNote;
         window.saveReaderAiMessageToPageNote = saveReaderAiMessageToPageNote;
+        window.renderMarkdownContent = renderMarkdown;
 
         askAiBtn?.addEventListener('click', () => openAskAiModal({ itemId: null, resetConversation: true }));
         openReaderAiBtn?.addEventListener('click', openCurrentItemAiAssistant);

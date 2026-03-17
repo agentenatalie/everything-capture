@@ -51,6 +51,7 @@ from services.knowledge_base import (
     detect_knowledge_base_path,
     load_knowledge_base_snapshot,
     prepare_note_for_similarity,
+    rank_notes_for_expanded_queries,
     rank_notes_for_query,
     rank_related_notes,
 )
@@ -332,6 +333,10 @@ def _ask_ai_system_prompt() -> str:
         "如果证据不足，必须明确说信息不足。"
         "只有在你实际引用了某条笔记时，才使用 [1] [2] 这样的引用编号。"
         "如果答案没有直接引用具体笔记，就不要输出引用编号。"
+        "\n\n"
+        "【重要】仔细审查所有提供的笔记，不要只看标题是否字面匹配用户问题。"
+        "要深入理解每篇笔记的实际内容和用途，判断它是否能间接回答用户的问题。"
+        "例如：用户问'找实习要用什么工具'，一篇关于'简历自动填写'的笔记就是高度相关的。"
     )
 
 
@@ -355,6 +360,10 @@ def _assistant_chat_system_prompt() -> str:
         "回答请使用中文，保持简洁。"
         "只有在你实际引用了某条知识库笔记时，才使用 [1] [2] 引用编号。"
         "如果没有直接引用具体笔记，就不要输出引用编号。"
+        "\n\n"
+        "【重要】仔细审查所有提供的笔记，不要只看标题是否字面匹配用户问题。"
+        "要深入理解每篇笔记的实际内容和用途，判断它是否能间接回答用户的问题。"
+        "例如：用户问'找实习要用什么工具'，一篇关于'简历自动填写'的笔记就是高度相关的。"
     )
 
 
@@ -381,6 +390,16 @@ def _assistant_agent_system_prompt(agent_permissions: list[str], snapshot: Knowl
         "回答请使用中文，保持清楚直接。"
         "只有在你最终说明里直接引用了某条知识库笔记时，才使用 [1] [2] 引用编号。"
         "如果没有直接引用具体笔记，就不要输出引用编号。"
+        "\n\n"
+        "【重要：智能检索策略】\n"
+        "当用户提问时，你必须主动进行多轮、多角度的知识库检索，而不是只搜索一次：\n"
+        "1. 先用用户原始问题的关键词搜索一次。\n"
+        "2. 然后思考用户真正想要找的内容可能以什么形式保存在知识库中——"
+        "考虑同义词、相关概念、不同的表述方式。"
+        "例如用户问'申请实习用什么工具'，你应该额外搜索'简历''求职''resume''job application'等。\n"
+        "3. 如果第一次搜索结果不够理想（分数低或明显不相关），务必用不同的关键词再搜索1-2次。\n"
+        "4. 同时使用 search_knowledge_base 和 search_library_items 来扩大搜索范围。\n"
+        "5. 综合所有搜索结果后再给出最终回答。\n"
         f"当前知识库位置：{knowledge_base_hint}。"
         f"当前可用权限：{readable_permissions}。"
     )
@@ -397,7 +416,7 @@ def _analysis_organizer_system_prompt() -> str:
         "你的任务是把当前文章已有的内容分析文字整理成适合阅读侧栏直接展示的结构化文本。"
         "目标不是生成摘要，而是在不引入外部信息的前提下，最大限度保留原有内容、事实和原文表达。"
         "你更像在做编辑排版，而不是写摘要或读后感。"
-        "不要把长文压缩成几点结论，不要默认输出“摘要 / 核心要点”这种固定模板。"
+        "不要把长文压缩成几点结论，不要默认输出「摘要 / 核心要点」这种固定模板。"
         "不要整理正文，不要改写抓取正文、OCR 或帧文字，也不要把正文重新誊写进结果里。"
         "只允许基于提供的内容整理，不要补外部知识，不要编造。"
         "输出必须是纯文本，不要解释，不要加代码块。"
@@ -450,6 +469,258 @@ def _strip_leading_analysis_heading(text: str | None) -> str:
             continue
         break
     return "\n".join(lines).strip()
+
+
+# ---------------------------------------------------------------------------
+# Stage 1: AI query expansion — bridge the semantic gap at the *query* level
+# ---------------------------------------------------------------------------
+
+_QUERY_EXPANSION_PROMPT = (
+    "你是搜索查询扩展助手。用户会问一个问题，你需要生成多组不同的搜索关键词，"
+    "帮助在个人知识库中通过关键词匹配找到相关内容。\n"
+    "要求：\n"
+    "1. 输出用户原始问题的核心关键词\n"
+    "2. 输出同义词、相关概念、可能的内容标题用词\n"
+    "   例如：用户问'申请实习'→ 也搜索'简历 求职 resume job application 面试'\n"
+    "   例如：用户问'学编程'→ 也搜索'Python 教程 tutorial 开发工具 coding'\n"
+    "3. 每行一组搜索词（可包含多个词），共4-6行\n"
+    "4. 不要编号、不要解释，只输出搜索词"
+)
+
+
+async def _expand_search_queries(ai_config: dict[str, str], question: str) -> list[str]:
+    """Use AI to generate expanded search queries that cover synonyms and related concepts."""
+    try:
+        response = await chat_completion(
+            api_key=ai_config["api_key"],
+            base_url=ai_config["base_url"],
+            model=ai_config["model"],
+            messages=[
+                {"role": "system", "content": _QUERY_EXPANSION_PROMPT},
+                {"role": "user", "content": question},
+            ],
+            temperature=0.3,
+        )
+        expanded = [
+            line.strip()
+            for line in _strip_reasoning_blocks(response).strip().splitlines()
+            if line.strip() and len(line.strip()) >= 2
+        ]
+        if expanded:
+            return [question, *expanded[:6]]
+    except (AiClientError, Exception):
+        pass
+    return [question]
+
+
+# ---------------------------------------------------------------------------
+# Stage 2: Unified TF-IDF candidate retrieval (Obsidian notes + DB items)
+# ---------------------------------------------------------------------------
+
+_CANDIDATE_POOL_SIZE = 30
+
+
+def _item_to_virtual_note(item: Item) -> KnowledgeBaseNote:
+    """Convert a database Item into a KnowledgeBaseNote for unified search."""
+    folder_names = _extract_item_folder_names(item)
+    summary = _truncate_text(item.extracted_text or item.canonical_text, 280)
+    return KnowledgeBaseNote(
+        note_id=f"item::{item.id}",
+        title=_clean_optional_string(item.title) or f"Item {item.id}",
+        summary=summary,
+        body=(item.canonical_text or "").strip(),
+        excerpt=_truncate_text(item.canonical_text or item.extracted_text, 320),
+        extracted_text=(item.extracted_text or "").strip(),
+        tags=[],
+        folder=", ".join(folder_names),
+        source=_clean_optional_string(item.source_url),
+        created_at=item.created_at,
+        relative_path=f"library/{item.id}",
+        item_id=item.id,
+    )
+
+
+def _build_unified_snapshot(
+    snapshot: KnowledgeBaseSnapshot,
+    db_items: list[Item] | None = None,
+) -> KnowledgeBaseSnapshot:
+    """Merge Obsidian notes with database items into one searchable snapshot."""
+    seen_item_ids: set[str] = set()
+    all_notes: list[KnowledgeBaseNote] = list(snapshot.notes)
+    for note in snapshot.notes:
+        if note.item_id:
+            seen_item_ids.add(note.item_id)
+
+    if db_items:
+        for item in db_items:
+            if item.id in seen_item_ids:
+                continue
+            virtual_note = _item_to_virtual_note(item)
+            virtual_note = prepare_note_for_similarity(virtual_note)
+            all_notes.append(virtual_note)
+            seen_item_ids.add(item.id)
+
+    return KnowledgeBaseSnapshot(
+        root_path=snapshot.root_path,
+        notes=all_notes,
+        loaded_at=snapshot.loaded_at,
+    )
+
+
+def _retrieve_candidates(
+    unified_snapshot: KnowledgeBaseSnapshot,
+    queries: list[str],
+    pool_size: int = _CANDIDATE_POOL_SIZE,
+) -> list[tuple[KnowledgeBaseNote, float]]:
+    """Run TF-IDF search with multiple expanded queries and merge into a candidate pool."""
+    return rank_notes_for_expanded_queries(unified_snapshot, queries, limit=pool_size)
+
+
+# ---------------------------------------------------------------------------
+# Stage 3: AI reranker — semantically select from the candidate pool
+# ---------------------------------------------------------------------------
+
+_RERANKER_SYSTEM_PROMPT = (
+    "你是知识库语义精排助手。下面列出了一组候选内容的编号、标题和摘要。"
+    "请根据用户的问题，选出所有真正相关的条目编号。\n"
+    "重要规则：\n"
+    "1. 深入理解语义关系，不要只看字面关键词。\n"
+    "2. 例如用户问'申请实习'，'简历工具''求职产品''面试准备'都是相关的。\n"
+    "3. 宁可多选也不要漏掉，最多选10个。\n"
+    "4. 按相关度从高到低排列。\n"
+    "5. 输出格式：只输出编号，用英文逗号分隔，例如：3,7,12\n"
+    "6. 如果没有任何相关内容，输出：无"
+)
+
+
+def _build_candidate_index(
+    candidates: list[tuple[KnowledgeBaseNote, float]],
+) -> tuple[str, list[KnowledgeBaseNote]]:
+    """Build a compact index from candidates for the AI reranker."""
+    lines: list[str] = []
+    indexed: list[KnowledgeBaseNote] = []
+    for note, _score in candidates:
+        idx = len(indexed) + 1
+        title = (note.title or "").strip()[:80]
+        summary = (note.summary or "").strip()[:150]
+        tags = ", ".join(note.tags[:5]) if note.tags else ""
+        source = (note.source or "").strip()[:80]
+        parts = [f"{idx}. [{title}]"]
+        if summary:
+            parts.append(summary)
+        if tags:
+            parts.append(f"标签:{tags}")
+        if source:
+            parts.append(f"来源:{source}")
+        lines.append(" | ".join(parts))
+        indexed.append(note)
+    return "\n".join(lines), indexed
+
+
+async def _ai_rerank_candidates(
+    ai_config: dict[str, str],
+    candidates: list[tuple[KnowledgeBaseNote, float]],
+    question: str,
+    limit: int = 8,
+) -> list[tuple[KnowledgeBaseNote, float]]:
+    """Ask AI to pick the most relevant notes from the candidate pool."""
+    if not candidates:
+        return []
+
+    index_text, indexed_notes = _build_candidate_index(candidates)
+
+    try:
+        response = await chat_completion(
+            api_key=ai_config["api_key"],
+            base_url=ai_config["base_url"],
+            model=ai_config["model"],
+            messages=[
+                {"role": "system", "content": _RERANKER_SYSTEM_PROMPT},
+                {
+                    "role": "user",
+                    "content": f"候选内容：\n{index_text}\n\n用户问题：{question}",
+                },
+            ],
+            temperature=0.1,
+        )
+    except AiClientError:
+        return candidates[:limit]
+
+    cleaned = _strip_reasoning_blocks(response).strip()
+    if not cleaned or cleaned == "无":
+        return []
+
+    selected: list[tuple[KnowledgeBaseNote, float]] = []
+    seen_ids: set[str] = set()
+    for raw_number in re.findall(r"\d+", cleaned):
+        try:
+            idx = int(raw_number) - 1
+        except ValueError:
+            continue
+        if idx < 0 or idx >= len(indexed_notes):
+            continue
+        note = indexed_notes[idx]
+        if note.note_id in seen_ids:
+            continue
+        seen_ids.add(note.note_id)
+        relevance = max(0.1, 1.0 - len(selected) * 0.08)
+        selected.append((note, round(relevance, 4)))
+        if len(selected) >= limit:
+            break
+
+    return selected
+
+
+# ---------------------------------------------------------------------------
+# Full pipeline: expand → retrieve → rerank
+# ---------------------------------------------------------------------------
+
+def _load_all_user_items(db: Session, user_id: str) -> list[Item]:
+    """Load all items from the database for a user."""
+    return (
+        db.query(Item)
+        .filter(Item.user_id == user_id)
+        .order_by(Item.created_at.desc())
+        .all()
+    )
+
+
+async def _semantic_rank_notes(
+    ai_config: dict[str, str],
+    snapshot: KnowledgeBaseSnapshot,
+    question: str,
+    limit: int = 8,
+    db: Session | None = None,
+    user_id: str | None = None,
+) -> list[tuple[KnowledgeBaseNote, float]]:
+    """Three-stage semantic search: expand → retrieve → rerank.
+
+    Works with any knowledge base size:
+    - Stage 1 (expand): AI generates synonym/related-concept queries (~100 tokens)
+    - Stage 2 (retrieve): TF-IDF across ALL content (Obsidian + DB), takes top 30
+    - Stage 3 (rerank): AI picks the truly relevant ones from 30 candidates (~3k tokens)
+    """
+    # Build unified searchable snapshot (Obsidian + DB items)
+    db_items = _load_all_user_items(db, user_id) if db and user_id else None
+    unified = _build_unified_snapshot(snapshot, db_items=db_items)
+
+    # Stage 1: AI query expansion
+    expanded_queries = await _expand_search_queries(ai_config, question)
+
+    # Stage 2: TF-IDF candidate retrieval with expanded queries
+    candidates = _retrieve_candidates(unified, expanded_queries, pool_size=_CANDIDATE_POOL_SIZE)
+
+    if not candidates:
+        return []
+
+    # Stage 3: AI reranker on the candidate pool
+    reranked = await _ai_rerank_candidates(ai_config, candidates, question, limit=limit)
+
+    # If reranker returned nothing (e.g. API failure), fall back to TF-IDF order
+    if not reranked:
+        return candidates[:limit]
+
+    return reranked
 
 
 def _match_organized_analysis_heading(line: str | None) -> str | None:
@@ -785,11 +1056,17 @@ def _build_agent_tools(agent_permissions: list[str]) -> list[dict[str, Any]]:
             "type": "function",
             "function": {
                 "name": "search_knowledge_base",
-                "description": "Search the Obsidian knowledge base semantically and return the most relevant notes.",
+                "description": (
+                    "Search the Obsidian knowledge base and return the most relevant notes. "
+                    "The search uses keyword matching, so choose your query terms carefully. "
+                    "Tips: use specific keywords rather than full sentences; "
+                    "try synonyms and related concepts if the first search doesn't yield good results; "
+                    "call this tool multiple times with different queries to improve recall."
+                ),
                 "parameters": {
                     "type": "object",
                     "properties": {
-                        "query": {"type": "string"},
+                        "query": {"type": "string", "description": "Search keywords or short phrase. Use specific, concrete terms."},
                         "limit": {"type": "integer", "minimum": 1, "maximum": 8},
                     },
                     "required": ["query"],
@@ -801,7 +1078,7 @@ def _build_agent_tools(agent_permissions: list[str]) -> list[dict[str, Any]]:
             "type": "function",
             "function": {
                 "name": "search_library_items",
-                "description": "Search saved library items in the website and return item IDs for later actions.",
+                "description": "Search saved library items in the website database. Complements search_knowledge_base - use both for comprehensive results. Try different keywords if initial results are not satisfying.",
                 "parameters": {
                     "type": "object",
                     "properties": {
@@ -999,6 +1276,7 @@ async def _execute_agent_tool(
     user_id: str,
     snapshot: KnowledgeBaseSnapshot,
     agent_permissions: list[str],
+    ai_config: dict[str, str] | None = None,
 ) -> tuple[dict[str, Any], AiToolEventResponse, list[tuple[KnowledgeBaseNote, float]], list[dict[str, Any]]]:
     limit = max(1, min(int(arguments.get("limit") or 5), 10))
 
@@ -1007,7 +1285,10 @@ async def _execute_agent_tool(
         if not query:
             result = {"status": "error", "message": "query is required"}
             return result, AiToolEventResponse(name=tool_name, status="failed", summary="知识库检索失败：缺少 query"), [], []
-        ranked = rank_notes_for_query(snapshot, query, limit=limit) if snapshot.note_count else []
+        if ai_config:
+            ranked = await _semantic_rank_notes(ai_config, snapshot, query, limit=limit, db=db, user_id=user_id)
+        else:
+            ranked = rank_notes_for_query(snapshot, query, limit=limit) if snapshot.note_count else []
         result = {
             "status": "ok",
             "query": query,
@@ -1344,6 +1625,7 @@ async def _run_agent_assistant(
                     user_id=user_id,
                     snapshot=snapshot,
                     agent_permissions=agent_permissions,
+                    ai_config=ai_config,
                 )
             tool_events.append(event)
             _append_unique_ranked_notes(collected_notes, ranked_notes)
@@ -1493,6 +1775,21 @@ def save_ai_conversation(request: AiConversationSaveRequest, db: Session = Depen
     return _serialize_ai_conversation(conversation)
 
 
+@router.delete("/conversations/{conversation_id}")
+def delete_ai_conversation(conversation_id: str, db: Session = Depends(get_db)):
+    user_id = get_current_user_id()
+    conversation = (
+        db.query(AiConversation)
+        .filter(AiConversation.id == conversation_id, AiConversation.user_id == user_id)
+        .first()
+    )
+    if not conversation:
+        raise HTTPException(status_code=404, detail="Conversation not found")
+    db.delete(conversation)
+    db.commit()
+    return {"ok": True}
+
+
 @router.post("/ask", response_model=AiAskResponse)
 async def ask_ai(request: AiAskRequest, db: Session = Depends(get_db)):
     question = (request.question or "").strip()
@@ -1504,18 +1801,9 @@ async def ask_ai(request: AiAskRequest, db: Session = Depends(get_db)):
     ai_config = _resolve_ai_config(settings)
 
     snapshot = load_knowledge_base_snapshot()
-    if snapshot.note_count == 0:
-        return AiAskResponse(
-            question=question,
-            answer="当前没有检测到可读取的 Obsidian 知识库笔记，所以无法基于知识库回答这个问题。",
-            citations=[],
-            knowledge_base_path=detect_knowledge_base_path(),
-            note_count=0,
-            insufficient_context=True,
-        )
 
     top_k = max(3, min(int(request.top_k or 6), 10))
-    ranked_notes = rank_notes_for_query(snapshot, question, limit=top_k)
+    ranked_notes = await _semantic_rank_notes(ai_config, snapshot, question, limit=top_k, db=db, user_id=user_id)
     if not ranked_notes:
         return AiAskResponse(
             question=question,
@@ -1602,20 +1890,8 @@ async def assistant(request: AiAssistantRequest, db: Session = Depends(get_db)):
     if not latest_question:
         raise HTTPException(status_code=400, detail="At least one user message is required")
 
-    if snapshot.note_count == 0 and current_item_note is None:
-        return AiAssistantResponse(
-            mode="chat",
-            message="当前没有检测到可读取的 Obsidian 知识库笔记，所以我现在还不能基于知识库回答。",
-            citations=[],
-            knowledge_base_path=detect_knowledge_base_path(),
-            note_count=0,
-            insufficient_context=True,
-            agent_permissions=_agent_permissions(settings),
-            updated_items=[],
-        )
-
     top_k = max(3, min(int(request.top_k or 6), 10))
-    ranked_notes = rank_notes_for_query(snapshot, latest_question, limit=top_k) if snapshot.note_count else []
+    ranked_notes = await _semantic_rank_notes(ai_config, snapshot, latest_question, limit=top_k, db=db, user_id=user_id)
     combined_ranked_notes: list[tuple[KnowledgeBaseNote, float]] = []
     if current_item_note is not None:
         combined_ranked_notes.append((current_item_note, 1.0))
@@ -1704,6 +1980,67 @@ def related_notes(item_id: str, limit: int = 5, db: Session = Depends(get_db)):
     )
 
 
+_ORGANIZER_CHUNK_CHAR_LIMIT = 12000
+_ORGANIZER_MERGE_PROMPT = (
+    "下面是同一篇文章分段整理后的结果，请合并成一份连贯的内容分析文本。"
+    "保留所有信息和结构标记（[detected_title]、[body] 等），去除重复部分。"
+    "输出纯文本，不要解释。"
+)
+
+
+def _split_analysis_chunks(text: str, limit: int = _ORGANIZER_CHUNK_CHAR_LIMIT) -> list[str]:
+    """Split long analysis text into chunks at paragraph boundaries."""
+    if len(text) <= limit:
+        return [text]
+
+    paragraphs = text.split("\n\n")
+    chunks: list[str] = []
+    current: list[str] = []
+    current_len = 0
+
+    for para in paragraphs:
+        para_len = len(para) + 2  # +2 for \n\n
+        if current and current_len + para_len > limit:
+            chunks.append("\n\n".join(current))
+            current = [para]
+            current_len = para_len
+        else:
+            current.append(para)
+            current_len += para_len
+
+    if current:
+        chunks.append("\n\n".join(current))
+
+    return chunks
+
+
+async def _organize_single_chunk(
+    ai_config: dict[str, str],
+    system_prompt: str,
+    chunk_context: str,
+    timeout: float,
+) -> str:
+    return await chat_completion(
+        api_key=ai_config["api_key"],
+        base_url=ai_config["base_url"],
+        model=ai_config["model"],
+        messages=[
+            {"role": "system", "content": system_prompt},
+            {
+                "role": "user",
+                "content": (
+                    "请直接整理下面这条「内容分析」文本。目标是尽量保留原有信息和表述，"
+                    "只做结构化、分段、去重和 Markdown 排版；不要总结、不要压缩成提要。"
+                    "请输出最终可保存的内容分析文本。\n\n"
+                    f"{chunk_context}"
+                ),
+            },
+        ],
+        temperature=0.2,
+        timeout_seconds=timeout,
+    )
+
+
 @router.post("/items/{item_id}/organize-analysis", response_model=ItemResponse)
 async def organize_item_analysis(item_id: str, db: Session = Depends(get_db)):
     user_id = get_current_user_id()
@@ -1718,25 +2055,53 @@ async def organize_item_analysis(item_id: str, db: Session = Depends(get_db)):
 
     if not _clean_optional_string(item.extracted_text):
         raise HTTPException(status_code=400, detail="No current item analysis available for organization")
-    source_context = _build_analysis_organizer_context(item)
+
+    analysis_text = _normalize_multiline_text(item.extracted_text)
+    item_header = (
+        f"当前文章 item_id：{item.id}\n"
+        f"当前文章标题：{_clean_optional_string(item.title) or f'Item {item.id}'}\n\n"
+        "当前文章已有的内容分析文本：\n"
+    )
+    system_prompt = _analysis_organizer_system_prompt()
+
+    chunks = _split_analysis_chunks(analysis_text)
 
     try:
-        response_text = await chat_completion(
-            api_key=ai_config["api_key"],
-            base_url=ai_config["base_url"],
-            model=ai_config["model"],
-            messages=[
-                {"role": "system", "content": _analysis_organizer_system_prompt()},
-                {
-                    "role": "user",
-                    "content": (
-                        "请直接整理下面这条“内容分析”文本。目标是尽量保留原有信息和表述，只做结构化、分段、去重和 Markdown 排版；不要总结、不要压缩成提要。请输出最终可保存的内容分析文本。\n\n"
-                        f"{source_context}"
-                    ),
-                },
-            ],
-            temperature=0.2,
-        )
+        if len(chunks) == 1:
+            # Short text: single pass
+            context = item_header + _truncate_text(analysis_text, 20000)
+            timeout = min(300.0, 90.0 + (len(context) / 5000) * 30.0)
+            response_text = await _organize_single_chunk(ai_config, system_prompt, context, timeout)
+        else:
+            # Long text: organize each chunk, then merge
+            chunk_results: list[str] = []
+            for i, chunk in enumerate(chunks):
+                chunk_label = f"（第{i + 1}/{len(chunks)}段）\n" if len(chunks) > 1 else ""
+                context = item_header + chunk_label + chunk
+                timeout = min(300.0, 90.0 + (len(context) / 5000) * 30.0)
+                result = await _organize_single_chunk(ai_config, system_prompt, context, timeout)
+                chunk_results.append(_strip_reasoning_blocks(result).strip())
+
+            if len(chunk_results) == 1:
+                response_text = chunk_results[0]
+            else:
+                # Merge all chunk results
+                merged_input = "\n\n---\n\n".join(chunk_results)
+                merge_timeout = min(300.0, 90.0 + (len(merged_input) / 5000) * 30.0)
+                response_text = await chat_completion(
+                    api_key=ai_config["api_key"],
+                    base_url=ai_config["base_url"],
+                    model=ai_config["model"],
+                    messages=[
+                        {"role": "system", "content": system_prompt},
+                        {
+                            "role": "user",
+                            "content": f"{_ORGANIZER_MERGE_PROMPT}\n\n{merged_input}",
+                        },
+                    ],
+                    temperature=0.2,
+                    timeout_seconds=merge_timeout,
+                )
     except AiClientError as exc:
         raise _ai_request_failed(exc) from exc
 

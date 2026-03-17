@@ -18,6 +18,7 @@
         const readerSidebarResizeHandle = document.getElementById('readerSidebarResizeHandle');
         const closeReaderSidebar = document.getElementById('closeReaderSidebar');
         const sidebarNoteTab = document.getElementById('sidebarNoteTab');
+        const sidebarPageNotesTab = document.getElementById('sidebarPageNotesTab');
         const sidebarAiTab = document.getElementById('sidebarAiTab');
         const urlInput = document.getElementById('urlInput');
         const extractBtnLabel = document.getElementById('extractBtnLabel');

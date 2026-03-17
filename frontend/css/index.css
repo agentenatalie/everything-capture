@@ -6263,7 +6263,8 @@
             body.reader-is-fullscreen .sidebar-user-meta,
             body.reader-is-fullscreen .folder-item-name,
             body.reader-is-fullscreen .folder-item-count,
-            body.reader-is-fullscreen .folder-item-menu {
+            body.reader-is-fullscreen .folder-item-menu,
+            body.reader-is-fullscreen .folder-sidebar-toggle {
                 display: none;
             }
 

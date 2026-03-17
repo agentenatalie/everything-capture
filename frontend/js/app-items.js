@@ -55,6 +55,7 @@
 
         function setReaderChromeHidden(nextState) {
             const shouldHide = Boolean(nextState) && isReaderFullscreen && modalOverlay.classList.contains('active');
+            if (readerChromeHidden === shouldHide) return;
             readerChromeHidden = shouldHide;
             modalShell?.classList.toggle('is-reader-chrome-hidden', shouldHide);
         }
@@ -763,7 +764,7 @@
                     latestReturnedCount || itemsData.length,
                     hasKeyword || hasPlatformFilter || hasFolderFilter
                 );
-                renderItems(filteredEntries);
+                renderItems(filteredEntries, { animate: true });
                 const trackedSyncIds = getTrackedRemoteSyncItemIds(itemsData);
                 if (trackedSyncIds.length) {
                     scheduleRemoteSyncRefresh({ delay: 400, force: true, itemIds: trackedSyncIds });
@@ -1176,7 +1177,8 @@
             refreshRemoteSyncStatus(nextItemIds, libraryRequestId);
         }
 
-        function renderItems(entries) {
+        function renderItems(entries, options = {}) {
+            const { animate = false } = options;
             if (entries.length === 0) {
                 grid.className = currentView === 'gallery' ? 'grid' : 'list-view';
                 grid.innerHTML = filterInput.value.trim() || platformFilter.value !== 'all' || currentFolderScope !== 'all'
@@ -1188,11 +1190,26 @@
             if (currentView === 'list') {
                 grid.className = 'list-view';
                 grid.innerHTML = entries.map((item) => renderListRowMarkup(item)).join('');
-                return;
+            } else {
+                grid.className = 'grid';
+                grid.innerHTML = entries.map((item) => renderCardMarkup(item)).join('');
             }
 
-            grid.className = 'grid';
-            grid.innerHTML = entries.map((item) => renderCardMarkup(item)).join('');
+            if (animate) {
+                const children = grid.querySelectorAll('.card, .list-row');
+                const staggerLimit = Math.min(children.length, 20);
+                for (let i = 0; i < staggerLimit; i += 1) {
+                    children[i].style.animationDelay = `${i * 30}ms`;
+                }
+                grid.classList.add('is-animating');
+                const cleanup = () => {
+                    grid.classList.remove('is-animating');
+                    for (let i = 0; i < staggerLimit; i += 1) {
+                        children[i].style.animationDelay = '';
+                    }
+                };
+                window.setTimeout(cleanup, staggerLimit * 30 + 350);
+            }
         }
 
         function setView(view) {

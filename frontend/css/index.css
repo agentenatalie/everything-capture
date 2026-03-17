@@ -1206,6 +1206,16 @@
             box-shadow: var(--focus-ring), inset 0 1px 0 rgba(255, 255, 255, 0.76);
         }
 
+        @keyframes itemReveal {
+            from { opacity: 0; transform: translateY(8px); }
+            to   { opacity: 1; transform: translateY(0); }
+        }
+
+        .grid.is-animating .card,
+        .list-view.is-animating .list-row {
+            animation: itemReveal 0.32s cubic-bezier(0.2, 0, 0, 1) both;
+        }
+
         .card {
             background: #ffffff;
             border: 1px solid rgba(226, 232, 240, 0.94);
@@ -5630,7 +5640,7 @@
         .modal.is-fullscreen .modal-footer {
             flex-shrink: 0;
             background: #ffffff;
-            border-top: 1px solid rgba(203, 213, 225, 0.6);
+            border-top: none;
             padding: 12px 24px;
         }
 
@@ -6602,9 +6612,10 @@
 
         .modal.is-fullscreen .reader-toolbar,
         .modal.is-fullscreen .modal-footer {
-            will-change: transform, opacity;
+            will-change: opacity;
             transition:
-                transform 0.3s cubic-bezier(0.2, 0, 0, 1),
+                max-height 0.3s cubic-bezier(0.2, 0, 0, 1),
+                padding 0.3s cubic-bezier(0.2, 0, 0, 1),
                 opacity 0.2s ease;
         }
 
@@ -6628,7 +6639,7 @@
             min-height: var(--reader-footer-height);
             padding: 12px max(var(--reader-inline-gutter), calc((100% - var(--reader-content-width)) / 2)) 18px;
             background: rgba(255, 255, 255, 0.94);
-            border-top: 1px solid rgba(226, 232, 240, 0.95);
+            border-top: none;
             backdrop-filter: blur(14px);
             -webkit-backdrop-filter: blur(14px);
             max-height: 140px;
@@ -6651,14 +6662,22 @@
 
         .modal.is-fullscreen.is-reader-chrome-hidden .reader-toolbar {
             opacity: 0;
-            transform: translateY(-100%);
             pointer-events: none;
+            max-height: 12px;
+            min-height: 0;
+            padding-top: 0;
+            padding-bottom: 0;
+            overflow: hidden;
         }
 
         .modal.is-fullscreen.is-reader-chrome-hidden .modal-footer {
             opacity: 0;
-            transform: translateY(100%);
             pointer-events: none;
+            max-height: 12px;
+            min-height: 0;
+            padding-top: 0;
+            padding-bottom: 0;
+            overflow: hidden;
         }
 
         .modal.is-fullscreen .reader-sidebar {

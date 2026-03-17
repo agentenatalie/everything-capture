@@ -122,6 +122,24 @@ class ItemContentParseRouteTests(unittest.TestCase):
         self.assertEqual(updated.content, "新的页面笔记内容应该成为标题来源")
         self.assertTrue(updated.title.startswith("新的页面笔记内容"))
 
+    def test_recover_processing_item_parsing_replays_stuck_jobs(self) -> None:
+        with self.TestSession() as db:
+            item = db.query(Item).filter(Item.id == "item-parse-route").one()
+            item.parse_status = "processing"
+            db.commit()
+
+        calls: list[tuple[str, str]] = []
+        with patch.object(items_router, "SessionLocal", self.TestSession):
+            with patch.object(
+                items_router,
+                "background_parse_item_content",
+                side_effect=lambda item_id, user_id: calls.append((item_id, user_id)),
+            ):
+                recovered = items_router.recover_processing_item_parsing(limit=5)
+
+        self.assertEqual(recovered, 1)
+        self.assertEqual(calls, [("item-parse-route", "local-default-user")])
+
 
 if __name__ == "__main__":
     unittest.main()

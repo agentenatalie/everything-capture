@@ -552,7 +552,10 @@
                 if (headingMatch) {
                     flushParagraph();
                     flushList();
-                    html.push(`<p class="content-para"><strong>${renderInlineMarkdown(headingMatch[2])}</strong></p>`);
+                    const headingLevel = Math.min(headingMatch[1].length + 1, 4);
+                    html.push(
+                        `<h${headingLevel} class="reader-extracted-md-heading reader-extracted-md-heading--${headingLevel}">${renderInlineMarkdown(headingMatch[2])}</h${headingLevel}>`
+                    );
                     continue;
                 }
 
@@ -606,17 +609,22 @@
         }
 
         function renderExtractedSections(item, options = {}) {
-            const { asPrimary = false, kicker = '' } = options;
+            const {
+                asPrimary = false,
+                kicker = '',
+                showKicker = true,
+                hideBodySectionTitle = false,
+            } = options;
             const parsed = parseExtractedTextSections(item?.extracted_text || '');
             if (!parsed.contentSections.length) return '';
             const displayKicker = kicker || (asPrimary ? '解析内容' : '补充解析');
 
             return `
                 <section class="reader-extracted-panel${asPrimary ? ' is-primary' : ''}">
-                    <div class="reader-extracted-kicker">${escapeHtml(displayKicker)}</div>
+                    ${showKicker ? `<div class="reader-extracted-kicker">${escapeHtml(displayKicker)}</div>` : ''}
                     ${parsed.contentSections.map((section) => `
                         <div class="reader-extracted-section">
-                            <h3 class="reader-extracted-title">${escapeHtml(section.label)}</h3>
+                            ${hideBodySectionTitle && section.key === 'body' ? '' : `<h3 class="reader-extracted-title">${escapeHtml(section.label)}</h3>`}
                             ${renderExtractedSectionMarkup(section)}
                         </div>
                     `).join('')}

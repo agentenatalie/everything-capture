@@ -14,9 +14,9 @@
         })();
     </script>
     <link
-        href="https://fonts.googleapis.com/css2?family=Manrope:wght@500;600;700&family=Noto+Sans+SC:wght@400;500;600;700&display=swap"
+        href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&family=Manrope:wght@500;600;700&family=Noto+Sans+SC:wght@400;500;600;700&display=swap"
         rel="stylesheet">
-    <link rel="stylesheet" href="css/index.css?v=20260315aiworkspace5">
+    <link rel="stylesheet" href="css/index.css?v=20260316xhsimagefit1">
 </head>
 
 <body>
@@ -472,64 +472,80 @@
     <div class="folder-context-menu" id="folderContextMenu"></div>
 
     <div class="modal-overlay" id="askAiOverlay">
-        <div class="ai-chat-modal" role="dialog" aria-modal="true" aria-label="Ask AI">
-            <aside class="ai-chat-history-panel">
-                <div class="ai-history-header">
-                    <div class="ai-history-header-copy">
-                        <div class="ai-history-kicker">会话历史</div>
-                        <div class="ai-history-title">保存、搜索、继续</div>
-                        <div class="ai-history-scope" id="aiConversationScope">全部对话</div>
-                    </div>
-                    <button id="aiNewConversationBtn" class="ai-history-new-btn" type="button">新对话</button>
-                </div>
-                <label class="ai-history-search">
-                    <svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                        <circle cx="11" cy="11" r="7"></circle>
-                        <path d="m20 20-3.5-3.5"></path>
-                    </svg>
-                    <input id="aiHistorySearchInput" type="text" placeholder="搜索对话内容..." />
-                </label>
-                <div class="ai-history-list" id="aiConversationList"></div>
-            </aside>
-            <div class="ai-chat-main">
-                <div class="ai-chat-header">
-                    <div class="ai-chat-headline">
-                        <div class="ai-chat-title-row">
-                            <div class="ai-chat-title">Ask AI</div>
-                        </div>
-                        <div class="ai-chat-subtitle">先基于你的知识库回答；切到 Agent 后会在权限允许时直接执行实际操作。</div>
-                    </div>
-                    <div class="ai-chat-header-actions">
-                        <button id="clearAiChatBtn" class="ai-chat-ghost-btn" type="button">清空</button>
-                        <div class="ai-chat-mode">
-                            <button id="aiModeChatBtn" class="ai-mode-btn is-active" type="button">Chat</button>
-                            <button id="aiModeAgentBtn" class="ai-mode-btn" type="button">Agent</button>
-                        </div>
-                    </div>
-                    <button id="closeAskAiModal" class="ai-chat-close" type="button" aria-label="关闭">
-                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18M6 6l12 12"/></svg>
+        <div class="ai-shell" role="dialog" aria-modal="true" aria-label="Ask AI">
+            <!-- 侧边栏 -->
+            <aside class="ai-sidebar" id="aiSidebar">
+                <div class="ai-sidebar-inner">
+                    <button id="aiNewConversationBtn" class="ai-new-chat" type="button">
+                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12h14"/></svg>
+                        <span>新对话</span>
                     </button>
-                </div>
-                <div class="ai-chat-messages" id="askAiResult">
-                    <div class="ai-welcome">
-                        <div class="ai-welcome-icon">
-                            <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M12 4.25 13.8 8.2 17.75 10 13.8 11.8 12 15.75 10.2 11.8 6.25 10 10.2 8.2 12 4.25Z"></path><path d="M18.25 15.25 19 16.9 20.65 17.65 19 18.4 18.25 20.05 17.5 18.4 15.85 17.65 17.5 16.9 18.25 15.25Z"></path></svg>
+                    <div class="ai-sidebar-sections">
+                        <div class="ai-sidebar-section">
+                            <div class="ai-sidebar-section-header">
+                                <span class="ai-sidebar-section-title">Chat</span>
+                                <span class="ai-sidebar-section-count" id="aiChatCount">0</span>
+                            </div>
+                            <div class="ai-history" id="aiChatHistory"></div>
                         </div>
-                        <div class="ai-welcome-title">从知识库开始</div>
-                        <div class="ai-welcome-desc">你可以直接提问，或切到 Agent 让它按权限执行真实操作。</div>
+                        <div class="ai-sidebar-section">
+                            <div class="ai-sidebar-section-header">
+                                <span class="ai-sidebar-section-title">Agent</span>
+                                <span class="ai-sidebar-section-count" id="aiAgentCount">0</span>
+                            </div>
+                            <div class="ai-history" id="aiAgentHistory"></div>
+                        </div>
                     </div>
                 </div>
-                <div class="ai-chat-input-area">
-                    <div class="ai-agent-permissions" id="aiAgentPermissions"></div>
-                    <div class="ai-chat-input-wrap">
-                        <textarea id="askAiInput" class="ai-chat-input" placeholder="输入问题..." rows="1"></textarea>
-                        <button id="submitAskAiBtn" class="ai-chat-send" type="button" aria-label="发送">
-                            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 2L11 13M22 2l-7 20-4-9-9-4 20-7z"/></svg>
+            </aside>
+
+            <!-- 主内容 -->
+            <main class="ai-main" id="aiMain">
+                <!-- 顶部工具栏 -->
+                <header class="ai-topbar">
+                    <div class="ai-topbar-left">
+                        <button id="aiMenuBtn" class="ai-icon-btn" type="button" aria-label="菜单">
+                            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 12h18M3 6h18M3 18h18"/></svg>
                         </button>
                     </div>
-                    <div class="ai-chat-hint" id="askAiMeta">按 Enter 发送，Shift+Enter 换行；输入法确认不会直接发送</div>
+                    <div class="ai-topbar-center">
+                        <div class="ai-topbar-title">Ask AI</div>
+                        <div class="ai-topbar-subtitle" id="aiTopbarSubtitle">基于你的知识库连续对话</div>
+                    </div>
+                    <div class="ai-topbar-actions">
+                        <div class="ai-mode-switch" aria-label="Ask AI 模式">
+                            <button id="aiModeChatBtn" class="ai-mode-toggle is-active" type="button">Chat</button>
+                            <button id="aiModeAgentBtn" class="ai-mode-toggle" type="button">Agent</button>
+                        </div>
+                        <button id="closeAskAiModal" class="ai-icon-btn" type="button" aria-label="关闭">
+                            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6 6 18M6 6l12 12"/></svg>
+                        </button>
+                    </div>
+                </header>
+
+                <!-- 消息区域 -->
+                <div class="ai-content" id="askAiResult">
+                    <div class="ai-welcome">
+                        <div class="ai-welcome-badge">基于知识库连续对话</div>
+                        <h1 class="ai-welcome-title">有什么需要我一起处理？</h1>
+                        <p class="ai-welcome-subtitle">可以直接提问、总结内容、串联相关笔记，或切到 Agent 执行动作。</p>
+                        <div class="ai-welcome-grid" id="aiWelcomeGrid"></div>
+                    </div>
                 </div>
-            </div>
+
+                <!-- 输入区域 -->
+                <div class="ai-composer">
+                    <div class="ai-composer-box" id="aiComposerBox">
+                        <textarea id="askAiInput" class="ai-composer-input" placeholder="发送消息..." rows="1"></textarea>
+                        <button id="submitAskAiBtn" class="ai-send-btn" type="button" disabled aria-label="发送">
+                            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M22 2L11 13M22 2l-7 20-4-9-9-4 20-7z"/></svg>
+                        </button>
+                    </div>
+                    <div class="ai-composer-footer">
+                        <span class="ai-composer-hint" id="askAiMeta">按 Enter 发送，Shift+Enter 换行</span>
+                    </div>
+                </div>
+            </main>
         </div>
     </div>
 
@@ -537,9 +553,9 @@
     <script src="js/app-settings.js?v=20260315aicitation1"></script>
     <script src="js/app-command.js?v=20260312n"></script>
     <script src="js/app-folders.js?v=20260312n"></script>
-    <script src="js/app-content.js?v=20260315readerlayout1"></script>
-    <script src="js/app-items.js?v=20260315ainotes1"></script>
-    <script src="js/app-ai.js?v=20260315aiworkspace3"></script>
+    <script src="js/app-content.js?v=20260316analysismd1"></script>
+    <script src="js/app-items.js?v=20260316xhsimagefit1"></script>
+    <script src="js/app-ai.js?v=20260316codeboxmono1"></script>
 </body>
 
 </html>

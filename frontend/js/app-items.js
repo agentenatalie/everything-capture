@@ -25,6 +25,13 @@
                 </g>
             </svg>
         `;
+        const extraItemCache = new Map();
+
+        function cacheItemById(item) {
+            if (!item || !item.id) return;
+            const key = String(item.id);
+            extraItemCache.set(key, item);
+        }
 
         function setReaderFullscreen(nextState) {
             isReaderFullscreen = Boolean(nextState);
@@ -172,12 +179,15 @@
             const isOrganizingAnalysis = analysisOrganizeInFlightItemId === item.id;
             const analysisAiTitle = isOrganizingAnalysis ? 'AI 正在整理内容分析' : 'AI 重新整理当前内容分析';
             const analysisMarkup = typeof renderExtractedSections === 'function'
-                ? renderExtractedSections(item, { asPrimary: true, kicker: '内容分析' })
+                ? renderExtractedSections(item, {
+                    asPrimary: true,
+                    showKicker: false,
+                    hideBodySectionTitle: true,
+                })
                 : '';
             const fallbackMarkup = extractedText
                 ? `
                     <section class="reader-extracted-panel is-primary">
-                        <div class="reader-extracted-kicker">内容分析</div>
                         <div class="reader-extracted-section">
                             ${extractedText
                                 .split(/\n{2,}/)
@@ -1057,7 +1067,11 @@
         }
 
         function getItemById(itemId) {
-            return itemsData.find((entry) => entry.id === itemId) || commandSearchResults.find((entry) => entry.id === itemId) || null;
+            const key = String(itemId);
+            return itemsData.find((entry) => String(entry.id) === key)
+                || commandSearchResults.find((entry) => String(entry.id) === key)
+                || extraItemCache.get(key)
+                || null;
         }
 
         function mergeUpdatedItem(updatedItem) {
@@ -1285,7 +1299,7 @@
         }
 
         function openModalById(itemId) {
-            const item = itemsData.find((entry) => entry.id === itemId);
+            const item = getItemById(itemId);
             if (!item) return;
             openModalByItem(item);
         }
@@ -1327,7 +1341,7 @@
                     html += `<div class="modal-media"><video controls preload="metadata" poster="${escapeAttribute(resolveMediaUrl(cover ? cover.url : ''))}"><source src="${escapeAttribute(resolveMediaUrl(videos[0].url || ''))}" type="video/mp4"></video></div>`;
                 }
                 if (images.length > 0) {
-                    html += `<div class="modal-media modal-media--carousel"><div class="media-gallery">${images.map((img) => `<img src="${escapeAttribute(resolveMediaUrl(img.url || ''))}" alt="">`).join('')}</div>${images.length > 1 ? '<div class="gallery-hint">← 左右滑动查看更多图片 →</div>' : ''}</div>`;
+                    html += `<div class="modal-media modal-media--carousel${images.length > 1 ? ' is-multi' : ''}"><div class="media-gallery">${images.map((img) => `<img src="${escapeAttribute(resolveMediaUrl(img.url || ''))}" alt="">`).join('')}</div>${images.length > 1 ? '<div class="gallery-hint">← 左右滑动查看更多图片 →</div>' : ''}</div>`;
                 }
                 const plainArticleHtml = typeof renderPlainTextArticle === 'function'
                     ? renderPlainTextArticle(item)
@@ -1572,6 +1586,21 @@
             e.stopImmediatePropagation();
         }, true);
 
+        window.addEventListener('everything-capture:open-item', (event) => {
+            const detail = event?.detail || {};
+            const item = detail.item || null;
+            const itemId = String(detail.itemId || item?.id || '').trim();
+            if (item) {
+                openModalByItem(item);
+                event.preventDefault();
+                return;
+            }
+            if (itemId) {
+                openModalById(itemId);
+                event.preventDefault();
+            }
+        });
+
         // Expose functions to window for onclick handlers
         window.saveSidebarNote = saveSidebarNote;
         window.organizeItemAnalysis = organizeItemAnalysis;
@@ -1584,5 +1613,9 @@
         window.saveReaderPageNote = saveReaderPageNote;
         window.deleteReaderPageNote = deleteReaderPageNote;
         window.loadItemPageNotes = loadItemPageNotes;
+        window.cacheItemById = cacheItemById;
+        window.getItemById = getItemById;
+        window.openModalById = openModalById;
+        window.openModalByItem = openModalByItem;
 
         bootstrapAuth();

@@ -270,7 +270,7 @@ def _build_analysis_organizer_context(item: Item) -> str:
         f"当前文章标题：{_clean_optional_string(item.title) or f'Item {item.id}'}",
         "",
         "当前文章已有的内容分析文本：",
-        _truncate_text(analysis_text, 8000),
+        _truncate_text(analysis_text, 20000),
     ]
     return "\n".join(lines).strip()
 
@@ -395,14 +395,16 @@ def _analysis_organizer_system_prompt() -> str:
     return (
         "你是一个内容整理助手。"
         "你的任务是把当前文章已有的内容分析文字整理成适合阅读侧栏直接展示的结构化文本。"
+        "目标不是生成摘要，而是在不引入外部信息的前提下，最大限度保留原有内容、事实和原文表达。"
+        "你更像在做编辑排版，而不是写摘要或读后感。"
+        "不要把长文压缩成几点结论，不要默认输出“摘要 / 核心要点”这种固定模板。"
         "不要整理正文，不要改写抓取正文、OCR 或帧文字，也不要把正文重新誊写进结果里。"
         "只允许基于提供的内容整理，不要补外部知识，不要编造。"
         "输出必须是纯文本，不要解释，不要加代码块。"
-        "如果原文里已经有像 [detected_title]、[urls]、[qr_links] 这样的结构标记，优先保留并整理它们。"
-        "优先输出以下结构："
-        "[detected_title] 对整理后的标题；"
-        "[body] 对整理后的内容分析。"
-        "[body] 内请按“摘要 / 核心要点 / 链接与待确认”组织内容，修正乱换行、重复片段和层级混乱。"
+        "如果原文里已经有像 [detected_title]、[body]、[urls]、[qr_links]、[ocr_text]、[subtitle_text]、[transcript_text] 这样的结构标记，优先保留这些结构标记，只整理各自内部的格式。"
+        "如果原文没有结构标记，至少输出 [detected_title] 和 [body]。"
+        "整理时只做这些事：修正乱换行、合并重复片段、补齐必要标点、拆分过长段落、在确有必要时添加少量贴近原文逻辑的 Markdown 标题。"
+        "[body] 内请使用 Markdown 段落渲染友好的格式：段落之间留空行；仅在原文本来就是条目时使用列表；需要分段时使用 `##` / `###` 标题，但不要把正文改写成提纲式总结。"
     )
 
 
@@ -450,6 +452,58 @@ def _strip_leading_analysis_heading(text: str | None) -> str:
     return "\n".join(lines).strip()
 
 
+def _match_organized_analysis_heading(line: str | None) -> str | None:
+    source = str(line or "")
+    heading_match = re.match(r"^\s*#{1,6}\s+(.+?)\s*$", source)
+    if heading_match:
+        candidate = heading_match.group(1)
+    else:
+        if re.match(r"^\s*[-*+]\s+", source) or re.match(r"^\s*\d+\.\s+", source):
+            return None
+        candidate = source.strip()
+        if not candidate:
+            return None
+
+    normalized = re.sub(r"[*_`~]+", "", candidate).strip().rstrip("：:").strip()
+    if not normalized:
+        return None
+
+    aliases = {
+        "摘要": "摘要",
+        "核心要点": "核心要点",
+        "关键要点": "核心要点",
+        "要点": "核心要点",
+        "链接与待确认": "链接与待确认",
+        "链接和待确认": "链接与待确认",
+        "相关链接与待确认": "链接与待确认",
+        "链接待确认": "链接与待确认",
+        "相关链接": "链接与待确认",
+        "待确认": "链接与待确认",
+        "链接": "链接与待确认",
+    }
+    return aliases.get(normalized)
+
+
+def _normalize_organized_analysis_body(text: str | None) -> str:
+    normalized = _normalize_multiline_text(_strip_leading_analysis_heading(text))
+    if not normalized:
+        return ""
+
+    normalized_lines: list[str] = []
+    for raw_line in normalized.splitlines():
+        heading = _match_organized_analysis_heading(raw_line)
+        if heading:
+            while normalized_lines and not normalized_lines[-1].strip():
+                normalized_lines.pop()
+            if normalized_lines:
+                normalized_lines.append("")
+            normalized_lines.append(f"## {heading}")
+            continue
+        normalized_lines.append(raw_line.rstrip())
+
+    return _normalize_multiline_text("\n".join(normalized_lines))
+
+
 def _normalize_organized_analysis_text(text: str, fallback_title: str | None = None) -> str:
     normalized = _normalize_multiline_text(_strip_leading_analysis_heading(_strip_reasoning_blocks(_strip_code_fence(text))))
     if not normalized:
@@ -475,7 +529,7 @@ def _normalize_organized_analysis_text(text: str, fallback_title: str | None = N
             for key, lines in sections:
                 value = _normalize_multiline_text("\n".join(lines))
                 if key == "body":
-                    value = _normalize_multiline_text(_strip_leading_analysis_heading(value))
+                    value = _normalize_organized_analysis_body(value)
                 if not value and key != "detected_title":
                     continue
                 normalized_sections.append(f"[{key}]\n{value}".rstrip())
@@ -485,7 +539,7 @@ def _normalize_organized_analysis_text(text: str, fallback_title: str | None = N
     sections: list[str] = []
     if fallback_title:
         sections.append(f"[detected_title]\n{fallback_title}")
-    sections.append(f"[body]\n{normalized}")
+    sections.append(f"[body]\n{_normalize_organized_analysis_body(normalized)}")
     return "\n\n".join(section for section in sections if section.strip()).strip()
 
 
@@ -1676,7 +1730,7 @@ async def organize_item_analysis(item_id: str, db: Session = Depends(get_db)):
                 {
                     "role": "user",
                     "content": (
-                        "请直接整理下面这条“内容分析”文本，并输出最终可保存的内容分析文本。\n\n"
+                        "请直接整理下面这条“内容分析”文本。目标是尽量保留原有信息和表述，只做结构化、分段、去重和 Markdown 排版；不要总结、不要压缩成提要。请输出最终可保存的内容分析文本。\n\n"
                         f"{source_context}"
                     ),
                 },

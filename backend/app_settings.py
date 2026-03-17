@@ -12,6 +12,8 @@ GOOGLE_CLIENT_ID_ENV = "GOOGLE_OAUTH_CLIENT_ID"
 GOOGLE_CLIENT_SECRET_ENV = "GOOGLE_OAUTH_CLIENT_SECRET"
 GOOGLE_REDIRECT_URI_ENV = "GOOGLE_OAUTH_REDIRECT_URI"
 
+USE_FTS5_SEARCH = os.getenv("USE_FTS5_SEARCH", "true").lower() == "true"
+
 
 def clean_optional_string(value: Optional[str]) -> Optional[str]:
     if value is None:

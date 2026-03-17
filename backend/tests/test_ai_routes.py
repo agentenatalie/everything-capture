@@ -263,11 +263,17 @@ class AiRouteTests(unittest.TestCase):
         self.assertIn("当前文章 item_id：item-ai", str(captured_messages[0][0].get("content", "")))
 
     def test_organize_item_analysis_persists_updated_extracted_text(self) -> None:
+        captured_system_prompt = ""
         captured_user_prompt = ""
 
         async def fake_chat_completion(**kwargs):
+            nonlocal captured_system_prompt
             nonlocal captured_user_prompt
             messages = kwargs.get("messages") or []
+            captured_system_prompt = next(
+                (str(message.get("content", "")) for message in messages if message.get("role") == "system"),
+                "",
+            )
             captured_user_prompt = next(
                 (str(message.get("content", "")) for message in messages if message.get("role") == "user"),
                 "",
@@ -275,8 +281,8 @@ class AiRouteTests(unittest.TestCase):
             return (
                 "<think>\n先写内部推理\n</think>\n\n"
                 "[detected_title]\nAI UI 为什么总差最后一口气\n\n"
-                "[body]\n解析内容\n\n摘要\nAI 生成 UI 的核心问题是缺少统一设计规范。\n\n"
-                "核心要点\n1. 问题不只是模型能力，而是缺设计系统。\n2. 后处理打磨很关键。"
+                "[body]\n## 按原文整理\nAI 生成 UI 的核心问题是缺少统一设计规范。\n\n"
+                "问题不只是模型能力，而是缺设计系统。后处理打磨很关键。"
             )
 
         with self.Session() as db:
@@ -291,9 +297,13 @@ class AiRouteTests(unittest.TestCase):
         self.assertEqual(response.parse_status, "completed")
         self.assertIn("[detected_title]", response.extracted_text or "")
         self.assertIn("AI UI 为什么总差最后一口气", response.extracted_text or "")
+        self.assertIn("## 按原文整理", response.extracted_text or "")
+        self.assertNotIn("## 摘要", response.extracted_text or "")
         self.assertNotIn("<think>", response.extracted_text or "")
-        self.assertNotIn("\n解析内容\n\n摘要", response.extracted_text or "")
+        self.assertIn("最大限度保留原有内容", captured_system_prompt)
+        self.assertIn("不要默认输出“摘要 / 核心要点”", captured_system_prompt)
         self.assertIn("当前文章已有的内容分析文本", captured_user_prompt)
+        self.assertIn("不要总结、不要压缩成提要", captured_user_prompt)
         self.assertNotIn("当前文章抓取到的正文文本", captured_user_prompt)
         self.assertNotIn("当前文章额外抓取到的 OCR / 帧文字", captured_user_prompt)
 

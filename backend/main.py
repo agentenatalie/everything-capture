@@ -94,6 +94,11 @@ app.include_router(settings.router)
 app.include_router(ai.router)
 
 
+@app.on_event("startup")
+def startup_recover_processing_items() -> None:
+    items.schedule_processing_item_parsing_recovery()
+
+
 @app.api_route("/", methods=["GET", "HEAD"], include_in_schema=False)
 def root(request: Request):
     return RedirectResponse(url=build_frontend_url(request, query_string=request.url.query))

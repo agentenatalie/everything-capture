@@ -1,13 +1,15 @@
 import os
 import json
 import re
+import threading
+import logging
 from collections import OrderedDict
 from dataclasses import dataclass
 from datetime import datetime
 from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Response
-from sqlalchemy import func, or_
+from sqlalchemy import func, or_, text
 from sqlalchemy.orm import Session
 from database import SessionLocal, get_db
 from models import AiConversation, Folder, Item, ItemFolderLink, ItemPageNote
@@ -26,6 +28,7 @@ from schemas import (
 from paths import STATIC_DIR
 from services.content_extraction import ContentExtractionError, parse_item_content
 from tenant import get_current_user_id
+from app_settings import USE_FTS5_SEARCH
 
 router = APIRouter(
     prefix="/api",
@@ -192,6 +195,9 @@ EXACT_QUERY_WEIGHTS = {
 
 INTENT_MATCH_BONUS = 2.4
 MIN_SEARCH_SCORE = 2.5
+PROCESSING_PARSE_RECOVERY_LIMIT = 32
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -494,6 +500,45 @@ def background_parse_item_content(item_id: str, user_id: str) -> None:
             db.commit()
 
 
+def _list_processing_parse_jobs(db: Session, *, limit: int = PROCESSING_PARSE_RECOVERY_LIMIT) -> list[tuple[str, str]]:
+    rows = (
+        db.query(Item.id, Item.user_id)
+        .filter(Item.parse_status == "processing")
+        .order_by(Item.created_at.asc())
+        .limit(max(1, int(limit)))
+        .all()
+    )
+    return [(str(item_id), str(user_id)) for item_id, user_id in rows if item_id and user_id]
+
+
+def recover_processing_item_parsing(*, limit: int = PROCESSING_PARSE_RECOVERY_LIMIT) -> int:
+    with SessionLocal() as db:
+        jobs = _list_processing_parse_jobs(db, limit=limit)
+
+    if not jobs:
+        return 0
+
+    logger.info("恢复后台内容解析任务 %d 个", len(jobs))
+    recovered = 0
+    for item_id, user_id in jobs:
+        try:
+            background_parse_item_content(item_id, user_id)
+            recovered += 1
+        except Exception as exc:
+            logger.exception("恢复内容解析失败 %s: %s", item_id, exc)
+    return recovered
+
+
+def schedule_processing_item_parsing_recovery(*, limit: int = PROCESSING_PARSE_RECOVERY_LIMIT) -> None:
+    thread = threading.Thread(
+        target=recover_processing_item_parsing,
+        kwargs={"limit": limit},
+        daemon=True,
+        name="item-parse-recovery",
+    )
+    thread.start()
+
+
 def normalize_search_text(value: str) -> str:
     normalized = (value or "").strip().lower()
     if not normalized:
@@ -700,6 +745,126 @@ def rank_search_rows(rows: list, query: str) -> list[str]:
     return [item_id for _, _, item_id in scored_rows]
 
 
+def build_fts_query(user_query: str) -> str:
+    """
+    将用户查询转换为FTS5查询表达式（trigram tokenizer）
+
+    trigram tokenizer 将文本拆分为3字符序列，MATCH 相当于子串搜索。
+    查询词必须至少3个字符才能匹配。
+    多个词用 OR 组合以扩大召回。
+    """
+    tokens = tokenize_search_query(user_query)
+    if not tokens:
+        return ""
+
+    # trigram tokenizer 要求每个搜索项至少3个字符
+    fts_tokens = []
+    for token in tokens:
+        # 清理FTS5特殊语法字符，但保留中文和常规字符
+        clean_token = re.sub(r'["*(){}^]', '', token).strip()
+        if len(clean_token) >= 3:
+            # 用双引号包裹，确保作为子串搜索而非FTS语法
+            fts_tokens.append(f'"{clean_token}"')
+
+    if not fts_tokens:
+        # 所有token都太短，尝试用原始查询（如果够长）
+        normalized = normalize_search_text(user_query)
+        clean_raw = re.sub(r'["*(){}^]', '', normalized).strip()
+        if len(clean_raw) >= 3:
+            return f'"{clean_raw}"'
+        return ""
+
+    if len(fts_tokens) == 1:
+        return fts_tokens[0]
+
+    # 多个token用OR组合，扩大召回范围
+    return " OR ".join(fts_tokens)
+
+
+def search_with_fts5(db: Session, user_id: str, query: str, limit: int = 1000):
+    """
+    使用FTS5搜索相关项目
+    返回: [(item_id, score), ...] 按相关性排序
+    """
+    fts_query = build_fts_query(query)
+    if not fts_query:
+        return []
+
+    try:
+        results = db.execute(
+            text("""
+            SELECT item_id, bm25(items_fts) as score
+            FROM items_fts
+            WHERE items_fts MATCH :fts_query
+              AND item_id IN (SELECT id FROM items WHERE user_id = :user_id)
+            ORDER BY score
+            LIMIT :limit
+            """),
+            {"fts_query": fts_query, "user_id": user_id, "limit": limit}
+        ).fetchall()
+        return [(row[0], row[1]) for row in results]
+    except Exception as exc:
+        logger.warning("FTS5 search failed for query %r: %s", query, exc)
+        return []
+
+
+@router.get("/items/search-suggestions")
+def get_search_suggestions(
+    q: str,
+    limit: int = 10,
+    db: Session = Depends(get_db),
+):
+    """获取搜索建议"""
+    user_id = get_current_user_id()
+
+    if not q or len(q) < 2:
+        return []
+
+    fts_query = build_fts_query(q)
+    if not fts_query:
+        return []
+
+    try:
+        suggestions = db.execute(
+            text("""
+            SELECT
+                item_id,
+                snippet(items_fts, 1, '<mark>', '</mark>', '...', 16) as snippet,
+                bm25(items_fts) as score
+            FROM items_fts
+            WHERE items_fts MATCH :fts_query
+              AND item_id IN (SELECT id FROM items WHERE user_id = :user_id)
+            ORDER BY score
+            LIMIT :limit
+            """),
+            {"fts_query": fts_query, "user_id": user_id, "limit": limit}
+        ).fetchall()
+
+        return [
+            {
+                "item_id": row[0],
+                "snippet": row[1],
+                "score": row[2]
+            }
+            for row in suggestions
+        ]
+    except Exception as exc:
+        logger.warning("FTS5 search-suggestions failed for query %r: %s", q, exc)
+        return []
+
+
+@router.get("/items/{item_id}", response_model=ItemResponse)
+def get_item(
+    item_id: str,
+    db: Session = Depends(get_db),
+):
+    user_id = get_current_user_id()
+    item = db.query(Item).filter(Item.user_id == user_id, Item.id == item_id).first()
+    if not item:
+        raise HTTPException(status_code=404, detail="Item not found")
+    return item
+
+
 @router.get("/items", response_model=List[ItemResponse])
 def get_items(
     response: Response,
@@ -717,36 +882,76 @@ def get_items(
 
     raw_query = (q or "").strip()
     if raw_query:
-        candidate_rows = (
-            apply_folder_filter(
-                apply_platform_filter(
-                    db.query(
-                        Item.id,
-                        Item.user_id,
-                        Item.title,
-                        Item.canonical_text,
-                        Item.source_url,
-                        Item.platform,
-                        Item.created_at,
-                    ).filter(Item.user_id == user_id),
-                    platform,
-                ),
-                folder_scope,
-                folder_id,
+        use_fts = USE_FTS5_SEARCH
+        fts_results = None
+
+        if use_fts:
+            fts_results = search_with_fts5(db, user_id, raw_query, limit=1000)
+            # FTS5 returned empty — could be a query too short for trigram;
+            # fall through to legacy scoring so users still get results.
+            if not fts_results:
+                use_fts = False
+
+        if use_fts and fts_results:
+            # 提取item_id列表
+            fts_item_ids = [item_id for item_id, score in fts_results]
+
+            # 应用平台和文件夹过滤
+            base_query = db.query(Item).filter(
+                Item.user_id == user_id,
+                Item.id.in_(fts_item_ids)
             )
-            .all()
-        )
-        ranked_item_ids = rank_search_rows(candidate_rows, raw_query)
-        visible_count = len(ranked_item_ids)
-        page_item_ids = ranked_item_ids[skip: skip + safe_limit]
-        if page_item_ids:
-            items_by_id = {
-                item.id: item
-                for item in db.query(Item).filter(Item.user_id == user_id, Item.id.in_(page_item_ids)).all()
-            }
-            items = [items_by_id[item_id] for item_id in page_item_ids if item_id in items_by_id]
+
+            filtered_query = apply_folder_filter(
+                apply_platform_filter(base_query, platform),
+                folder_scope,
+                folder_id
+            )
+
+            filtered_items = filtered_query.all()
+
+            # 保持FTS5排序（bm25分数越低相关性越高）
+            score_map = {item_id: score for item_id, score in fts_results}
+            sorted_items = sorted(
+                filtered_items,
+                key=lambda item: score_map.get(item.id, 1000000)
+            )
+
+            visible_count = len(sorted_items)
+            page_items = sorted_items[skip:skip + safe_limit]
+            items = page_items
         else:
-            items = []
+            # 使用原有搜索逻辑
+            candidate_rows = (
+                apply_folder_filter(
+                    apply_platform_filter(
+                        db.query(
+                            Item.id,
+                            Item.user_id,
+                            Item.title,
+                            Item.canonical_text,
+                            Item.source_url,
+                            Item.platform,
+                            Item.created_at,
+                        ).filter(Item.user_id == user_id),
+                        platform,
+                    ),
+                    folder_scope,
+                    folder_id,
+                )
+                .all()
+            )
+            ranked_item_ids = rank_search_rows(candidate_rows, raw_query)
+            visible_count = len(ranked_item_ids)
+            page_item_ids = ranked_item_ids[skip: skip + safe_limit]
+            if page_item_ids:
+                items_by_id = {
+                    item.id: item
+                    for item in db.query(Item).filter(Item.user_id == user_id, Item.id.in_(page_item_ids)).all()
+                }
+                items = [items_by_id[item_id] for item_id in page_item_ids if item_id in items_by_id]
+            else:
+                items = []
     else:
         items_query = apply_folder_filter(
             apply_platform_filter(db.query(Item).filter(Item.user_id == user_id), platform),
@@ -996,3 +1201,7 @@ def delete_item(item_id: str, db: Session = Depends(get_db)):
     db.commit()
     _cleanup_item_media_files(local_paths)
     return None
+
+
+# NOTE: /items/search-suggestions route is defined above /items/{item_id}
+# to prevent FastAPI from capturing "search-suggestions" as an item_id path param.

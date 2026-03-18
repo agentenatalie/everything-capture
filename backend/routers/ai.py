@@ -11,7 +11,7 @@ from sqlalchemy import func, or_
 from sqlalchemy.orm import Session
 
 from database import get_db
-from models import AiConversation, Folder, Item, ItemFolderLink, ItemPageNote, Settings
+from models import AiConversation, AiMemory, Folder, Item, ItemFolderLink, ItemPageNote, Settings
 from schemas import (
     AiAskRequest,
     AiAskResponse,
@@ -403,7 +403,33 @@ def _assistant_chat_system_prompt() -> str:
     )
 
 
-def _assistant_agent_system_prompt(agent_permissions: list[str]) -> str:
+def _load_ai_memories(db: Session, user_id: str) -> list[AiMemory]:
+    return (
+        db.query(AiMemory)
+        .filter(AiMemory.user_id == user_id)
+        .order_by(AiMemory.updated_at.desc())
+        .limit(50)
+        .all()
+    )
+
+
+def _format_memories_for_prompt(memories: list[AiMemory]) -> str:
+    if not memories:
+        return ""
+    type_labels = {"learned": "学到的", "preference": "用户偏好", "correction": "纠正"}
+    lines = ["【你的记忆】以下是你从过去的交互中学到的内容，请据此调整行为："]
+    for m in memories:
+        label = type_labels.get(m.type, m.type)
+        lines.append(f"- [{label}] {m.content}")
+    lines.append(
+        "\n你可以用 save_memory 工具主动记住新发现的模式和偏好，"
+        "用 delete_memory 删除过时的记忆。"
+        "当用户纠正你或你观察到用户的习惯时，主动保存记忆。"
+    )
+    return "\n".join(lines)
+
+
+def _assistant_agent_system_prompt(agent_permissions: list[str], memories: list[AiMemory] | None = None) -> str:
     permission_lines = {
         "search_library": "搜索收藏库内容",
         "manage_folders": "管理文件夹（创建、归档、批量整理）",
@@ -416,7 +442,9 @@ def _assistant_agent_system_prompt(agent_permissions: list[str]) -> str:
     if not readable_permissions:
         readable_permissions = "搜索收藏库内容"
 
-    return (
+    memory_block = _format_memories_for_prompt(memories or [])
+
+    base = (
         "你是用户网站里的 AI agent。"
         "你既可以回答问题，也可以在工具确认成功时代表用户执行站内操作。"
         "你必须优先基于用户收藏库中的内容和工具返回的信息工作，不要编造。"
@@ -454,6 +482,11 @@ def _assistant_agent_system_prompt(agent_permissions: list[str]) -> str:
         "\n"
         f"当前可用权限：{readable_permissions}。"
     )
+
+    if memory_block:
+        base += "\n\n" + memory_block
+
+    return base
 
 
 def _compose_system_message(*parts: str | None) -> str:
@@ -1333,6 +1366,53 @@ def _build_agent_tools(agent_permissions: list[str]) -> list[dict[str, Any]]:
                 },
             },
         },
+        {
+            "type": "function",
+            "function": {
+                "name": "save_memory",
+                "description": (
+                    "Save a piece of learned knowledge to your long-term memory. "
+                    "Use this proactively when you discover user preferences, patterns, or corrections. "
+                    "Examples: how the user organizes folders, preferred response style, domain interests, "
+                    "classification rules the user established or corrected."
+                ),
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "content": {
+                            "type": "string",
+                            "description": "What to remember. Be concise and specific.",
+                        },
+                        "type": {
+                            "type": "string",
+                            "enum": ["learned", "preference", "correction"],
+                            "description": (
+                                "'learned' = observed pattern or fact about user's library/habits, "
+                                "'preference' = explicit user preference, "
+                                "'correction' = user corrected your behavior."
+                            ),
+                        },
+                    },
+                    "required": ["content", "type"],
+                    "additionalProperties": False,
+                },
+            },
+        },
+        {
+            "type": "function",
+            "function": {
+                "name": "delete_memory",
+                "description": "Delete an outdated or wrong memory entry by its ID.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "memory_id": {"type": "string"},
+                    },
+                    "required": ["memory_id"],
+                    "additionalProperties": False,
+                },
+            },
+        },
     ]
 
     if "manage_folders" in agent_permissions:
@@ -1700,6 +1780,43 @@ async def _execute_agent_tool(
         }
         summary = f"已列出 {len(folders)} 个文件夹"
         return result, AiToolEventResponse(name=tool_name, summary=summary), [], []
+
+    if tool_name == "save_memory":
+        content = _clean_optional_string(arguments.get("content"))
+        memory_type = _clean_optional_string(arguments.get("type")) or "learned"
+        if not content:
+            result = {"status": "error", "message": "content is required"}
+            return result, AiToolEventResponse(name=tool_name, status="failed", summary="记忆保存失败：缺少内容"), [], []
+        if memory_type not in ("learned", "preference", "correction"):
+            memory_type = "learned"
+        import datetime as _dt
+        now = _dt.datetime.utcnow()
+        memory = AiMemory(
+            user_id=user_id,
+            type=memory_type,
+            content=content.strip(),
+            created_at=now,
+            updated_at=now,
+        )
+        db.add(memory)
+        db.commit()
+        db.refresh(memory)
+        result = {"status": "ok", "memory_id": memory.id, "type": memory_type}
+        return result, AiToolEventResponse(name=tool_name, summary=f"已记住：{_truncate_text(content, 60)}"), [], []
+
+    if tool_name == "delete_memory":
+        memory_id = _clean_optional_string(arguments.get("memory_id"))
+        if not memory_id:
+            result = {"status": "error", "message": "memory_id is required"}
+            return result, AiToolEventResponse(name=tool_name, status="failed", summary="删除记忆失败：缺少 ID"), [], []
+        memory = db.query(AiMemory).filter(AiMemory.id == memory_id, AiMemory.user_id == user_id).first()
+        if not memory:
+            result = {"status": "error", "message": "Memory not found"}
+            return result, AiToolEventResponse(name=tool_name, status="failed", summary="删除记忆失败：未找到"), [], []
+        db.delete(memory)
+        db.commit()
+        result = {"status": "ok"}
+        return result, AiToolEventResponse(name=tool_name, summary="已删除一条记忆"), [], []
 
     if tool_name == "assign_item_folders":
         if "manage_folders" not in agent_permissions:
@@ -2201,6 +2318,7 @@ async def _run_agent_assistant(
     agent_permissions = _agent_permissions(settings)
     tools = _build_agent_tools(agent_permissions)
     snapshot = _build_items_only_snapshot(db, user_id)
+    memories = _load_ai_memories(db, user_id)
     current_page_notes = _get_item_page_notes(db, user_id, current_item.id) if current_item else []
     current_item_context = _build_current_item_context(current_item, current_item_note, current_page_notes) if current_item is not None else ""
 
@@ -2226,6 +2344,7 @@ async def _run_agent_assistant(
             tools=tools,
             agent_permissions=agent_permissions,
             snapshot=snapshot,
+            memories=memories,
             current_item=current_item,
             current_item_note=current_item_note,
             current_item_context=current_item_context,
@@ -2240,6 +2359,7 @@ async def _run_agent_assistant(
         tools=tools,
         agent_permissions=agent_permissions,
         snapshot=snapshot,
+        memories=memories,
         current_item=current_item,
         current_item_note=current_item_note,
         current_item_context=current_item_context,
@@ -2256,6 +2376,7 @@ async def _run_plan_and_execute(
     tools: list[dict[str, Any]],
     agent_permissions: list[str],
     snapshot: KnowledgeBaseSnapshot,
+    memories: list[AiMemory] | None = None,
     current_item: Item | None = None,
     current_item_note: KnowledgeBaseNote | None = None,
     current_item_context: str = "",
@@ -2322,6 +2443,7 @@ async def _run_plan_and_execute(
             tools=tools,
             agent_permissions=agent_permissions,
             snapshot=snapshot,
+            memories=memories,
             current_item=current_item,
             current_item_note=current_item_note,
             current_item_context=current_item_context,
@@ -2358,7 +2480,7 @@ async def _run_plan_and_execute(
         download_hint = f"\n\n以下文件已生成，请在回答中告知用户可以点击下载：\n{links}"
 
     agent_system = _compose_system_message(
-        _assistant_agent_system_prompt(agent_permissions),
+        _assistant_agent_system_prompt(agent_permissions, memories=memories),
         (
             "下面是当前文章上下文。\n\n" + current_item_context
         ) if current_item_context else "",
@@ -2415,13 +2537,14 @@ async def _run_agent_loop(
     tools: list[dict[str, Any]],
     agent_permissions: list[str],
     snapshot: KnowledgeBaseSnapshot,
+    memories: list[AiMemory] | None = None,
     current_item: Item | None = None,
     current_item_note: KnowledgeBaseNote | None = None,
     current_item_context: str = "",
 ) -> AiAssistantResponse:
     """Original agent loop — used for questions and complex multi-step tasks."""
     system_message = _compose_system_message(
-        _assistant_agent_system_prompt(agent_permissions),
+        _assistant_agent_system_prompt(agent_permissions, memories=memories),
         (
             "下面是当前文章上下文。若用户提到当前文章、这篇内容、这条笔记等指代，优先以这里为准；"
             "如果需要调用工具操作当前文章，请直接使用这里给出的 item_id。\n\n"

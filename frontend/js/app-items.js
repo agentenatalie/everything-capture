@@ -141,6 +141,14 @@
             if (!isReaderFullscreen) return;
             const validTabs = ['note', 'pageNotes', 'ai'];
             const nextTab = validTabs.includes(tab) ? tab : 'note';
+
+            // If sidebar is already open on the same tab and user is editing a note in source mode,
+            // skip re-render to avoid destroying the textarea and losing unsaved input.
+            if (readerSidebarOpen && readerSidebarTab === nextTab && nextTab === 'pageNotes'
+                && activePageNoteId && pageNoteViewMode === 'source') {
+                return;
+            }
+
             readerSidebarOpen = true;
             readerSidebarTab = nextTab;
             readerSidebar?.classList.add('is-open');
@@ -164,6 +172,12 @@
         }
 
         function closeReaderSidebarPanel() {
+            // Save any in-progress note editing before closing
+            if (activePageNoteId && pageNoteViewMode === 'source' && currentOpenItemId) {
+                clearTimeout(pageNoteAutoSaveTimer);
+                captureAndCacheNoteFromDOM(currentOpenItemId, activePageNoteId);
+                triggerPageNoteAutoSave(currentOpenItemId, activePageNoteId);
+            }
             readerSidebarOpen = false;
             readerSidebar?.classList.remove('is-open');
             readerSidebarContent?.removeAttribute('data-tab');
@@ -175,6 +189,15 @@
         function setReaderSidebarTab(tab) {
             const validTabs = ['note', 'pageNotes', 'ai'];
             const nextTab = validTabs.includes(tab) ? tab : 'note';
+
+            // If switching away from pageNotes while editing, save first
+            if (readerSidebarTab === 'pageNotes' && nextTab !== 'pageNotes'
+                && activePageNoteId && pageNoteViewMode === 'source') {
+                clearTimeout(pageNoteAutoSaveTimer);
+                captureAndCacheNoteFromDOM(currentOpenItemId, activePageNoteId);
+                triggerPageNoteAutoSave(currentOpenItemId, activePageNoteId);
+            }
+
             readerSidebarTab = nextTab;
             readerSidebarContent?.setAttribute('data-tab', nextTab);
             sidebarNoteTab?.classList.toggle('is-active', nextTab === 'note');
@@ -339,6 +362,7 @@
                 const newNote = await createReaderPageNote(item.id);
                 if (newNote) {
                     activePageNoteId = newNote.id;
+                    pageNoteViewMode = 'source';
                     renderSidebarPageNotesContent();
                 }
             });
@@ -376,7 +400,7 @@
                         <div class="pn-editor-toolbar-actions">
                             <span class="pn-save-indicator" id="pnSaveIndicator">${isSaving ? '保存中...' : (timeStr ? timeStr : '')}</span>
                             <button class="pn-mode-toggle" type="button" title="${isPreview ? '源码模式' : '渲染模式'}">
-                                ${isPreview ? sourceIcon : previewIcon}
+                                ${isPreview ? previewIcon : sourceIcon}
                             </button>
                             <button class="pn-delete-btn" type="button" title="删除笔记">
                                 <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -420,18 +444,20 @@
 
             // Mode toggle
             readerSidebarContent.querySelector('.pn-mode-toggle')?.addEventListener('click', () => {
-                // If switching from source to preview, save first
                 if (pageNoteViewMode === 'source') {
+                    // Capture DOM values into cache synchronously BEFORE destroying the DOM
                     clearTimeout(pageNoteAutoSaveTimer);
-                    triggerPageNoteAutoSave(item.id, note.id).then(() => {
-                        pageNoteViewMode = 'preview';
-                        // Re-read note from cache to get saved content
-                        const freshNote = getItemPageNotes(item.id).find((n) => n.id === note.id) || note;
-                        renderPageNoteEditor(item, freshNote);
-                    });
-                } else {
+                    captureAndCacheNoteFromDOM(item.id, note.id);
+                    // Fire save in background (uses captured values already in cache)
+                    triggerPageNoteAutoSave(item.id, note.id);
+                    // Switch to preview immediately using locally cached data
                     pageNoteViewMode = 'preview';
-                    renderPageNoteEditor(item, note);
+                    const freshNote = getItemPageNotes(item.id).find((n) => n.id === note.id) || note;
+                    renderPageNoteEditor(item, freshNote);
+                } else {
+                    pageNoteViewMode = 'source';
+                    const freshNote = getItemPageNotes(item.id).find((n) => n.id === note.id) || note;
+                    renderPageNoteEditor(item, freshNote);
                 }
             });
 
@@ -478,6 +504,8 @@
             readerSidebarContent.querySelector('.pn-back-btn')?.addEventListener('click', () => {
                 clearTimeout(pageNoteAutoSaveTimer);
                 if (pageNoteViewMode === 'source') {
+                    // Capture before DOM is destroyed
+                    captureAndCacheNoteFromDOM(item.id, note.id);
                     triggerPageNoteAutoSave(item.id, note.id);
                 }
                 activePageNoteId = null;
@@ -499,17 +527,30 @@
             });
         }
 
-        async function triggerPageNoteAutoSave(itemId, noteId) {
-            if (!itemId || !noteId || itemPageNoteMutationIds.has(noteId)) return;
+        // Capture current editor values from DOM and update local cache immediately.
+        // Returns { title, content } or null if DOM not available.
+        function captureAndCacheNoteFromDOM(itemId, noteId) {
             const titleInput = document.getElementById('pnEditorTitle');
             const contentInput = document.getElementById('pnEditorContent');
-            if (!titleInput || !contentInput) return;
+            if (!titleInput || !contentInput) return null;
 
+            const title = titleInput.value || '';
+            const content = contentInput.value || '';
+
+            // Update local cache immediately so re-renders use fresh data
             const notes = getItemPageNotes(itemId);
-            const existing = notes.find((n) => n.id === noteId);
-            if (existing && existing.title === (titleInput.value || '') && existing.content === (contentInput.value || '')) {
-                return; // No changes
-            }
+            const updated = notes.map((n) => n.id === noteId ? { ...n, title, content } : n);
+            itemPageNotesByItem.set(itemId, updated);
+
+            return { title, content };
+        }
+
+        async function triggerPageNoteAutoSave(itemId, noteId) {
+            if (!itemId || !noteId || itemPageNoteMutationIds.has(noteId)) return;
+
+            // Capture values from DOM now — they may not exist after mode switch
+            const captured = captureAndCacheNoteFromDOM(itemId, noteId);
+            if (!captured) return;
 
             const indicator = document.getElementById('pnSaveIndicator');
             if (indicator) indicator.textContent = '保存中...';
@@ -520,19 +561,32 @@
                     method: 'PATCH',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
-                        title: titleInput.value || '',
-                        content: contentInput.value || '',
+                        title: captured.title,
+                        content: captured.content,
                     }),
                 });
                 const data = await response.json().catch(() => ({}));
                 if (!response.ok) throw new Error(data.detail || '保存失败');
 
-                const nextNotes = getItemPageNotes(itemId).map((n) => (n.id === noteId ? data : n));
+                // Merge server response (has updated_at etc.) but keep any newer local edits
+                const latestNotes = getItemPageNotes(itemId);
+                const nextNotes = latestNotes.map((n) => {
+                    if (n.id !== noteId) return n;
+                    // If user kept editing after we captured, preserve their local values
+                    const titleInput = document.getElementById('pnEditorTitle');
+                    const contentInput = document.getElementById('pnEditorContent');
+                    if (titleInput && contentInput) {
+                        return { ...data, title: titleInput.value || '', content: contentInput.value || '' };
+                    }
+                    return data;
+                });
                 itemPageNotesByItem.set(itemId, nextNotes);
                 itemPageNotesLoadStateByItem.set(itemId, 'loaded');
-                if (indicator) indicator.textContent = '已保存';
+                const ind = document.getElementById('pnSaveIndicator');
+                if (ind) ind.textContent = '已保存';
             } catch (error) {
-                if (indicator) indicator.textContent = '保存失败';
+                const ind = document.getElementById('pnSaveIndicator');
+                if (ind) ind.textContent = '保存失败';
             } finally {
                 itemPageNoteMutationIds.delete(noteId);
             }
@@ -593,7 +647,10 @@
                 throw error;
             } finally {
                 if (currentOpenItemId === itemId && readerSidebarOpen && readerSidebarTab === 'pageNotes') {
-                    renderSidebarPageNotesContent();
+                    // Don't re-render while user is actively editing in source mode — it destroys unsaved input
+                    if (!(activePageNoteId && pageNoteViewMode === 'source')) {
+                        renderSidebarPageNotesContent();
+                    }
                 }
             }
         }
@@ -627,9 +684,6 @@
                 itemPageNotesByItem.set(itemId, [data, ...existingNotes.filter((note) => note.id !== data.id)]);
                 itemPageNotesLoadStateByItem.set(itemId, 'loaded');
                 itemPageNotesErrorByItem.delete(itemId);
-                if (currentOpenItemId === itemId && readerSidebarOpen && readerSidebarTab === 'pageNotes') {
-                    renderSidebarPageNotesContent();
-                }
                 showToast(successMessage, 'success');
                 return data;
             } catch (error) {

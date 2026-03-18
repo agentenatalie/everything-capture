@@ -449,6 +449,22 @@ def ensure_runtime_schema():
             "CREATE INDEX IF NOT EXISTS idx_item_page_notes_ai_conversation_id ON item_page_notes(ai_conversation_id)"
         )
 
+        # --- ai_memories ---
+        connection.exec_driver_sql(
+            """
+            CREATE TABLE IF NOT EXISTS ai_memories (
+                id VARCHAR PRIMARY KEY,
+                user_id VARCHAR NOT NULL REFERENCES users(id),
+                type VARCHAR NOT NULL DEFAULT 'learned',
+                content TEXT NOT NULL,
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+            )
+            """
+        )
+        connection.exec_driver_sql("CREATE INDEX IF NOT EXISTS idx_ai_memories_user_id ON ai_memories(user_id)")
+        connection.exec_driver_sql("CREATE INDEX IF NOT EXISTS idx_ai_memories_user_type ON ai_memories(user_id, type)")
+
 
 
 def init_search_index():

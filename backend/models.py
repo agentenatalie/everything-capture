@@ -201,3 +201,16 @@ class ItemPageNote(Base):
     ai_conversation = relationship("AiConversation", back_populates="page_notes", lazy="joined")
 
 
+class AiMemory(Base):
+    __tablename__ = "ai_memories"
+
+    id = Column(String, primary_key=True, index=True, default=generate_uuid)
+    user_id = Column(String, ForeignKey("users.id"), nullable=False, index=True, default=DEFAULT_USER_ID)
+    type = Column(String, nullable=False, default="learned")  # learned, preference, correction
+    content = Column(Text, nullable=False)
+    created_at = Column(DateTime, default=datetime.datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.datetime.utcnow)
+
+    user = relationship("User")
+
+

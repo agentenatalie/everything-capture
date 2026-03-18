@@ -3319,6 +3319,9 @@
             gap: 16px;
             width: 100%;
             max-width: none;
+            position: sticky;
+            top: 0;
+            z-index: 10;
         }
 
         .toolbar-left {

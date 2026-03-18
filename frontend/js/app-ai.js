@@ -32,6 +32,8 @@
             export_items_to_zip: '导出内容打包',
             create_folder: '创建文件夹',
             batch_assign_item_folders: '批量归档',
+            save_memory: '记住偏好',
+            delete_memory: '删除记忆',
         };
         const AI_MUTATING_TOOLS = new Set([
             'assign_item_folders',

@@ -3,6 +3,7 @@ import json
 import logging
 import re
 import threading
+from datetime import datetime
 from typing import Callable
 
 from fastapi import APIRouter, Depends, HTTPException, status, BackgroundTasks, Request
@@ -56,10 +57,28 @@ def background_auto_sync(item_id: str, user_id: str):
         db.close()
 
 
+def _seed_extracted_text_from_canonical(item_id: str, user_id: str) -> None:
+    """For items without parseable media, seed extracted_text from canonical_text
+    and mark parse as completed so the frontend auto-triggers AI organize."""
+    with SessionLocal() as db:
+        item = db.query(Item).filter(Item.id == item_id, Item.user_id == user_id).first()
+        if not item:
+            return
+        canonical = (item.canonical_text or "").strip()
+        if canonical and not (item.extracted_text or "").strip():
+            item.extracted_text = canonical
+        item.parse_status = "completed"
+        item.parse_error = None
+        item.parsed_at = item.parsed_at or datetime.utcnow()
+        db.commit()
+
+
 def _run_capture_postprocess(item_id: str, user_id: str, *, should_parse: bool) -> None:
     try:
         if should_parse:
             background_parse_item_content(item_id, user_id)
+        else:
+            _seed_extracted_text_from_canonical(item_id, user_id)
         background_auto_sync(item_id, user_id)
     except Exception as exc:
         logger.error("后台后处理失败 %s: %s", item_id, exc)
@@ -83,9 +102,8 @@ def _queue_capture_postprocess(
     *,
     should_parse: bool,
 ) -> None:
-    if should_parse:
-        item.parse_status = "processing"
-        item.parse_error = None
+    item.parse_status = "processing"
+    item.parse_error = None
     background_tasks.add_task(
         _spawn_capture_postprocess,
         item.id,

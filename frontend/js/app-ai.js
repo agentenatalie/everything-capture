@@ -30,6 +30,8 @@
             sync_item_to_notion: '同步到 Notion',
             execute_sandbox_command: '沙箱命令执行',
             export_items_to_zip: '导出内容打包',
+            create_folder: '创建文件夹',
+            batch_assign_item_folders: '批量归档',
         };
         const AI_MUTATING_TOOLS = new Set([
             'assign_item_folders',
@@ -38,6 +40,8 @@
             'sync_item_to_notion',
             'execute_sandbox_command',
             'export_items_to_zip',
+            'create_folder',
+            'batch_assign_item_folders',
         ]);
         const READER_AI_SUGGESTIONS = [
             '结合正文和我的笔记，总结核心观点',
@@ -1259,11 +1263,12 @@
             const updatedItems = Array.isArray(responseData?.updated_items) ? responseData.updated_items : [];
             const toolEvents = Array.isArray(responseData?.tool_events) ? responseData.tool_events : [];
             const needsMutationRefresh = hasSuccessfulAiMutation(toolEvents);
-            const needsFolderRefresh = toolEvents.some((event) => (
-                event
-                && String(event.name || '') === 'assign_item_folders'
-                && String(event.status || 'completed') !== 'failed'
-            ));
+            const needsFolderRefresh = toolEvents.some((event) => {
+                const name = String(event?.name || '');
+                return event
+                    && (name === 'assign_item_folders' || name === 'batch_assign_item_folders' || name === 'create_folder')
+                    && String(event.status || 'completed') !== 'failed';
+            });
 
             updatedItems.forEach((item) => {
                 if (!item?.id) return;

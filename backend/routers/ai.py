@@ -11,7 +11,7 @@ from sqlalchemy import func, or_
 from sqlalchemy.orm import Session
 
 from database import get_db
-from models import AiConversation, Folder, Item, ItemPageNote, Settings
+from models import AiConversation, Folder, Item, ItemFolderLink, ItemPageNote, Settings
 from schemas import (
     AiAskRequest,
     AiAskResponse,
@@ -406,7 +406,7 @@ def _assistant_chat_system_prompt() -> str:
 def _assistant_agent_system_prompt(agent_permissions: list[str]) -> str:
     permission_lines = {
         "search_library": "搜索收藏库内容",
-        "manage_folders": "调整内容文件夹归属",
+        "manage_folders": "管理文件夹（创建、归档、批量整理）",
         "parse_content": "触发内容解析",
         "sync_obsidian": "触发同步到 Obsidian",
         "sync_notion": "触发同步到 Notion",
@@ -435,6 +435,14 @@ def _assistant_agent_system_prompt(agent_permissions: list[str]) -> str:
         "例如用户问'申请实习用什么工具'，你应该额外搜索'简历''求职''resume''job application'等。\n"
         "3. 如果第一次搜索结果不够理想（分数低或明显不相关），务必用不同的关键词再搜索1-2次。\n"
         "4. 综合所有搜索结果后再给出最终回答。\n"
+        "\n"
+        "【重要：执行操作的通用原则】\n"
+        "你拥有多个原子工具，可以自由组合来完成用户的各种请求：\n"
+        "- 查看内容：search_library_items / list_recent_notes（支持 scope='unfiled' 筛选未归档）/ get_item_details\n"
+        "- 管理文件夹：list_folders / create_folder / assign_item_folders / batch_assign_item_folders\n"
+        "- 遇到复杂任务时，先用查询工具了解现状，再决定执行什么操作。\n"
+        "- 批量操作优先用 batch_assign_item_folders，不要逐条调用 assign_item_folders。\n"
+        "- 需要新文件夹时先用 create_folder 创建，再用 batch_assign_item_folders 归档。\n"
         "\n"
         "【重要：导出/打包/下载请求】\n"
         "当用户要求'打包''导出''下载''整理成文档'内容时：\n"
@@ -1274,11 +1282,24 @@ def _build_agent_tools(agent_permissions: list[str]) -> list[dict[str, Any]]:
             "type": "function",
             "function": {
                 "name": "list_recent_notes",
-                "description": "List the most recently saved items from the library.",
+                "description": (
+                    "List saved items from the library. "
+                    "Supports filtering by scope (all/unfiled) and platform. "
+                    "Returns item_id, title, folder info, excerpt for each item."
+                ),
                 "parameters": {
                     "type": "object",
                     "properties": {
-                        "limit": {"type": "integer", "minimum": 1, "maximum": 10},
+                        "limit": {"type": "integer", "minimum": 1, "maximum": 50},
+                        "scope": {
+                            "type": "string",
+                            "enum": ["all", "unfiled"],
+                            "description": "'unfiled' = only items not in any folder. Default 'all'.",
+                        },
+                        "platform": {
+                            "type": "string",
+                            "description": "Filter by platform (e.g. 'xiaohongshu', 'douyin', 'wechat', 'github', 'generic').",
+                        },
                     },
                     "additionalProperties": False,
                 },
@@ -1329,6 +1350,55 @@ def _build_agent_tools(agent_permissions: list[str]) -> list[dict[str, Any]]:
                             "folder_names": {"type": "array", "items": {"type": "string"}},
                         },
                         "required": ["item_id"],
+                        "additionalProperties": False,
+                    },
+                },
+            }
+        )
+        tools.append(
+            {
+                "type": "function",
+                "function": {
+                    "name": "create_folder",
+                    "description": "Create a new folder in the user's library. Returns the created folder's ID and name.",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "name": {"type": "string", "description": "The folder name to create."},
+                        },
+                        "required": ["name"],
+                        "additionalProperties": False,
+                    },
+                },
+            }
+        )
+        tools.append(
+            {
+                "type": "function",
+                "function": {
+                    "name": "batch_assign_item_folders",
+                    "description": (
+                        "Assign multiple items to folders in one call. "
+                        "Each assignment maps one item_id to one or more folder names. "
+                        "Use this for bulk organization instead of calling assign_item_folders repeatedly."
+                    ),
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "assignments": {
+                                "type": "array",
+                                "items": {
+                                    "type": "object",
+                                    "properties": {
+                                        "item_id": {"type": "string"},
+                                        "folder_names": {"type": "array", "items": {"type": "string"}},
+                                    },
+                                    "required": ["item_id", "folder_names"],
+                                },
+                                "description": "List of {item_id, folder_names} assignments.",
+                            },
+                        },
+                        "required": ["assignments"],
                         "additionalProperties": False,
                     },
                 },
@@ -1576,15 +1646,22 @@ async def _execute_agent_tool(
         return result, AiToolEventResponse(name=tool_name, summary=f"已读取《{item.title or item.id}》的详情"), [], []
 
     if tool_name == "list_recent_notes":
-        items = (
-            db.query(Item)
-            .filter(Item.user_id == user_id)
-            .order_by(Item.created_at.desc())
-            .limit(limit)
-            .all()
-        )
+        list_limit = max(1, min(int(arguments.get("limit") or 10), 50))
+        scope = _clean_optional_string(arguments.get("scope")) or "all"
+        platform_filter = _clean_optional_string(arguments.get("platform"))
+
+        q = db.query(Item).filter(Item.user_id == user_id)
+
+        if scope == "unfiled":
+            q = q.outerjoin(ItemFolderLink, ItemFolderLink.item_id == Item.id).filter(ItemFolderLink.item_id.is_(None))
+        if platform_filter:
+            q = q.filter(Item.platform == platform_filter)
+
+        items = q.order_by(Item.created_at.desc()).limit(list_limit).all()
+
+        scope_label = "未归档" if scope == "unfiled" else "最近"
         result = {"status": "ok", "results": [_tool_item_result(item) for item in items]}
-        summary = f"已列出最近 {len(items)} 条收藏内容"
+        summary = f"已列出{scope_label} {len(items)} 条收藏内容"
         return result, AiToolEventResponse(name=tool_name, summary=summary), [], []
 
     if tool_name == "get_related_notes":
@@ -1929,6 +2006,100 @@ async def _execute_agent_tool(
             result = {"status": "error", "message": str(exc)}
             return result, AiToolEventResponse(name=tool_name, status="failed", summary=f"导出失败：{exc}"), [], []
 
+    if tool_name == "create_folder":
+        if "manage_folders" not in agent_permissions:
+            result = {"status": "error", "message": "Permission denied"}
+            return result, AiToolEventResponse(name=tool_name, status="failed", summary="没有开放文件夹管理权限"), [], []
+        folder_name = _clean_optional_string(arguments.get("name"))
+        if not folder_name:
+            result = {"status": "error", "message": "name is required"}
+            return result, AiToolEventResponse(name=tool_name, status="failed", summary="创建文件夹失败：缺少名称"), [], []
+        # Check duplicate
+        existing = (
+            db.query(Folder)
+            .filter(Folder.user_id == user_id, func.lower(Folder.name) == folder_name.strip().lower())
+            .first()
+        )
+        if existing:
+            result = {
+                "status": "ok",
+                "message": "文件夹已存在",
+                "folder_id": existing.id,
+                "folder_name": existing.name,
+            }
+            return result, AiToolEventResponse(name=tool_name, summary=f"文件夹「{existing.name}」已存在"), [], []
+        import datetime as _dt
+        now = _dt.datetime.utcnow()
+        max_sort = db.query(func.max(Folder.sort_order)).filter(Folder.user_id == user_id).scalar()
+        folder = Folder(
+            user_id=user_id,
+            name=folder_name.strip(),
+            sort_order=int(max_sort if max_sort is not None else -1) + 1,
+            created_at=now,
+            updated_at=now,
+        )
+        db.add(folder)
+        db.commit()
+        db.refresh(folder)
+        result = {
+            "status": "ok",
+            "folder_id": folder.id,
+            "folder_name": folder.name,
+        }
+        return result, AiToolEventResponse(name=tool_name, summary=f"已创建文件夹「{folder.name}」"), [], []
+
+    if tool_name == "batch_assign_item_folders":
+        if "manage_folders" not in agent_permissions:
+            result = {"status": "error", "message": "Permission denied"}
+            return result, AiToolEventResponse(name=tool_name, status="failed", summary="没有开放文件夹管理权限"), [], []
+        assignments = arguments.get("assignments") or []
+        if not assignments:
+            result = {"status": "error", "message": "assignments is required"}
+            return result, AiToolEventResponse(name=tool_name, status="failed", summary="批量归档失败：缺少 assignments"), [], []
+
+        from routers.items import serialize_items, sync_item_folder_assignments
+
+        success_count = 0
+        errors: list[str] = []
+        updated_items_list: list[dict[str, Any]] = []
+
+        for assignment in assignments[:50]:
+            item_id = _clean_optional_string(assignment.get("item_id"))
+            folder_names = _coerce_text_list(assignment.get("folder_names"), limit=12)
+            if not item_id or not folder_names:
+                continue
+            item = _get_user_item(db, user_id, item_id)
+            if not item:
+                errors.append(f"Item {item_id} not found")
+                continue
+            folders, missing = _resolve_tool_target_folders(db, user_id, [], folder_names)
+            if missing:
+                errors.append(f"Unknown folders for {item_id}: {', '.join(missing)}")
+                continue
+            sync_item_folder_assignments(item, folders)
+            success_count += 1
+
+        db.commit()
+
+        # Refresh updated items
+        for assignment in assignments[:50]:
+            item_id = _clean_optional_string(assignment.get("item_id"))
+            if item_id:
+                item = _get_user_item(db, user_id, item_id)
+                if item:
+                    db.refresh(item)
+                    updated_items_list.append(serialize_items([item])[0].model_dump(mode="json"))
+
+        result = {
+            "status": "ok",
+            "success_count": success_count,
+            "errors": errors[:20] if errors else [],
+        }
+        summary = f"已批量归档 {success_count} 条内容"
+        if errors:
+            summary += f"，{len(errors)} 条失败"
+        return result, AiToolEventResponse(name=tool_name, summary=summary), [], updated_items_list
+
     if tool_name == "execute_sandbox_command":
         if "execute_commands" not in agent_permissions:
             result = {"status": "error", "message": "Permission denied"}
@@ -1991,12 +2162,26 @@ _PLAN_AND_EXECUTE_SYSTEM_PROMPT = (
 )
 
 
+def _is_organize_request(user_message: str) -> bool:
+    """Heuristic: does the user's message look like a library organization request?"""
+    organize_keywords = [
+        "整理", "归类", "分类", "自动分类", "按主题", "按领域",
+        "分到文件夹", "建议文件夹", "检查标签", "重新分类",
+        "organize", "categorize", "classify",
+    ]
+    lower = user_message.lower()
+    return any(kw in lower for kw in organize_keywords)
+
+
 def _is_action_request(user_message: str) -> bool:
     """Heuristic: does the user's last message look like an action/execution request?"""
+    # Organization requests should go through agent loop (not plan-and-execute)
+    if _is_organize_request(user_message):
+        return False
     action_keywords = [
-        "打包", "导出", "下载", "整理", "创建", "生成", "写成", "合并",
+        "打包", "导出", "下载", "创建", "生成", "写成", "合并",
         "克隆", "clone", "zip", "export",
-        "同步", "移到", "归类", "分类到",
+        "同步", "移到",
         "执行", "运行",
     ]
     lower = user_message.lower()
@@ -2888,6 +3073,9 @@ async def organize_item_analysis(item_id: str, db: Session = Depends(get_db)):
         item.ocr_text = None
 
     item.extracted_text = organized_text
+    # AI-organized content overwrites the original scraped text
+    item.canonical_text = organized_text
+    item.canonical_text_length = len(organized_text)
     item.parse_status = "completed"
     item.parse_error = None
     if item.parsed_at is None:

@@ -6743,11 +6743,14 @@
 
         .modal.is-fullscreen .reader-toolbar,
         .modal.is-fullscreen .modal-footer {
-            will-change: opacity;
+            will-change: transform, opacity;
             transition:
-                max-height 0.3s cubic-bezier(0.2, 0, 0, 1),
-                padding 0.3s cubic-bezier(0.2, 0, 0, 1),
-                opacity 0.2s ease;
+                transform 0.28s cubic-bezier(0.2, 0, 0, 1),
+                max-height 0.28s cubic-bezier(0.2, 0, 0, 1),
+                min-height 0.28s cubic-bezier(0.2, 0, 0, 1),
+                padding 0.28s cubic-bezier(0.2, 0, 0, 1),
+                opacity 0.22s ease;
+            overflow: hidden;
         }
 
         .modal.is-fullscreen .reader-toolbar {
@@ -6794,21 +6797,21 @@
         .modal.is-fullscreen.is-reader-chrome-hidden .reader-toolbar {
             opacity: 0;
             pointer-events: none;
-            max-height: 12px;
+            transform: translateY(-100%);
+            max-height: 0;
             min-height: 0;
             padding-top: 0;
             padding-bottom: 0;
-            overflow: hidden;
         }
 
         .modal.is-fullscreen.is-reader-chrome-hidden .modal-footer {
             opacity: 0;
             pointer-events: none;
-            max-height: 12px;
+            transform: translateY(100%);
+            max-height: 0;
             min-height: 0;
             padding-top: 0;
             padding-bottom: 0;
-            overflow: hidden;
         }
 
         .modal.is-fullscreen .reader-sidebar {

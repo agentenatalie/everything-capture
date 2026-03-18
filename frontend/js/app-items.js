@@ -13,6 +13,7 @@
         let readerSidebarStartX = 0;
         let readerSidebarStartWidth = 0;
         let readerChromeHidden = false;
+        let readerChromeLastToggle = 0;
         let readerLastScrollTop = 0;
         const readerNavStack = []; // stack of item IDs for back-navigation from citations
         let readerNavOrigin = null; // 'askAi' | 'readerAi' | null — where the citation nav started
@@ -58,8 +59,18 @@
         function setReaderChromeHidden(nextState) {
             const shouldHide = Boolean(nextState) && isReaderFullscreen && modalOverlay.classList.contains('active');
             if (readerChromeHidden === shouldHide) return;
+            // Cooldown: prevent rapid toggling (at least 300ms between state changes)
+            const now = performance.now();
+            if (now - readerChromeLastToggle < 300) return;
+            readerChromeLastToggle = now;
             readerChromeHidden = shouldHide;
             modalShell?.classList.toggle('is-reader-chrome-hidden', shouldHide);
+            // After layout change, sync scroll baseline so the reflow-caused
+            // scroll shift doesn't trigger another toggle (breaks the flicker loop)
+            requestAnimationFrame(() => {
+                readerLastScrollTop = modalContent?.scrollTop || 0;
+                readerScrollIntent = 0;
+            });
         }
 
         function resetReaderChromeState(forceScrollTop = false) {
@@ -68,6 +79,7 @@
             }
             readerLastScrollTop = modalContent?.scrollTop || 0;
             readerScrollIntent = 0;
+            readerChromeLastToggle = 0; // bypass cooldown on explicit reset
             setReaderChromeHidden(false);
         }
 
@@ -108,6 +120,7 @@
 
             if (delta > 0) {
                 // Scrolling down — hide bars quickly
+                if (readerScrollIntent < 0) readerScrollIntent = 0; // reset on direction change
                 readerScrollIntent += delta;
                 if (currentScrollTop > 60 && readerScrollIntent >= 20) {
                     readerScrollIntent = 0;
@@ -115,7 +128,8 @@
                 }
             } else {
                 // Scrolling up — reveal bars
-                readerScrollIntent += Math.abs(delta);
+                if (readerScrollIntent > 0) readerScrollIntent = 0; // reset on direction change
+                readerScrollIntent -= delta; // accumulate positive for up scroll
                 if (readerScrollIntent >= 24) {
                     readerScrollIntent = 0;
                     setReaderChromeHidden(false);

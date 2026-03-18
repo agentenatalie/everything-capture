@@ -221,7 +221,8 @@ def _build_current_item_context(item: Item, note: KnowledgeBaseNote | None = Non
     folder_names = _extract_item_folder_names(item)
     analysis_text = _normalize_multiline_text(item.extracted_text)
     canonical_text = _normalize_multiline_text(item.canonical_text)
-    ocr_text = _normalize_multiline_text(item.ocr_text)
+    has_video = any(m.type == "video" for m in (item.media or []))
+    ocr_text = "" if has_video else _normalize_multiline_text(item.ocr_text)
     frame_text = _normalize_multiline_text("\n".join(_load_frame_texts(item)))
     note_summary = _clean_optional_string(note.summary if note else None)
 
@@ -2243,6 +2244,10 @@ async def organize_item_analysis(item_id: str, db: Session = Depends(get_db)):
         raise HTTPException(status_code=400, detail="No current item analysis available for organization")
 
     analysis_text = _normalize_multiline_text(item.extracted_text)
+    # For video items, strip cover-image OCR — it's just the thumbnail, not real content
+    has_video = any(m.type == "video" for m in (item.media or []))
+    if has_video:
+        analysis_text = re.sub(r"\[ocr_text\]\n.*?(?=\n\[|\Z)", "", analysis_text, flags=re.DOTALL).strip()
     item_header = (
         f"当前文章 item_id：{item.id}\n"
         f"当前文章标题：{_clean_optional_string(item.title) or f'Item {item.id}'}\n\n"
@@ -2297,6 +2302,11 @@ async def organize_item_analysis(item_id: str, db: Session = Depends(get_db)):
     )
     if not organized_text:
         raise HTTPException(status_code=502, detail="AI returned empty organized analysis")
+
+    # For video items, ensure the organized result doesn't contain cover-image OCR
+    if has_video:
+        organized_text = re.sub(r"\[ocr_text\]\n.*?(?=\n\[|\Z)", "", organized_text, flags=re.DOTALL).strip()
+        item.ocr_text = None
 
     item.extracted_text = organized_text
     item.parse_status = "completed"

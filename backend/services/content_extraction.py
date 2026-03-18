@@ -940,7 +940,8 @@ def parse_item_content(item) -> ContentParseResult:
             else:
                 transcript_sections.append(text)
 
-    ocr_text = "\n\n".join(_unique_preserve_order(ocr_sections))
+    # For video items the OCR comes from cover thumbnails only — discard it
+    ocr_text = "" if has_videos else "\n\n".join(_unique_preserve_order(ocr_sections))
     subtitle_text = "\n\n".join(_unique_preserve_order(subtitle_sections))
     transcript_text = "\n\n".join(_unique_preserve_order(transcript_sections))
     urls = _unique_preserve_order([value for value in urls if value])

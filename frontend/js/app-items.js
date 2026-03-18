@@ -745,7 +745,7 @@
                     hasKeyword || hasPlatformFilter || hasFolderFilter
                 );
                 renderItems(filteredEntries, { animate: true });
-                scheduleParseStatusPolling();
+                startBackgroundRefresh();
                 const trackedSyncIds = getTrackedRemoteSyncItemIds(itemsData);
                 if (trackedSyncIds.length) {
                     scheduleRemoteSyncRefresh({ delay: 400, force: true, itemIds: trackedSyncIds });
@@ -1276,9 +1276,11 @@
             commandSearchResults = commandSearchResults.map((entry) => entry.id === updatedItem.id ? updatedItem : entry);
         }
 
-        /* ── Poll processing items until they finish, then auto-trigger AI analysis ── */
-        let _parsePollingTimer = null;
-        const PARSE_POLL_INTERVAL_MS = 2500;
+        /* ── Background refresh: poll processing items & detect new external captures ── */
+        let _bgRefreshTimer = null;
+        let _bgRefreshInFlight = false;
+        const BG_REFRESH_INTERVAL_MS = 3000;
+        const BG_REFRESH_IDLE_INTERVAL_MS = 8000;
 
         function _getProcessingItemIds() {
             return itemsData
@@ -1286,16 +1288,29 @@
                 .map((item) => item.id);
         }
 
-        function scheduleParseStatusPolling() {
-            if (_parsePollingTimer) return;
-            const ids = _getProcessingItemIds();
-            if (!ids.length) return;
-            _parsePollingTimer = window.setTimeout(async () => {
-                _parsePollingTimer = null;
-                const ids = _getProcessingItemIds();
-                if (!ids.length) return;
+        function startBackgroundRefresh() {
+            if (_bgRefreshTimer) return;
+            _scheduleNextRefresh();
+        }
 
-                for (const itemId of ids) {
+        function _scheduleNextRefresh() {
+            if (_bgRefreshTimer) window.clearTimeout(_bgRefreshTimer);
+            const hasProcessing = _getProcessingItemIds().length > 0;
+            const interval = hasProcessing ? BG_REFRESH_INTERVAL_MS : BG_REFRESH_IDLE_INTERVAL_MS;
+            _bgRefreshTimer = window.setTimeout(_doBackgroundRefresh, interval);
+        }
+
+        async function _doBackgroundRefresh() {
+            _bgRefreshTimer = null;
+            if (_bgRefreshInFlight || document.visibilityState === 'hidden') {
+                _scheduleNextRefresh();
+                return;
+            }
+            _bgRefreshInFlight = true;
+            try {
+                // 1) Poll processing items for status change
+                const processingIds = _getProcessingItemIds();
+                for (const itemId of processingIds) {
                     try {
                         const res = await fetch(`/api/items/${itemId}`);
                         if (!res.ok) continue;
@@ -1307,21 +1322,36 @@
                         if (currentOpenItemId === itemId) {
                             openModalByItem(updated, { preserveSidebarTab: true });
                         }
-                        if (wasProcessing && updated.parse_status !== 'processing') {
+                        if (wasProcessing && updated.parse_status === 'completed') {
                             organizeItemAnalysis(itemId);
                         }
-                    } catch (_) { /* ignore network errors, retry next tick */ }
+                    } catch (_) { /* retry next tick */ }
                 }
-                scheduleParseStatusPolling();
-            }, PARSE_POLL_INTERVAL_MS);
-        }
 
-        function stopParseStatusPolling() {
-            if (_parsePollingTimer) {
-                window.clearTimeout(_parsePollingTimer);
-                _parsePollingTimer = null;
+                // 2) Check for new items from external sources (phone shortcuts, etc.)
+                try {
+                    const countRes = await fetch(`/api/items?${getActiveSearchParams(1).toString()}`, {
+                        method: 'GET',
+                    });
+                    if (countRes.ok) {
+                        const serverTotal = Number(countRes.headers.get('X-Total-Count') || '0');
+                        if (serverTotal > latestTotalCount) {
+                            await fetchItems();
+                        }
+                    }
+                } catch (_) { /* retry next tick */ }
+            } finally {
+                _bgRefreshInFlight = false;
+                _scheduleNextRefresh();
             }
         }
+
+        // Pause polling when tab is hidden, resume when visible
+        document.addEventListener('visibilitychange', () => {
+            if (document.visibilityState === 'visible' && !_bgRefreshTimer) {
+                _doBackgroundRefresh();
+            }
+        });
 
         function formatParseStatusSummary(item) {
             const status = String(item?.parse_status || 'idle');

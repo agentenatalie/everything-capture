@@ -683,12 +683,18 @@
             } = options;
             const parsed = parseExtractedTextSections(item?.extracted_text || '');
             if (!parsed.contentSections.length) return '';
+            // For video items, OCR is just the cover thumbnail — hide it
+            const hasVideo = (item?.media || []).some((m) => m.type === 'video');
+            const sections = hasVideo
+                ? parsed.contentSections.filter((s) => s.key !== 'ocr_text')
+                : parsed.contentSections;
+            if (!sections.length) return '';
             const displayKicker = kicker || (asPrimary ? '解析内容' : '补充解析');
 
             return `
                 <section class="reader-extracted-panel${asPrimary ? ' is-primary' : ''}">
                     ${showKicker ? `<div class="reader-extracted-kicker">${escapeHtml(displayKicker)}</div>` : ''}
-                    ${parsed.contentSections.map((section) => `
+                    ${sections.map((section) => `
                         <div class="reader-extracted-section">
                             ${hideBodySectionTitle && section.key === 'body' ? '' : `<h3 class="reader-extracted-title">${escapeHtml(section.label)}</h3>`}
                             ${renderExtractedSectionMarkup(section)}

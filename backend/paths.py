@@ -1,8 +1,98 @@
+from __future__ import annotations
+
+import logging
+import os
+import shutil
 from pathlib import Path
+
+logger = logging.getLogger(__name__)
 
 BACKEND_DIR = Path(__file__).resolve().parent
 PROJECT_ROOT = BACKEND_DIR.parent
-DB_PATH = BACKEND_DIR / "items.db"
-STATIC_DIR = BACKEND_DIR / "static"
-MEDIA_DIR = STATIC_DIR / "media"
-LOCAL_STATE_DIR = BACKEND_DIR / ".local"
+
+# ---------------------------------------------------------------------------
+# External data directory (code/data separation)
+# ---------------------------------------------------------------------------
+# Default: ../everything-capture-data  (sibling of the project directory)
+# Override via DATA_DIR environment variable.
+DATA_ROOT = Path(
+    os.getenv("DATA_DIR")
+    or str(PROJECT_ROOT.parent / "everything-capture-data")
+).resolve()
+
+DB_PATH = Path(os.getenv("SQLITE_PATH") or str(DATA_ROOT / "app.db"))
+MEDIA_DIR = Path(os.getenv("MEDIA_DIR") or str(DATA_ROOT / "media"))
+EXPORTS_DIR = Path(os.getenv("EXPORTS_DIR") or str(DATA_ROOT / "exports"))
+BACKUPS_DIR = Path(os.getenv("BACKUPS_DIR") or str(DATA_ROOT / "backups"))
+LOCAL_STATE_DIR = DATA_ROOT / ".local"
+
+# Backward-compatible alias: existing code does `STATIC_DIR / local_path` where
+# local_path = "media/users/{uid}/{item_id}/file.jpg".  Since DATA_ROOT contains
+# the "media/" sub-directory, STATIC_DIR = DATA_ROOT makes the resolution correct.
+STATIC_DIR = DATA_ROOT
+
+# ---------------------------------------------------------------------------
+# Legacy paths (used for one-time migration)
+# ---------------------------------------------------------------------------
+_OLD_DB_PATH = BACKEND_DIR / "items.db"
+_OLD_MEDIA_DIR = BACKEND_DIR / "static" / "media"
+_OLD_LOCAL_STATE_DIR = BACKEND_DIR / ".local"
+
+
+def ensure_data_dirs() -> None:
+    """Create the external data directory tree if it doesn't exist."""
+    for d in (DATA_ROOT, MEDIA_DIR, EXPORTS_DIR, BACKUPS_DIR, LOCAL_STATE_DIR):
+        d.mkdir(parents=True, exist_ok=True)
+
+
+def migrate_legacy_data() -> None:
+    """Migrate data from old in-project locations to the external data directory.
+
+    - Copies (not moves) files so the old data is preserved as a safety net.
+    - Skips migration if the destination already has data.
+    """
+    _migrate_local_state()
+    _migrate_database()
+    _migrate_media()
+
+
+def _migrate_local_state() -> None:
+    if not _OLD_LOCAL_STATE_DIR.exists():
+        return
+    master_key_src = _OLD_LOCAL_STATE_DIR / "master.key"
+    master_key_dst = LOCAL_STATE_DIR / "master.key"
+    if master_key_src.exists() and not master_key_dst.exists():
+        LOCAL_STATE_DIR.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(str(master_key_src), str(master_key_dst))
+        os.chmod(str(master_key_dst), 0o600)
+        logger.info("Migrated master.key -> %s", master_key_dst)
+
+
+def _migrate_database() -> None:
+    if _OLD_DB_PATH.exists() and not DB_PATH.exists():
+        DB_PATH.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(str(_OLD_DB_PATH), str(DB_PATH))
+        # Also copy WAL/SHM if present
+        for suffix in ("-wal", "-shm"):
+            wal = _OLD_DB_PATH.with_name(_OLD_DB_PATH.name + suffix)
+            if wal.exists():
+                shutil.copy2(str(wal), str(DB_PATH.with_name(DB_PATH.name + suffix)))
+        logger.info("Migrated database -> %s", DB_PATH)
+
+
+def _migrate_media() -> None:
+    if not _OLD_MEDIA_DIR.exists():
+        return
+    # Only migrate if the new media dir is empty (no "users" sub-dir yet)
+    if (MEDIA_DIR / "users").exists():
+        return
+    MEDIA_DIR.mkdir(parents=True, exist_ok=True)
+    for child in _OLD_MEDIA_DIR.iterdir():
+        dst = MEDIA_DIR / child.name
+        if dst.exists():
+            continue
+        if child.is_dir():
+            shutil.copytree(str(child), str(dst))
+        else:
+            shutil.copy2(str(child), str(dst))
+    logger.info("Migrated media -> %s", MEDIA_DIR)

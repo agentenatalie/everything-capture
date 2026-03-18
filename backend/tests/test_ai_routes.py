@@ -24,6 +24,9 @@ from security import encrypt_secret  # noqa: E402
 from services.knowledge_base import KnowledgeBaseNote, KnowledgeBaseSnapshot, prepare_note_for_similarity  # noqa: E402
 from database import Base  # noqa: E402
 
+# ai.py now uses _build_items_only_snapshot instead of load_knowledge_base_snapshot
+_SNAPSHOT_FUNC = "_build_items_only_snapshot"
+
 
 class AiRouteTests(unittest.TestCase):
     def setUp(self) -> None:
@@ -115,7 +118,7 @@ class AiRouteTests(unittest.TestCase):
         with self.Session() as db:
             with patch.object(ai_router, "get_current_user_id", return_value="local-default-user"), patch.object(
                 ai_router,
-                "load_knowledge_base_snapshot",
+                _SNAPSHOT_FUNC,
                 return_value=self._make_snapshot(),
             ), patch.object(
                 ai_router,
@@ -132,7 +135,7 @@ class AiRouteTests(unittest.TestCase):
         with self.Session() as db:
             with patch.object(ai_router, "get_current_user_id", return_value="local-default-user"), patch.object(
                 ai_router,
-                "load_knowledge_base_snapshot",
+                _SNAPSHOT_FUNC,
                 return_value=self._make_snapshot(),
             ), patch.object(
                 ai_router,
@@ -164,7 +167,7 @@ class AiRouteTests(unittest.TestCase):
         with self.Session() as db:
             with patch.object(ai_router, "get_current_user_id", return_value="local-default-user"), patch.object(
                 ai_router,
-                "load_knowledge_base_snapshot",
+                _SNAPSHOT_FUNC,
                 return_value=self._make_snapshot(),
             ), patch.object(
                 ai_router,
@@ -187,12 +190,6 @@ class AiRouteTests(unittest.TestCase):
         )
         captured_messages: list[list[dict]] = []
 
-        empty_snapshot = KnowledgeBaseSnapshot(
-            root_path="/tmp/Sources.base",
-            notes=[],
-            loaded_at=datetime.utcnow(),
-        )
-
         async def fake_chat_completion(**kwargs):
             captured_messages.append(kwargs["messages"])
             return "这条内容主要在讨论 AI UI 为什么容易缺少设计一致性，以及如何通过规范和组件表达来改善。[1]"
@@ -200,8 +197,8 @@ class AiRouteTests(unittest.TestCase):
         with self.Session() as db:
             with patch.object(ai_router, "get_current_user_id", return_value="local-default-user"), patch.object(
                 ai_router,
-                "load_knowledge_base_snapshot",
-                return_value=empty_snapshot,
+                _SNAPSHOT_FUNC,
+                return_value=self._make_snapshot(),
             ), patch.object(
                 ai_router,
                 "chat_completion",
@@ -242,7 +239,7 @@ class AiRouteTests(unittest.TestCase):
         with self.Session() as db:
             with patch.object(ai_router, "get_current_user_id", return_value="local-default-user"), patch.object(
                 ai_router,
-                "load_knowledge_base_snapshot",
+                _SNAPSHOT_FUNC,
                 return_value=KnowledgeBaseSnapshot(
                     root_path="/tmp/Sources.base",
                     notes=[],
@@ -301,7 +298,7 @@ class AiRouteTests(unittest.TestCase):
         self.assertNotIn("## 摘要", response.extracted_text or "")
         self.assertNotIn("<think>", response.extracted_text or "")
         self.assertIn("最大限度保留原有内容", captured_system_prompt)
-        self.assertIn("不要默认输出“摘要 / 核心要点”", captured_system_prompt)
+        self.assertIn("不要默认输出", captured_system_prompt)
         self.assertIn("当前文章已有的内容分析文本", captured_user_prompt)
         self.assertIn("不要总结、不要压缩成提要", captured_user_prompt)
         self.assertNotIn("当前文章抓取到的正文文本", captured_user_prompt)
@@ -336,7 +333,7 @@ class AiRouteTests(unittest.TestCase):
                                 "id": "tool-1",
                                 "type": "function",
                                 "function": {
-                                    "name": "search_knowledge_base",
+                                    "name": "search_library_items",
                                     "arguments": '{"query":"AI UI 设计","limit":2}',
                                 },
                             }
@@ -359,7 +356,7 @@ class AiRouteTests(unittest.TestCase):
         with self.Session() as db:
             with patch.object(ai_router, "get_current_user_id", return_value="local-default-user"), patch.object(
                 ai_router,
-                "load_knowledge_base_snapshot",
+                _SNAPSHOT_FUNC,
                 return_value=self._make_snapshot(),
             ), patch.object(
                 ai_router,
@@ -370,7 +367,7 @@ class AiRouteTests(unittest.TestCase):
 
         self.assertEqual(response.mode, "agent")
         self.assertEqual(len(response.tool_events), 1)
-        self.assertEqual(response.tool_events[0].name, "search_knowledge_base")
+        self.assertEqual(response.tool_events[0].name, "search_library_items")
         self.assertGreaterEqual(len(response.citations), 1)
         self.assertIn("两条", response.message)
 
@@ -384,7 +381,7 @@ class AiRouteTests(unittest.TestCase):
         with self.Session() as db:
             with patch.object(ai_router, "get_current_user_id", return_value="local-default-user"), patch.object(
                 ai_router,
-                "load_knowledge_base_snapshot",
+                _SNAPSHOT_FUNC,
                 return_value=self._make_snapshot(),
             ), patch.object(
                 ai_router,
@@ -435,7 +432,7 @@ class AiRouteTests(unittest.TestCase):
         with self.Session() as db:
             with patch.object(ai_router, "get_current_user_id", return_value="local-default-user"), patch.object(
                 ai_router,
-                "load_knowledge_base_snapshot",
+                _SNAPSHOT_FUNC,
                 return_value=self._make_snapshot(),
             ), patch.object(
                 ai_router,
@@ -453,7 +450,7 @@ class AiRouteTests(unittest.TestCase):
         with self.Session() as db:
             with patch.object(ai_router, "get_current_user_id", return_value="local-default-user"), patch.object(
                 ai_router,
-                "load_knowledge_base_snapshot",
+                _SNAPSHOT_FUNC,
                 return_value=self._make_snapshot(),
             ):
                 response = ai_router.related_notes("item-ai", limit=3, db=db)

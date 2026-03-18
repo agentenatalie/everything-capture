@@ -745,6 +745,7 @@
                     hasKeyword || hasPlatformFilter || hasFolderFilter
                 );
                 renderItems(filteredEntries, { animate: true });
+                scheduleParseStatusPolling();
                 const trackedSyncIds = getTrackedRemoteSyncItemIds(itemsData);
                 if (trackedSyncIds.length) {
                     scheduleRemoteSyncRefresh({ delay: 400, force: true, itemIds: trackedSyncIds });
@@ -1275,6 +1276,53 @@
             commandSearchResults = commandSearchResults.map((entry) => entry.id === updatedItem.id ? updatedItem : entry);
         }
 
+        /* ── Poll processing items until they finish, then auto-trigger AI analysis ── */
+        let _parsePollingTimer = null;
+        const PARSE_POLL_INTERVAL_MS = 2500;
+
+        function _getProcessingItemIds() {
+            return itemsData
+                .filter((item) => item.parse_status === 'processing')
+                .map((item) => item.id);
+        }
+
+        function scheduleParseStatusPolling() {
+            if (_parsePollingTimer) return;
+            const ids = _getProcessingItemIds();
+            if (!ids.length) return;
+            _parsePollingTimer = window.setTimeout(async () => {
+                _parsePollingTimer = null;
+                const ids = _getProcessingItemIds();
+                if (!ids.length) return;
+
+                for (const itemId of ids) {
+                    try {
+                        const res = await fetch(`/api/items/${itemId}`);
+                        if (!res.ok) continue;
+                        const updated = await res.json();
+                        const prev = getItemById(itemId);
+                        const wasProcessing = prev?.parse_status === 'processing';
+                        mergeUpdatedItem(updated);
+                        patchRenderedItemsById(itemId);
+                        if (currentOpenItemId === itemId) {
+                            openModalByItem(updated, { preserveSidebarTab: true });
+                        }
+                        if (wasProcessing && updated.parse_status !== 'processing') {
+                            organizeItemAnalysis(itemId);
+                        }
+                    } catch (_) { /* ignore network errors, retry next tick */ }
+                }
+                scheduleParseStatusPolling();
+            }, PARSE_POLL_INTERVAL_MS);
+        }
+
+        function stopParseStatusPolling() {
+            if (_parsePollingTimer) {
+                window.clearTimeout(_parsePollingTimer);
+                _parsePollingTimer = null;
+            }
+        }
+
         function formatParseStatusSummary(item) {
             const status = String(item?.parse_status || 'idle');
             if (status === 'processing') return '解析中...';
@@ -1377,6 +1425,9 @@
                     }
                 }
                 showToast('内容解析完成', 'success');
+                manualParseInFlightItemId = null;
+                organizeItemAnalysis(itemId);
+                return;
             } catch (error) {
                 const failedItem = getItemById(itemId);
                 if (failedItem) {
@@ -1396,13 +1447,6 @@
                 showToast(`解析失败：${error.message}`, 'error');
             } finally {
                 manualParseInFlightItemId = null;
-                const nextItem = getItemById(itemId);
-                if (nextItem && currentOpenItemId === itemId) {
-                    openModalByItem(nextItem, { preserveSidebarTab: true });
-                    if (readerSidebarOpen && readerSidebarTab === 'note') {
-                        openReaderSidebarPanel('note');
-                    }
-                }
             }
         }
 

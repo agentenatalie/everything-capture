@@ -72,7 +72,7 @@ backend/venv/bin/python scripts/prepare_capture_vercel_deploy.py /tmp/everything
 - 生成 `api/index.py`
 - 生成 `vercel.json`
 - 生成 `requirements.txt`
-- 从本地 `backend/items.db` 导出一个文件夹种子，给手机端文件夹选择器预填默认值
+- 从本地数据库（默认 `../everything-capture-data/app.db`）导出一个文件夹种子，给手机端文件夹选择器预填默认值
 
 重要限制：
 

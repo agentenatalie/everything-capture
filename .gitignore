@@ -3,8 +3,11 @@
 *.sqlite
 *.sqlite3
 
-# Media uploads/downloads
+# Media uploads/downloads (legacy in-project path)
 backend/static/media/
+
+# External data directory
+../everything-capture-data/
 
 # Python environments and caches
 backend/venv/

@@ -1,3 +1,4 @@
+import logging
 import os
 
 from fastapi import FastAPI, Request
@@ -5,10 +6,18 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import RedirectResponse
 from fastapi.staticfiles import StaticFiles
+from paths import MEDIA_DIR, ensure_data_dirs, migrate_legacy_data
+
+# ---------------------------------------------------------------------------
+# Bootstrap external data directory and migrate legacy data (before DB init)
+# ---------------------------------------------------------------------------
+logging.basicConfig(level=logging.INFO)
+ensure_data_dirs()
+migrate_legacy_data()
+
 from database import engine, Base, SessionLocal, ensure_runtime_schema, init_search_index
 from frontend_bridge import build_frontend_url
 from routers import ai, connect, folders, ingest, items, phone_webapp, settings
-from paths import MEDIA_DIR
 
 # Create SQLite database tables
 Base.metadata.create_all(bind=engine)
@@ -78,6 +87,6 @@ def root(request: Request):
     return RedirectResponse(url=build_frontend_url(request, query_string=request.url.query))
 
 
-# Mount media directory for uploaded files (still served by backend)
+# Mount external media directory — keeps frontend URLs unchanged (/static/media/...)
 os.makedirs(MEDIA_DIR, exist_ok=True)
 app.mount("/static/media", StaticFiles(directory=str(MEDIA_DIR)), name="media")

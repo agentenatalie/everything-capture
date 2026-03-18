@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sqlite3
 import shutil
 from pathlib import Path
@@ -10,7 +11,13 @@ from pathlib import Path
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 CAPTURE_SOURCE_DIR = PROJECT_ROOT / "capture_service"
 BACKEND_STATIC_DIR = PROJECT_ROOT / "backend" / "static"
-BACKEND_DB_PATH = PROJECT_ROOT / "backend" / "items.db"
+
+# Use the external data directory (same resolution as backend/paths.py)
+_DATA_ROOT = Path(
+    os.getenv("DATA_DIR")
+    or str(PROJECT_ROOT.parent / "everything-capture-data")
+).resolve()
+BACKEND_DB_PATH = Path(os.getenv("SQLITE_PATH") or str(_DATA_ROOT / "app.db"))
 
 DEPLOY_REQUIREMENTS = """fastapi==0.135.1
 sqlalchemy==2.0.47

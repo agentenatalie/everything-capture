@@ -50,12 +50,9 @@ from services.ai_defaults import (
 from services.knowledge_base import (
     KnowledgeBaseNote,
     KnowledgeBaseSnapshot,
-    detect_knowledge_base_path,
     expand_query_from_top_results,
-    load_knowledge_base_snapshot,
     prepare_note_for_similarity,
     rank_notes_for_expanded_queries,
-    rank_notes_for_query,
     rank_related_notes,
 )
 from tenant import get_current_user_id
@@ -239,7 +236,7 @@ def _build_current_item_context(item: Item, note: KnowledgeBaseNote | None = Non
     if note_summary:
         lines.extend([
             "",
-            "这篇内容在知识库里的已有摘要：",
+            "这篇内容的已有摘要：",
             _truncate_text(note_summary, 1200),
         ])
 
@@ -350,23 +347,23 @@ def _build_seed_note_from_item(item: Item, existing_note: KnowledgeBaseNote | No
 
 def _ask_ai_system_prompt() -> str:
     return (
-        "你是一个读过用户个人知识库的研究助理。"
-        "只能基于提供的笔记回答，不要引入外部常识来补空。"
-        "优先使用每篇笔记已有的 `summary` / `摘要`，不要重复整理同一份知识。"
+        "你是一个读过用户收藏库所有内容的研究助理。"
+        "只能基于提供的内容回答，不要引入外部常识来补空。"
+        "优先使用每条内容已有的摘要，不要重复整理同一份内容。"
         "如果证据不足，必须明确说信息不足。"
-        "提到任何笔记内容时，必须使用 [1] [2] 这样的引用编号，不要用「笔记1」「（笔记51）」等其他格式。"
-        "如果答案没有直接引用具体笔记，就不要输出引用编号。"
+        "提到任何内容时，必须使用 [1] [2] 这样的引用编号，不要用「笔记1」「（笔记51）」等其他格式。"
+        "如果答案没有直接引用具体内容，就不要输出引用编号。"
         "\n\n"
-        "【重要】仔细审查所有提供的笔记，不要只看标题是否字面匹配用户问题。"
-        "要深入理解每篇笔记的实际内容和用途，判断它是否能间接回答用户的问题。"
-        "例如：用户问'找实习要用什么工具'，一篇关于'简历自动填写'的笔记就是高度相关的。"
+        "【重要】仔细审查所有提供的内容，不要只看标题是否字面匹配用户问题。"
+        "要深入理解每条内容的实际用途，判断它是否能间接回答用户的问题。"
+        "例如：用户问'找实习要用什么工具'，一篇关于'简历自动填写'的内容就是高度相关的。"
     )
 
 
 def _analysis_system_prompt() -> str:
     return (
-        "你是一个读过用户知识库的研究助理。"
-        "当前任务是分析一条笔记，不要机械复述现有摘要。"
+        "你是一个读过用户收藏库内容的研究助理。"
+        "当前任务是分析一条收藏内容，不要机械复述现有摘要。"
         "分析时要结合正文内容和用户在文章上的笔记内容一起综合判断。"
         "要以现有摘要为锚点，补充更高层次的理解、归类、关联和思考方向。"
         "只基于提供的内容做判断，不要编造。"
@@ -377,67 +374,64 @@ def _analysis_system_prompt() -> str:
 def _assistant_chat_system_prompt() -> str:
     return (
         "你是用户网站里的 AI chatbot。"
-        "你的职责是和用户的个人知识库以及当前打开的文章对话，而不是泛泛聊天。"
+        "你的职责是和用户收藏库中的内容以及当前打开的文章对话，而不是泛泛聊天。"
         "如果提供了当前文章上下文，优先依据当前文章的内容分析、抓取文本、OCR / 帧文字以及用户在文章上的笔记综合回答。"
         "回答时要结合正文内容和用户笔记内容一起分析，而不是只看其中一个。"
-        "如果同时提供了知识库笔记，优先使用已有 `summary` / `摘要` 作为辅助，不要机械重复整理。"
+        "如果同时提供了收藏库内容索引，优先使用已有摘要作为辅助，不要机械重复整理。"
         "只能基于提供的上下文回答；若上下文不足，必须明确说明。"
         "回答请使用中文。"
-        "提到任何知识库笔记时，必须使用 [编号] 引用标记（如 [1] [2]），不要用「笔记1」「（笔记51）」等其他格式。"
-        "如果没有直接引用具体笔记，就不要输出引用编号。"
+        "提到任何收藏内容时，必须使用 [编号] 引用标记（如 [1] [2]），不要用「笔记1」「（笔记51）」等其他格式。"
+        "如果没有直接引用具体内容，就不要输出引用编号。"
         "\n\n"
         "【重要：深度语义检索】\n"
-        "仔细审查所有提供的笔记，不要只看标题是否字面匹配用户问题。"
-        "要深入理解每篇笔记的实际内容和用途，判断它是否能间接回答用户的问题。"
+        "仔细审查所有提供的内容，不要只看标题是否字面匹配用户问题。"
+        "要深入理解每条内容的实际用途，判断它是否能间接回答用户的问题。"
         "运用发散性思维：用户问'找实习要用什么工具'→ 简历工具、求职平台、面试准备、AI 辅助写作等都是相关的。"
-        "尽可能全面地找出相关笔记，宁可多找也不要遗漏。"
+        "尽可能全面地找出相关内容，宁可多找也不要遗漏。"
         "\n\n"
         "【重要：回答风格】\n"
         "简洁、直接、信息密度高，不要废话和客套。\n"
         "格式要求：\n"
         "- 开头一句话直接回答要点，不要重复用户问题。\n"
         "- 每个要点用「名称 [编号] — 一句话说明核心价值和用法」的格式，不要用表格。\n"
-        "- 提到任何笔记内容时，必须使用 [编号] 格式引用（如 [1] [2]），绝对不要用「笔记1」「（笔记51）」等其他格式。\n"
+        "- 提到任何内容时，必须使用 [编号] 格式引用（如 [1] [2]），绝对不要用「笔记1」「（笔记51）」等其他格式。\n"
         "- 如果有实用建议（如工具组合使用方式），在末尾用一段话给出。\n"
         "- 不要输出'希望对你有帮助'之类的尾巴。\n"
         "- 不要问'需要我展开吗'，直接把有价值的信息说完。"
     )
 
 
-def _assistant_agent_system_prompt(agent_permissions: list[str], snapshot: KnowledgeBaseSnapshot) -> str:
+def _assistant_agent_system_prompt(agent_permissions: list[str]) -> str:
     permission_lines = {
-        "read_knowledge_base": "读取与检索知识库",
-        "manage_folders": "调整笔记文件夹归属",
-        "parse_content": "触发笔记内容解析",
+        "search_library": "搜索收藏库内容",
+        "manage_folders": "调整内容文件夹归属",
+        "parse_content": "触发内容解析",
         "sync_obsidian": "触发同步到 Obsidian",
         "sync_notion": "触发同步到 Notion",
     }
     readable_permissions = "、".join(permission_lines[key] for key in agent_permissions if key in permission_lines)
     if not readable_permissions:
-        readable_permissions = "只读知识库"
+        readable_permissions = "搜索收藏库内容"
 
-    knowledge_base_hint = snapshot.root_path or "当前未检测到可读取的 Obsidian 知识库目录"
     return (
         "你是用户网站里的 AI agent。"
         "你既可以回答问题，也可以在工具确认成功时代表用户执行站内操作。"
-        "你必须优先基于用户自己的知识库和工具返回的信息工作，不要编造。"
+        "你必须优先基于用户收藏库中的内容和工具返回的信息工作，不要编造。"
         "当用户要求执行动作时，必须调用工具，不要只描述你会怎么做。"
         "如果某个权限没有开放，或某个工具执行失败，必须直接说明。"
         "只有在工具结果明确成功时，才能说操作已经完成。"
         "回答请使用中文，保持清楚直接。"
-        "提到任何知识库笔记时，必须使用 [1] [2] 引用编号，不要用「笔记1」「（笔记51）」等其他格式。"
-        "如果没有直接引用具体笔记，就不要输出引用编号。"
+        "提到任何收藏内容时，必须使用 [1] [2] 引用编号，不要用「笔记1」「（笔记51）」等其他格式。"
+        "如果没有直接引用具体内容，就不要输出引用编号。"
         "\n\n"
         "【重要：智能检索策略】\n"
-        "当用户提问时，你必须主动进行多轮、多角度的知识库检索，而不是只搜索一次：\n"
+        "当用户提问时，你必须主动进行多轮、多角度的收藏库检索，而不是只搜索一次：\n"
         "1. 先用用户原始问题的关键词搜索一次。\n"
-        "2. 然后思考用户真正想要找的内容可能以什么形式保存在知识库中——"
+        "2. 然后思考用户真正想要找的内容可能以什么形式保存——"
         "考虑同义词、相关概念、不同的表述方式。"
         "例如用户问'申请实习用什么工具'，你应该额外搜索'简历''求职''resume''job application'等。\n"
         "3. 如果第一次搜索结果不够理想（分数低或明显不相关），务必用不同的关键词再搜索1-2次。\n"
-        "4. 同时使用 search_knowledge_base 和 search_library_items 来扩大搜索范围。\n"
-        "5. 综合所有搜索结果后再给出最终回答。\n"
-        f"当前知识库位置：{knowledge_base_hint}。"
+        "4. 综合所有搜索结果后再给出最终回答。\n"
         f"当前可用权限：{readable_permissions}。"
     )
 
@@ -514,7 +508,7 @@ def _strip_leading_analysis_heading(text: str | None) -> str:
 
 _QUERY_EXPANSION_PROMPT = (
     "你是搜索查询扩展助手。用户会问一个问题，你需要生成多组不同的搜索关键词，"
-    "帮助在个人知识库中通过关键词匹配找到相关内容。\n"
+    "帮助在用户收藏库中通过关键词匹配找到相关内容。\n"
     "要求：\n"
     "1. 输出用户原始问题的核心关键词\n"
     "2. 输出同义词、相关概念、可能的内容标题用词\n"
@@ -660,7 +654,7 @@ def _retrieve_candidates(
 # ---------------------------------------------------------------------------
 
 _RERANKER_SYSTEM_PROMPT = (
-    "你是知识库语义精排助手。下面列出了一组候选内容的编号、标题和摘要。"
+    "你是收藏库语义精排助手。下面列出了一组候选内容的编号、标题和摘要。"
     "请根据用户的问题，选出所有真正相关的条目编号。\n"
     "重要规则：\n"
     "1. 深入理解语义关系，不要只看字面关键词。\n"
@@ -674,7 +668,7 @@ _RERANKER_SYSTEM_PROMPT = (
 # Combined expansion + reranker: one AI call instead of two.
 # AI first expands the query semantically, then picks from candidates.
 _EXPAND_AND_RERANK_SYSTEM_PROMPT = (
-    "你是知识库语义检索助手。你需要完成两步任务：\n"
+    "你是收藏库语义检索助手。你需要完成两步任务：\n"
     "第一步：理解用户问题的深层含义，联想相关概念和同义词。\n"
     "第二步：从候选列表中选出所有真正相关的条目。\n\n"
     "重要规则：\n"
@@ -1196,7 +1190,7 @@ def _agent_permission_flags(settings: Settings | None) -> dict[str, bool]:
 
 
 def _agent_permissions(settings: Settings | None) -> list[str]:
-    permissions = ["read_knowledge_base"]
+    permissions = ["search_library"]
     flags = _agent_permission_flags(settings)
     obsidian_ready = bool(
         _clean_optional_string(settings.obsidian_rest_api_url if settings else None)
@@ -1224,30 +1218,14 @@ def _build_agent_tools(agent_permissions: list[str]) -> list[dict[str, Any]]:
         {
             "type": "function",
             "function": {
-                "name": "search_knowledge_base",
+                "name": "search_library_items",
                 "description": (
-                    "Search the Obsidian knowledge base and return the most relevant notes. "
+                    "Search saved items in the user's library. "
                     "The search uses keyword matching, so choose your query terms carefully. "
                     "Tips: use specific keywords rather than full sentences; "
                     "try synonyms and related concepts if the first search doesn't yield good results; "
                     "call this tool multiple times with different queries to improve recall."
                 ),
-                "parameters": {
-                    "type": "object",
-                    "properties": {
-                        "query": {"type": "string", "description": "Search keywords or short phrase. Use specific, concrete terms."},
-                        "limit": {"type": "integer", "minimum": 1, "maximum": 8},
-                    },
-                    "required": ["query"],
-                    "additionalProperties": False,
-                },
-            },
-        },
-        {
-            "type": "function",
-            "function": {
-                "name": "search_library_items",
-                "description": "Search saved library items in the website database. Complements search_knowledge_base - use both for comprehensive results. Try different keywords if initial results are not satisfying.",
                 "parameters": {
                     "type": "object",
                     "properties": {
@@ -1278,7 +1256,7 @@ def _build_agent_tools(agent_permissions: list[str]) -> list[dict[str, Any]]:
             "type": "function",
             "function": {
                 "name": "list_recent_notes",
-                "description": "List the most recent notes from the knowledge base.",
+                "description": "List the most recently saved items from the library.",
                 "parameters": {
                     "type": "object",
                     "properties": {
@@ -1292,7 +1270,7 @@ def _build_agent_tools(agent_permissions: list[str]) -> list[dict[str, Any]]:
             "type": "function",
             "function": {
                 "name": "get_related_notes",
-                "description": "Find related notes for one saved item by item_id.",
+                "description": "Find related items for one saved item by item_id.",
                 "parameters": {
                     "type": "object",
                     "properties": {
@@ -1449,30 +1427,11 @@ async def _execute_agent_tool(
 ) -> tuple[dict[str, Any], AiToolEventResponse, list[tuple[KnowledgeBaseNote, float]], list[dict[str, Any]]]:
     limit = max(1, min(int(arguments.get("limit") or 5), 10))
 
-    if tool_name == "search_knowledge_base":
-        query = _clean_optional_string(arguments.get("query"))
-        if not query:
-            result = {"status": "error", "message": "query is required"}
-            return result, AiToolEventResponse(name=tool_name, status="failed", summary="知识库检索失败：缺少 query"), [], []
-        if ai_config:
-            ranked = await _semantic_rank_notes(ai_config, snapshot, query, limit=limit, db=db, user_id=user_id)
-        else:
-            ranked = rank_notes_for_query(snapshot, query, limit=limit) if snapshot.note_count else []
-        result = {
-            "status": "ok",
-            "query": query,
-            "results": [_tool_note_result(note, score) for note, score in ranked],
-            "knowledge_base_path": snapshot.root_path,
-            "note_count": snapshot.note_count,
-        }
-        summary = f"知识库检索完成，找到 {len(ranked)} 条相关笔记"
-        return result, AiToolEventResponse(name=tool_name, summary=summary), ranked, []
-
     if tool_name == "search_library_items":
         query = _clean_optional_string(arguments.get("query"))
         if not query:
             result = {"status": "error", "message": "query is required"}
-            return result, AiToolEventResponse(name=tool_name, status="failed", summary="站内搜索失败：缺少 query"), [], []
+            return result, AiToolEventResponse(name=tool_name, status="failed", summary="搜索失败：缺少 query"), [], []
         from routers.items import rank_search_rows
 
         candidate_rows = (
@@ -1494,15 +1453,15 @@ async def _execute_agent_tool(
         ordered_items = [items_by_id[item_id] for item_id in ranked_item_ids if item_id in items_by_id]
         ranked_notes: list[tuple[KnowledgeBaseNote, float]] = []
         for item in ordered_items:
-            note = snapshot.notes_by_item_id.get(item.id) if snapshot.note_count else None
-            if note:
-                ranked_notes.append((note, 1.0))
+            virtual = _item_to_virtual_note(item)
+            virtual = prepare_note_for_similarity(virtual)
+            ranked_notes.append((virtual, 1.0))
         result = {
             "status": "ok",
             "query": query,
-            "results": [_tool_item_result(item, snapshot.notes_by_item_id.get(item.id) if snapshot.note_count else None) for item in ordered_items],
+            "results": [_tool_item_result(item) for item in ordered_items],
         }
-        summary = f"站内内容搜索完成，找到 {len(ordered_items)} 条结果"
+        summary = f"搜索完成，找到 {len(ordered_items)} 条结果"
         return result, AiToolEventResponse(name=tool_name, summary=summary), ranked_notes, []
 
     if tool_name == "get_item_details":
@@ -1510,23 +1469,11 @@ async def _execute_agent_tool(
         item = _get_user_item(db, user_id, item_id or "")
         if not item:
             result = {"status": "error", "message": "Item not found"}
-            return result, AiToolEventResponse(name=tool_name, status="failed", summary="读取笔记详情失败：Item not found"), [], []
-        note = snapshot.notes_by_item_id.get(item.id) if snapshot.note_count else None
-        ranked = [(note, 1.0)] if note else []
-        result = {"status": "ok", "item": _tool_item_result(item, note)}
-        return result, AiToolEventResponse(name=tool_name, summary=f"已读取《{item.title or item.id}》的详情"), ranked, []
+            return result, AiToolEventResponse(name=tool_name, status="failed", summary="读取详情失败：Item not found"), [], []
+        result = {"status": "ok", "item": _tool_item_result(item)}
+        return result, AiToolEventResponse(name=tool_name, summary=f"已读取《{item.title or item.id}》的详情"), [], []
 
     if tool_name == "list_recent_notes":
-        if snapshot.note_count:
-            ranked = [(note, 1.0) for note in snapshot.notes[:limit]]
-            result = {
-                "status": "ok",
-                "results": [_tool_note_result(note, score) for note, score in ranked],
-                "knowledge_base_path": snapshot.root_path,
-            }
-            summary = f"已列出最近 {len(ranked)} 条知识库笔记"
-            return result, AiToolEventResponse(name=tool_name, summary=summary), ranked, []
-
         items = (
             db.query(Item)
             .filter(Item.user_id == user_id)
@@ -1535,7 +1482,7 @@ async def _execute_agent_tool(
             .all()
         )
         result = {"status": "ok", "results": [_tool_item_result(item) for item in items]}
-        summary = f"当前知识库为空，已列出最近 {len(items)} 条站内内容"
+        summary = f"已列出最近 {len(items)} 条收藏内容"
         return result, AiToolEventResponse(name=tool_name, summary=summary), [], []
 
     if tool_name == "get_related_notes":
@@ -1543,16 +1490,15 @@ async def _execute_agent_tool(
         item = _get_user_item(db, user_id, item_id or "")
         if not item:
             result = {"status": "error", "message": "Item not found"}
-            return result, AiToolEventResponse(name=tool_name, status="failed", summary="查找相关笔记失败：Item not found"), [], []
-        existing_note = snapshot.notes_by_item_id.get(item.id) if snapshot.note_count else None
-        seed_note = _build_seed_note_from_item(item, existing_note)
+            return result, AiToolEventResponse(name=tool_name, status="failed", summary="查找相关内容失败：Item not found"), [], []
+        seed_note = _build_seed_note_from_item(item)
         ranked = rank_related_notes(snapshot, seed_note, limit=limit) if snapshot.note_count else []
         result = {
             "status": "ok",
             "item_id": item.id,
             "results": [_tool_note_result(note, score) for note, score in ranked],
         }
-        summary = f"已找到 {len(ranked)} 条相关笔记"
+        summary = f"已找到 {len(ranked)} 条相关内容"
         return result, AiToolEventResponse(name=tool_name, summary=summary), ranked, []
 
     if tool_name == "list_folders":
@@ -1597,15 +1543,14 @@ async def _execute_agent_tool(
         sync_item_folder_assignments(item, folders)
         db.commit()
         db.refresh(item)
-        note = snapshot.notes_by_item_id.get(item.id) if snapshot.note_count else None
         updated_item = serialize_items([item])[0].model_dump(mode="json")
         result = {
             "status": "ok",
-            "item": _tool_item_result(item, note),
+            "item": _tool_item_result(item),
         }
         folder_text = "、".join(_extract_item_folder_names(item)) or "未归档"
         summary = f"已更新《{item.title or item.id}》的文件夹为：{folder_text}"
-        ranked = [(note, 1.0)] if note else []
+        ranked: list[tuple[KnowledgeBaseNote, float]] = []
         return result, AiToolEventResponse(name=tool_name, summary=summary), ranked, [updated_item]
 
     if tool_name == "parse_item_content":
@@ -1628,14 +1573,13 @@ async def _execute_agent_tool(
             parse_item_content_for_item(item)
             db.commit()
             db.refresh(item)
-            note = snapshot.notes_by_item_id.get(item.id) if snapshot.note_count else None
             updated_item = serialize_items([item])[0].model_dump(mode="json")
             result = {
                 "status": "ok",
-                "item": _tool_item_result(item, note),
+                "item": _tool_item_result(item),
             }
             summary = f"已完成《{item.title or item.id}》的内容解析"
-            ranked = [(note, 1.0)] if note else []
+            ranked: list[tuple[KnowledgeBaseNote, float]] = []
             return result, AiToolEventResponse(name=tool_name, summary=summary), ranked, [updated_item]
         except Exception as exc:
             db.rollback()
@@ -1663,10 +1607,8 @@ async def _execute_agent_tool(
             result = await _sync_item_to_obsidian(item, db)
             db.refresh(item)
             summary = f"已触发《{item.title or item.id}》同步到 Obsidian"
-            note = snapshot.notes_by_item_id.get(item.id) if snapshot.note_count else None
-            ranked = [(note, 1.0)] if note else []
             updated_item = serialize_items([item])[0].model_dump(mode="json")
-            return result, AiToolEventResponse(name=tool_name, summary=summary), ranked, [updated_item]
+            return result, AiToolEventResponse(name=tool_name, summary=summary), [], [updated_item]
         except HTTPException as exc:
             result = {"status": "error", "message": str(exc.detail)}
             return result, AiToolEventResponse(name=tool_name, status="failed", summary=f"Obsidian 同步失败：{exc.detail}"), [], []
@@ -1688,10 +1630,8 @@ async def _execute_agent_tool(
             result = await _sync_item_to_notion(item, db)
             db.refresh(item)
             summary = f"已触发《{item.title or item.id}》同步到 Notion"
-            note = snapshot.notes_by_item_id.get(item.id) if snapshot.note_count else None
-            ranked = [(note, 1.0)] if note else []
             updated_item = serialize_items([item])[0].model_dump(mode="json")
-            return result, AiToolEventResponse(name=tool_name, summary=summary), ranked, [updated_item]
+            return result, AiToolEventResponse(name=tool_name, summary=summary), [], [updated_item]
         except HTTPException as exc:
             result = {"status": "error", "message": str(exc.detail)}
             return result, AiToolEventResponse(name=tool_name, status="failed", summary=f"Notion 同步失败：{exc.detail}"), [], []
@@ -1706,17 +1646,17 @@ async def _run_agent_assistant(
     user_id: str,
     ai_config: dict[str, str],
     settings: Settings | None,
-    snapshot: KnowledgeBaseSnapshot,
     conversation: list[dict[str, str]],
     current_item: Item | None = None,
     current_item_note: KnowledgeBaseNote | None = None,
 ) -> AiAssistantResponse:
     agent_permissions = _agent_permissions(settings)
     tools = _build_agent_tools(agent_permissions)
+    snapshot = _build_items_only_snapshot(db, user_id)
     current_page_notes = _get_item_page_notes(db, user_id, current_item.id) if current_item else []
     current_item_context = _build_current_item_context(current_item, current_item_note, current_page_notes) if current_item is not None else ""
     system_message = _compose_system_message(
-        _assistant_agent_system_prompt(agent_permissions, snapshot),
+        _assistant_agent_system_prompt(agent_permissions),
         (
             "下面是当前文章上下文。若用户提到当前文章、这篇内容、这条笔记等指代，优先以这里为准；"
             "如果需要调用工具操作当前文章，请直接使用这里给出的 item_id。\n\n"
@@ -1759,7 +1699,7 @@ async def _run_agent_assistant(
                     _filter_ranked_notes_by_citation_markers(final_message, collected_notes),
                 ),
                 tool_events=tool_events,
-                knowledge_base_path=snapshot.root_path,
+                knowledge_base_path=None,
                 note_count=snapshot.note_count,
                 insufficient_context=False,
                 agent_permissions=agent_permissions,
@@ -1835,7 +1775,7 @@ async def _run_agent_assistant(
             _filter_ranked_notes_by_citation_markers(final_text, collected_notes),
         ),
         tool_events=tool_events,
-        knowledge_base_path=snapshot.root_path,
+        knowledge_base_path=None,
         note_count=snapshot.note_count,
         insufficient_context=False,
         agent_permissions=agent_permissions,
@@ -1977,7 +1917,7 @@ async def ask_ai(request: AiAskRequest, db: Session = Depends(get_db)):
     if not indexed_notes:
         return AiAskResponse(
             question=question,
-            answer="知识库里没有找到任何笔记。",
+            answer="收藏库里没有找到任何内容。",
             citations=[],
             knowledge_base_path=None,
             note_count=0,
@@ -1995,8 +1935,8 @@ async def ask_ai(request: AiAskRequest, db: Session = Depends(get_db)):
                     "role": "user",
                     "content": (
                         f"用户问题：{question}\n\n"
-                        "下面是知识库中所有笔记的索引（编号、标题、摘要）。"
-                        "请仔细浏览所有条目，找出与问题相关的笔记并基于它们回答。"
+                        "下面是用户收藏库中所有内容的索引（编号、标题、摘要）。"
+                        "请仔细浏览所有条目，找出与问题相关的内容并基于它们回答。"
                         "引用时使用 [编号] 格式。若信息不够，请直接说明缺口。\n\n"
                         f"{index_text}"
                     ),
@@ -2029,15 +1969,13 @@ async def assistant(request: AiAssistantRequest, db: Session = Depends(get_db)):
     user_id = get_current_user_id()
     settings = _get_user_settings(db, user_id)
     ai_config = _resolve_ai_config(settings)
-    snapshot = load_knowledge_base_snapshot()
     mode = "agent" if (request.mode or "").strip().lower() == "agent" else "chat"
     current_item_id = _clean_optional_string(request.current_item_id)
     current_item = _get_user_item(db, user_id, current_item_id) if current_item_id else None
     current_item_note = None
     current_page_notes: list[ItemPageNote] = []
     if current_item:
-        current_item_note = snapshot.notes_by_item_id.get(current_item.id) if snapshot.note_count else None
-        current_item_note = _build_seed_note_from_item(current_item, current_item_note)
+        current_item_note = _build_seed_note_from_item(current_item)
         current_page_notes = _get_item_page_notes(db, user_id, current_item.id)
 
     if mode == "agent":
@@ -2046,7 +1984,6 @@ async def assistant(request: AiAssistantRequest, db: Session = Depends(get_db)):
             user_id=user_id,
             ai_config=ai_config,
             settings=settings,
-            snapshot=snapshot,
             conversation=conversation,
             current_item=current_item,
             current_item_note=current_item_note,
@@ -2064,8 +2001,8 @@ async def assistant(request: AiAssistantRequest, db: Session = Depends(get_db)):
             f"{current_item_context}"
         ) if current_item_context else "",
         (
-            "下面是用户知识库中所有笔记的索引（编号、标题、摘要）。"
-            "请仔细浏览所有条目，找出与对话相关的笔记作为辅助参考。"
+            "下面是用户收藏库中所有内容的索引（编号、标题、摘要）。"
+            "请仔细浏览所有条目，找出与对话相关的内容作为辅助参考。"
             "引用时使用 [编号] 格式。\n\n"
             f"{index_text}"
         ) if index_text else "",
@@ -2109,14 +2046,12 @@ async def assistant_stream(request: AiAssistantRequest, db: Session = Depends(ge
     user_id = get_current_user_id()
     settings = _get_user_settings(db, user_id)
     ai_config = _resolve_ai_config(settings)
-    snapshot = load_knowledge_base_snapshot()
     current_item_id = _clean_optional_string(request.current_item_id)
     current_item = _get_user_item(db, user_id, current_item_id) if current_item_id else None
     current_item_note = None
     current_page_notes: list[ItemPageNote] = []
     if current_item:
-        current_item_note = snapshot.notes_by_item_id.get(current_item.id) if snapshot.note_count else None
-        current_item_note = _build_seed_note_from_item(current_item, current_item_note)
+        current_item_note = _build_seed_note_from_item(current_item)
         current_page_notes = _get_item_page_notes(db, user_id, current_item.id)
 
     async def event_stream():
@@ -2130,13 +2065,13 @@ async def assistant_stream(request: AiAssistantRequest, db: Session = Depends(ge
         yield _sse({
             "type": "status",
             "status": "found",
-            "message": f"已加载 {len(indexed_notes)} 条知识库内容，正在生成回答…",
+            "message": f"已加载 {len(indexed_notes)} 条收藏内容，正在生成回答…",
         })
 
         if not indexed_notes:
             yield _sse({
                 "type": "done",
-                "message": "知识库里没有任何笔记。",
+                "message": "收藏库里没有任何内容。",
                 "citations": [],
                 "insufficient_context": True,
             })
@@ -2151,8 +2086,8 @@ async def assistant_stream(request: AiAssistantRequest, db: Session = Depends(ge
                 f"{current_item_context}"
             ) if current_item_context else "",
             (
-                "下面是用户知识库中所有笔记的索引（编号、标题、摘要）。"
-                "请仔细浏览所有条目，找出与对话相关的笔记作为辅助参考。"
+                "下面是用户收藏库中所有内容的索引（编号、标题、摘要）。"
+                "请仔细浏览所有条目，找出与对话相关的内容作为辅助参考。"
                 "引用时使用 [编号] 格式。\n\n"
                 f"{index_text}"
             ) if index_text else "",
@@ -2219,15 +2154,14 @@ def related_notes(item_id: str, limit: int = 5, db: Session = Depends(get_db)):
     if not item:
         raise HTTPException(status_code=404, detail="Item not found")
 
-    snapshot = load_knowledge_base_snapshot()
-    existing_note = snapshot.notes_by_item_id.get(item.id) if snapshot.note_count else None
-    seed_note = _build_seed_note_from_item(item, existing_note)
+    snapshot = _build_items_only_snapshot(db, user_id)
+    seed_note = _build_seed_note_from_item(item)
     ranked_related = rank_related_notes(snapshot, seed_note, limit=max(1, min(limit, 8))) if snapshot.note_count else []
 
     return AiRelatedNotesResponse(
         item_id=item.id,
         related=_serialize_citations(db, user_id, ranked_related),
-        knowledge_base_path=snapshot.root_path,
+        knowledge_base_path=None,
         note_count=snapshot.note_count,
     )
 
@@ -2388,9 +2322,8 @@ async def analyze_item(item_id: str, db: Session = Depends(get_db)):
     settings = _get_user_settings(db, user_id)
     ai_config = _resolve_ai_config(settings)
 
-    snapshot = load_knowledge_base_snapshot()
-    existing_note = snapshot.notes_by_item_id.get(item.id) if snapshot.note_count else None
-    seed_note = _build_seed_note_from_item(item, existing_note)
+    snapshot = _build_items_only_snapshot(db, user_id)
+    seed_note = _build_seed_note_from_item(item)
     ranked_related = rank_related_notes(snapshot, seed_note, limit=4) if snapshot.note_count else []
 
     related_context = "\n\n".join(
@@ -2466,5 +2399,5 @@ async def analyze_item(item_id: str, db: Session = Depends(get_db)):
         themes=_coerce_text_list(payload.get("themes")),
         thinking_questions=_coerce_text_list(payload.get("thinking_questions")),
         citations=_serialize_citations(db, user_id, deduped_citations),
-        knowledge_base_path=snapshot.root_path,
+        knowledge_base_path=None,
     )

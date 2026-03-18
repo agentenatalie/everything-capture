@@ -294,45 +294,11 @@
             return error instanceof TypeError || /Failed to fetch|Load failed|NetworkError/i.test(message);
         }
 
-        async function waitForAuthBootstrap(timeoutMs = 2200) {
-            if (typeof authBootstrapComplete === 'undefined' || authBootstrapComplete) {
-                return;
-            }
-            const startedAt = Date.now();
-            while (typeof authBootstrapComplete !== 'undefined' && !authBootstrapComplete && (Date.now() - startedAt) < timeoutMs) {
-                await new Promise((resolve) => window.setTimeout(resolve, 40));
-            }
-        }
-
-        async function ensureAiSessionReady(options = {}) {
-            const { allowRecovery = true } = options;
-            await waitForAuthBootstrap();
-            if (ensureAuthenticated()) return true;
-            if (!allowRecovery) return false;
-
-            if (typeof refreshAuthSession === 'function') {
-                const refreshedSession = await refreshAuthSession({ silent: true });
-                if (refreshedSession?.authenticated || ensureAuthenticated()) {
-                    return true;
-                }
-            }
-
-            if (typeof provisionLocalSession === 'function') {
-                const provisionedSession = await provisionLocalSession({ silent: true });
-                if (provisionedSession?.authenticated || ensureAuthenticated()) {
-                    return true;
-                }
-            }
-
-            return ensureAuthenticated();
-        }
+        async function ensureAiSessionReady() { return true; }
 
         function normalizeAiRequestError(error) {
             const message = String(error?.message || error || '').trim();
             if (!message) return 'AI 请求失败';
-            if (/Authentication required|401/i.test(message)) {
-                return '本地会话已断开，已尝试恢复，请再试一次。';
-            }
             if (isAiNetworkFailure(error)) {
                 return '无法连接到本地 AI 服务，请确认后端仍在运行。';
             }
@@ -341,10 +307,6 @@
 
         async function ensureAiSettingsLoaded() {
             if (latestSettings || typeof loadSettings !== 'function') {
-                return latestSettings;
-            }
-            await ensureAiSessionReady({ allowRecovery: true });
-            if (!ensureAuthenticated()) {
                 return latestSettings;
             }
             if (!aiSettingsLoadPromise) {
@@ -1149,30 +1111,31 @@
             if (!welcomeGrid) return;
             const starters = aiAssistantMode === 'agent'
                 ? [
-                    { title: '整理最近保存的内容', description: '自动分类和整理最近的笔记' },
-                    { title: '触发内容解析', description: '对未解析的内容执行解析' },
-                    { title: '同步到 Obsidian', description: '将选中的笔记同步到 Obsidian' },
-                    { title: '同步到 Notion', description: '将选中的笔记同步到 Notion' },
+                    { title: '整理最近保存的内容', description: '自动分类和整理最近的笔记', prompt: '请帮我整理最近保存的所有内容。按主题或领域自动分类，对没有归入文件夹的内容建议合适的文件夹，对已有标签的内容检查标签是否准确，并将分类结果执行到位。' },
+                    { title: '触发内容解析', description: '对未解析的内容执行解析', prompt: '请检查我的知识库，找出所有尚未解析（parse_status 不是 done）的内容，逐一触发内容解析。完成后汇报一共解析了多少条、有哪些解析失败需要注意。' },
+                    { title: '同步到 Obsidian', description: '将选中的笔记同步到 Obsidian', prompt: '请检查我的知识库中还没有同步到 Obsidian 的内容，列出这些内容的标题，然后逐一执行同步操作。完成后汇报同步结果，包括成功和失败的条目。' },
+                    { title: '同步到 Notion', description: '将选中的笔记同步到 Notion', prompt: '请检查我的知识库中还没有同步到 Notion 的内容，列出这些内容的标题，然后逐一执行同步操作。完成后汇报同步结果，包括成功和失败的条目。' },
                 ]
                 : [
-                    { title: '总结最近保存内容', description: '从知识库里挑出最近最值得继续看的内容' },
-                    { title: '帮我找相关笔记', description: '围绕一个主题串起已有记录和潜在线索' },
-                    { title: '把一条内容拆成行动', description: '从当前笔记里提炼下一步、待办和追问点' },
-                    { title: '分析当前内容', description: '结合当前文章和知识库给出结构化判断' },
+                    { title: '总结最近保存内容', description: '从知识库里挑出最近最值得继续看的内容', prompt: '请从我的知识库中找出最近保存的内容，按主题归类总结。对每条内容用一两句话概括核心观点，并标注哪些值得深入阅读、哪些可以归档。最后给出一个整体的知识积累趋势观察。' },
+                    { title: '帮我找相关笔记', description: '围绕一个主题串起已有记录和潜在线索', prompt: '我想探索一个主题，请在我的知识库中搜索所有相关的笔记和内容。将找到的内容按关联程度排列，说明它们之间的联系和共同线索，并指出哪些方向还缺少资料、值得进一步收集。主题是：' },
+                    { title: '把一条内容拆成行动', description: '从当前笔记里提炼下一步、待办和追问点', prompt: '请分析我当前正在阅读的这条内容，从中提取所有可执行的行动项、待办事项和值得追问的问题。按优先级排列，并为每个行动项给出具体的下一步建议。' },
+                    { title: '分析当前内容', description: '结合当前文章和知识库给出结构化判断', prompt: '请对我当前正在阅读的内容进行深度分析：1) 提炼核心论点和关键信息；2) 在我的知识库中找出与之相关或矛盾的已有笔记；3) 评估内容的可信度和价值；4) 给出我应该如何利用这些信息的建议。' },
                 ];
 
-            welcomeGrid.innerHTML = starters.map((item) => `
-                <button class="ai-starter" type="button" data-ai-starter="${escapeAttribute(item.title)}">
+            welcomeGrid.innerHTML = starters.map((item, idx) => `
+                <button class="ai-starter" type="button" data-ai-starter-idx="${idx}">
                     <div class="ai-starter-title">${escapeHtml(item.title)}</div>
                     <div class="ai-starter-desc">${escapeHtml(item.description)}</div>
                 </button>
             `).join('');
 
-            welcomeGrid.querySelectorAll('[data-ai-starter]').forEach((button) => {
+            welcomeGrid.querySelectorAll('[data-ai-starter-idx]').forEach((button) => {
                 button.addEventListener('click', () => {
-                    const starter = String(button.getAttribute('data-ai-starter') || '').trim();
+                    const idx = Number(button.getAttribute('data-ai-starter-idx'));
+                    const starter = starters[idx];
                     if (!starter || !askAiInput) return;
-                    askAiInput.value = starter;
+                    askAiInput.value = starter.prompt || starter.title;
                     autoResizeAiComposer(askAiInput, 200);
                     updateAskAiSubmitState();
                     askAiInput.focus();
@@ -1944,8 +1907,8 @@
 
             syncAiModeUi();
 
+            askAiOverlay.classList.remove('is-closing');
             askAiOverlay.classList.add('active');
-            document.body.style.overflow = 'hidden';
             await ensureAiSettingsLoaded();
             await loadAiConversationHistory();
             refreshAiAssistantUi();
@@ -1958,8 +1921,13 @@
         }
 
         function closeAskAiDialog() {
-            askAiOverlay.classList.remove('active');
-            document.body.style.overflow = '';
+            if (!askAiOverlay || askAiOverlay.classList.contains('is-closing')) return;
+            askAiOverlay.classList.remove('is-behind-reader');
+            askAiOverlay.classList.add('is-closing');
+            window.setTimeout(() => {
+                askAiOverlay.classList.remove('active', 'is-closing');
+                document.body.style.overflow = '';
+            }, 240);
         }
 
         function refreshAiAssistantUi() {
@@ -1996,6 +1964,7 @@
         function requestOpenCitationItem(options = {}) {
             const item = options.item || null;
             const itemId = String(options.itemId || item?.id || '').trim();
+            const navOrigin = options.navOrigin || null;
             if (!item && !itemId) return false;
 
             const event = new CustomEvent('everything-capture:open-item', {
@@ -2003,6 +1972,7 @@
                 detail: {
                     item,
                     itemId,
+                    navOrigin,
                 },
             });
             window.dispatchEvent(event);
@@ -2011,11 +1981,11 @@
             }
 
             if (item && typeof window.openModalByItem === 'function') {
-                window.openModalByItem(item, { pushToNavStack: true });
+                window.openModalByItem(item, { pushToNavStack: true, navOrigin });
                 return true;
             }
             if (itemId && typeof window.openModalById === 'function') {
-                window.openModalById(itemId, { pushToNavStack: true });
+                window.openModalById(itemId, { pushToNavStack: true, navOrigin });
                 return true;
             }
             return false;
@@ -2024,15 +1994,19 @@
         async function openAiCitation(libraryItemId) {
             const normalizedItemId = String(libraryItemId || '').trim();
             if (!normalizedItemId) return;
-            if (askAiOverlay?.classList.contains('active')) {
-                closeAskAiDialog();
+            const fromAskAi = askAiOverlay?.classList.contains('active') && !askAiOverlay.classList.contains('is-closing');
+            const navOrigin = fromAskAi ? 'askAi' : (currentOpenItemId ? 'readerAi' : null);
+            if (fromAskAi) {
+                // Hide Ask AI behind the reader without animation — it stays "active"
+                // so we can reveal it instantly when the user navigates back.
+                askAiOverlay.classList.add('is-behind-reader');
             }
 
             const getItem = typeof window.getItemById === 'function' ? window.getItemById : null;
 
             if (typeof getItem === 'function') {
                 const cachedItem = getItem(normalizedItemId);
-                if (cachedItem && requestOpenCitationItem({ item: cachedItem, itemId: normalizedItemId })) {
+                if (cachedItem && requestOpenCitationItem({ item: cachedItem, itemId: normalizedItemId, navOrigin })) {
                     return;
                 }
             }
@@ -2060,7 +2034,7 @@
                     if (typeof window.cacheItemById === 'function') {
                         window.cacheItemById(item);
                     }
-                    if (requestOpenCitationItem({ item, itemId: normalizedItemId })) {
+                    if (requestOpenCitationItem({ item, itemId: normalizedItemId, navOrigin })) {
                         return;
                     }
                     throw new Error('阅读弹窗未就绪');
@@ -2466,22 +2440,32 @@
 
         document.addEventListener('keydown', (event) => {
             const key = String(event.key || '').toLowerCase();
-            if (!(event.metaKey || event.ctrlKey) || key !== 'l') return;
+            const mod = event.metaKey || event.ctrlKey;
+            if (!mod) return;
 
-            event.preventDefault();
-
-            if (modalOverlay?.classList.contains('active') && currentOpenItemId) {
-                openReaderAiSidebarForCurrentItem();
+            if (key === 'l') {
+                event.preventDefault();
+                if (modalOverlay?.classList.contains('active') && currentOpenItemId) {
+                    openReaderAiSidebarForCurrentItem();
+                    return;
+                }
+                if (askAiOverlay?.classList.contains('active')) {
+                    askAiInput?.focus();
+                    return;
+                }
+                openAskAiModal({ itemId: null, resetConversation: true });
                 return;
             }
-
-            if (askAiOverlay?.classList.contains('active')) {
-                askAiInput?.focus();
-                return;
-            }
-
-            openAskAiModal({ itemId: null, resetConversation: true });
         });
+
+        // ⌘B: new conversation when AI overlay is open
+        window.addEventListener('keydown', (event) => {
+            if (!(event.metaKey || event.ctrlKey) || event.shiftKey || event.key.toLowerCase() !== 'b') return;
+            if (!askAiOverlay?.classList.contains('active') || askAiOverlay.classList.contains('is-closing')) return;
+            event.preventDefault();
+            event.stopPropagation();
+            startNewAiConversation();
+        }, true);
 
         setAiAssistantMode('chat');
         updateAskAiInputContextUi();

@@ -7,7 +7,6 @@ from typing import Callable
 
 from fastapi import APIRouter, Depends, HTTPException, status, BackgroundTasks, Request
 from sqlalchemy.orm import Session
-from auth import extract_session_token, is_shortcut_bearer_token
 from database import get_db, SessionLocal
 from models import Item, Media, Settings
 from schemas import IngestRequest, IngestResponse, ExtractRequest, ExtractResponse
@@ -257,12 +256,10 @@ async def _should_background_media_processing(
     if http_request is None:
         return False
 
-    raw_token = extract_session_token(http_request)
-    is_shortcut_request = is_shortcut_bearer_token(raw_token)
     user_agent = (http_request.headers.get("user-agent") or "").lower()
     is_mobile_request = "mobile" in user_agent or "iphone" in user_agent or "android" in user_agent
 
-    if not is_shortcut_request and not is_mobile_request:
+    if not is_mobile_request:
         return False
 
     video_candidates = [media for media in media_list if media.get("type") == "video" and media.get("url")]

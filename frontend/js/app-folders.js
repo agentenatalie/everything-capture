@@ -322,12 +322,6 @@
         }
 
         async function fetchFolders() {
-            if (!ensureAuthenticated({ showOverlay: false })) {
-                folderList.innerHTML = '<div class="folder-loading">正在连接本地文件夹...</div>';
-                folderMobileStrip.innerHTML = '';
-                updateMobileCaptureFolderSummary();
-                return;
-            }
             try {
                 const response = await fetch('/api/folders');
                 if (!response.ok) throw new Error('API Error');
@@ -350,7 +344,6 @@
                 renderFolderNavigation();
                 updateMobileCaptureFolderSummary();
             } catch (error) {
-                if (!authState.authenticated) return;
                 folderList.innerHTML = '<div class="folder-loading">文件夹加载失败</div>';
                 folderMobileStrip.innerHTML = '';
                 updateMobileCaptureFolderSummary();
@@ -455,7 +448,7 @@
             folderPickerOverlay.classList.add('active');
             requestAnimationFrame(() => folderCreateInput.focus());
 
-            if (!foldersData.length && authState.authenticated) {
+            if (!foldersData.length) {
                 folderPickerList.innerHTML = '<div class="folder-picker-empty">正在加载文件夹...</div>';
                 updateFolderPickerStatus();
                 await fetchFolders();

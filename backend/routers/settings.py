@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
-from app_settings import build_google_oauth_settings_payload, clean_optional_string, update_google_oauth_settings
+from app_settings import clean_optional_string
 from database import get_db
 from models import Settings
 from security import encrypt_secret, has_secret_value
@@ -40,7 +40,6 @@ def _build_settings_response(settings_obj: Optional[Settings], db: Session) -> S
     ai_knowledge_base_path = detect_knowledge_base_path()
     if not settings_obj:
         return SettingsResponse(
-            **build_google_oauth_settings_payload(db),
             ai_base_url=AI_DEFAULT_BASE_URL,
             ai_model=AI_DEFAULT_MODEL,
             ai_base_url_suggestion=AI_DEFAULT_BASE_URL,
@@ -78,7 +77,6 @@ def _build_settings_response(settings_obj: Optional[Settings], db: Session) -> S
         ai_missing_fields.append("ai_api_key")
 
     return SettingsResponse(
-        **build_google_oauth_settings_payload(db),
         notion_api_token=None,
         notion_api_token_saved=notion_api_token_saved,
         notion_database_id=notion_database_id,
@@ -133,17 +131,10 @@ def get_settings(db: Session = Depends(get_db)):
 def update_settings(request: SettingsUpdateRequest, db: Session = Depends(get_db)):
     user_id = get_current_user_id()
     settings_obj = db.query(Settings).filter(Settings.user_id == user_id).first()
-    
+
     if not settings_obj:
         settings_obj = Settings(user_id=user_id)
         db.add(settings_obj)
-
-    update_google_oauth_settings(
-        db,
-        client_id=request.google_oauth_client_id,
-        client_secret=request.google_oauth_client_secret,
-        redirect_uri=request.google_oauth_redirect_uri,
-    )
 
     if request.notion_api_token is not None:
         settings_obj.notion_api_token = encrypt_secret(request.notion_api_token)
@@ -180,5 +171,5 @@ def update_settings(request: SettingsUpdateRequest, db: Session = Depends(get_db
 
     db.commit()
     db.refresh(settings_obj)
-    
+
     return _build_settings_response(settings_obj, db)

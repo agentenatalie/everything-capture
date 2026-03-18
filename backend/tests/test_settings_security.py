@@ -7,9 +7,8 @@ from sqlalchemy.orm import sessionmaker
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
-from app_settings import build_google_oauth_settings_payload  # noqa: E402
 from database import Base  # noqa: E402
-from models import AppConfig, Settings  # noqa: E402
+from models import Settings  # noqa: E402
 from security import decrypt_secret, encrypt_secret  # noqa: E402
 from routers.connect import (  # noqa: E402
     ObsidianTestRequest,
@@ -49,15 +48,6 @@ class SettingsSecurityTests(unittest.TestCase):
             auto_sync_target="both",
         )
         with self.Session() as db:
-            db.add(
-                AppConfig(
-                    google_oauth_client_id="google-client-id",
-                    google_oauth_client_secret=encrypt_secret("google-secret"),
-                    google_oauth_redirect_uri="http://127.0.0.1:8000/api/auth/google/callback",
-                )
-            )
-            db.commit()
-
             response = _build_settings_response(settings, db)
 
         self.assertIsNone(response.notion_api_token)
@@ -66,9 +56,6 @@ class SettingsSecurityTests(unittest.TestCase):
         self.assertTrue(response.notion_client_secret_saved)
         self.assertIsNone(response.obsidian_api_key)
         self.assertTrue(response.obsidian_api_key_saved)
-        self.assertIsNone(response.google_oauth_client_secret)
-        self.assertTrue(response.google_oauth_client_secret_saved)
-        self.assertTrue(response.google_oauth_ready)
         self.assertTrue(response.notion_ready)
         self.assertTrue(response.obsidian_ready)
 
@@ -84,28 +71,6 @@ class SettingsSecurityTests(unittest.TestCase):
         self.assertIn("notion_api_token", response.notion_missing_fields)
         self.assertFalse(response.obsidian_ready)
         self.assertIn("obsidian_api_key", response.obsidian_missing_fields)
-        self.assertFalse(response.google_oauth_ready)
-        self.assertIn("google_oauth_client_id", response.google_oauth_missing_fields)
-        self.assertIn("google_oauth_client_secret", response.google_oauth_missing_fields)
-
-    def test_google_oauth_payload_hides_secret_and_reports_ready(self) -> None:
-        with self.Session() as db:
-            db.add(
-                AppConfig(
-                    google_oauth_client_id="google-client-id",
-                    google_oauth_client_secret=encrypt_secret("google-secret"),
-                    google_oauth_redirect_uri="http://127.0.0.1:8000/api/auth/google/callback",
-                )
-            )
-            db.commit()
-
-            payload = build_google_oauth_settings_payload(db)
-
-        self.assertEqual(payload["google_oauth_client_id"], "google-client-id")
-        self.assertIsNone(payload["google_oauth_client_secret"])
-        self.assertTrue(payload["google_oauth_client_secret_saved"])
-        self.assertTrue(payload["google_oauth_ready"])
-        self.assertEqual(payload["google_oauth_managed_by"], "settings")
 
     def test_obsidian_test_request_uses_saved_key_when_secret_is_omitted(self) -> None:
         request = ObsidianTestRequest(

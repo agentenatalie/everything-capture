@@ -32,13 +32,7 @@ class User(Base):
     id = Column(String, primary_key=True, index=True, default=generate_uuid)
     email = Column(String, nullable=False, unique=True, index=True)
     display_name = Column(String, nullable=False)
-    phone_e164 = Column(String, nullable=True, unique=True, index=True)
-    google_sub = Column(String, nullable=True, unique=True, index=True)
-    avatar_url = Column(String, nullable=True)
     is_default = Column(Boolean, nullable=False, default=False)
-    email_verified_at = Column(DateTime, nullable=True)
-    phone_verified_at = Column(DateTime, nullable=True)
-    last_login_at = Column(DateTime, nullable=True)
     created_at = Column(DateTime, default=datetime.datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.datetime.utcnow)
 
@@ -46,8 +40,6 @@ class User(Base):
     media = relationship("Media", back_populates="user")
     folders = relationship("Folder", back_populates="user")
     settings = relationship("Settings", back_populates="user")
-    sessions = relationship("AuthSession", back_populates="user")
-    verification_codes = relationship("AuthVerificationCode", back_populates="user")
     ai_conversations = relationship("AiConversation", back_populates="user")
     page_notes = relationship("ItemPageNote", back_populates="user")
 
@@ -208,46 +200,3 @@ class ItemPageNote(Base):
     ai_conversation = relationship("AiConversation", back_populates="page_notes", lazy="joined")
 
 
-class AppConfig(Base):
-    __tablename__ = "app_config"
-
-    id = Column(Integer, primary_key=True, index=True, autoincrement=True)
-    google_oauth_client_id = Column(String, nullable=True)
-    google_oauth_client_secret = Column(String, nullable=True)
-    google_oauth_redirect_uri = Column(String, nullable=True)
-
-
-class AuthSession(Base):
-    __tablename__ = "auth_sessions"
-
-    id = Column(String, primary_key=True, index=True, default=generate_uuid)
-    user_id = Column(String, ForeignKey("users.id"), nullable=False, index=True)
-    token_hash = Column(String, nullable=False, unique=True, index=True)
-    provider = Column(String, nullable=False)
-    created_at = Column(DateTime, default=datetime.datetime.utcnow)
-    updated_at = Column(DateTime, default=datetime.datetime.utcnow)
-    last_seen_at = Column(DateTime, nullable=True)
-    expires_at = Column(DateTime, nullable=False)
-    revoked_at = Column(DateTime, nullable=True)
-    user_agent = Column(String, nullable=True)
-    ip_address = Column(String, nullable=True)
-
-    user = relationship("User", back_populates="sessions", lazy="joined")
-
-
-class AuthVerificationCode(Base):
-    __tablename__ = "auth_verification_codes"
-
-    id = Column(String, primary_key=True, index=True, default=generate_uuid)
-    user_id = Column(String, ForeignKey("users.id"), nullable=True, index=True)
-    channel = Column(String, nullable=False, index=True)
-    target = Column(String, nullable=False, index=True)
-    code_salt = Column(String, nullable=False)
-    code_hash = Column(String, nullable=False)
-    purpose = Column(String, nullable=False, index=True, default="login")
-    created_at = Column(DateTime, default=datetime.datetime.utcnow)
-    expires_at = Column(DateTime, nullable=False)
-    consumed_at = Column(DateTime, nullable=True)
-    attempt_count = Column(Integer, nullable=False, default=0)
-
-    user = relationship("User", back_populates="verification_codes", lazy="joined")

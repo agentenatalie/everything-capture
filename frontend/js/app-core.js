@@ -67,10 +67,6 @@
         const settingsOverlay = document.getElementById('settingsOverlay');
         const closeSettingsModal = document.getElementById('closeSettingsModal');
         const btnSaveSettings = document.getElementById('saveSettingsBtn');
-        const googleOauthClientIdInput = document.getElementById('googleOauthClientId');
-        const googleOauthClientSecretInput = document.getElementById('googleOauthClientSecret');
-        const googleOauthRedirectUriInput = document.getElementById('googleOauthRedirectUri');
-        const googleOauthStatusText = document.getElementById('googleOauthStatusText');
         const notionStatusText = document.getElementById('notionStatusText');
         const obsidianStatusText = document.getElementById('obsidianStatusText');
         const obsidianFolderPathInput = document.getElementById('obsidianFolderPath');
@@ -134,7 +130,6 @@
         let scrollIdleTimer = null;
         let latestSettings = null;
         let hasLoadedAuthenticatedData = false;
-        let authBootstrapComplete = false;
         let mobileCaptureAutomationStarted = false;
         let mobileClipboardPollTimer = null;
         let lastAutoCapturedClipboardText = '';
@@ -190,41 +185,7 @@
         }
         window.fetch = apiFetch;
 
-        function createLocalAuthState(overrides = {}) {
-            return {
-                authenticated: true,
-                user: {
-                    id: 'local-default-user',
-                    display_name: '本地收录库',
-                    email: null,
-                    phone_e164: null,
-                    avatar_url: null,
-                },
-                providers: {
-                    google_enabled: false,
-                    email_enabled: false,
-                    phone_enabled: false,
-                    email_delivery_mode: 'disabled',
-                    phone_delivery_mode: 'disabled',
-                },
-                ...overrides,
-            };
-        }
-
-        let authState = createLocalAuthState();
-
-        function applyAuthState(sessionData = {}) {
-            authState = createLocalAuthState(sessionData || {});
-            const user = authState.user || {};
-            if (sidebarUserName) {
-                sidebarUserName.textContent = user.display_name || '本地收录库';
-            }
-            if (sidebarUserSubtitle) {
-                sidebarUserSubtitle.textContent = '本地模式';
-            }
-        }
-
-        function resetAuthenticatedAppState(message = '正在加载本地资料库...') {
+        function resetAppState(message = '正在加载本地资料库...') {
             hasLoadedAuthenticatedData = false;
             latestSettings = null;
             itemsData = [];
@@ -252,21 +213,7 @@
             folderMobileStrip.innerHTML = '';
         }
 
-        function ensureAuthenticated() {
-            return true;
-        }
-
-        async function refreshAuthSession() {
-            applyAuthState();
-            return authState;
-        }
-
-        async function provisionLocalSession() {
-            applyAuthState();
-            return authState;
-        }
-
-        async function bootstrapAuthenticatedData(options = {}) {
+        async function bootstrapAppData(options = {}) {
             const { force = false } = options;
             if (hasLoadedAuthenticatedData && !force) return;
             hasLoadedAuthenticatedData = true;
@@ -284,7 +231,7 @@
             loadSettings({ includeNotionDatabases: true });
         }
 
-        async function handleUrlCallbacks(currentSession = authState) {
+        async function handleUrlCallbacks() {
             const urlParams = new URLSearchParams(window.location.search);
             const notionAuth = urlParams.get('notion_auth');
             let handled = false;
@@ -312,24 +259,25 @@
             }
         }
 
-        async function bootstrapAuth() {
-            applyAuthState();
-            resetAuthenticatedAppState();
+        async function bootstrapApp() {
+            if (sidebarUserName) {
+                sidebarUserName.textContent = '本地收录库';
+            }
+            if (sidebarUserSubtitle) {
+                sidebarUserSubtitle.textContent = '本地模式';
+            }
+            resetAppState();
             updateSidebarState();
             updateCommandPaletteState();
             if (typeof startMobileCaptureAutomation === 'function' && window.matchMedia('(max-width: 860px)').matches) {
                 startMobileCaptureAutomation();
             }
 
-            try {
-                await bootstrapAuthenticatedData({ force: true });
-                if (typeof flushMobileCaptureQueue === 'function') {
-                    await flushMobileCaptureQueue({ silent: true });
-                }
-                await handleUrlCallbacks(authState);
-            } finally {
-                authBootstrapComplete = true;
+            await bootstrapAppData({ force: true });
+            if (typeof flushMobileCaptureQueue === 'function') {
+                await flushMobileCaptureQueue({ silent: true });
             }
+            await handleUrlCallbacks();
         }
 
         function markScrollActivity() {

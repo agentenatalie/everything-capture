@@ -1,5 +1,4 @@
         function openCommandPalette() {
-            if (!ensureAuthenticated({ mode: 'email' })) return;
             commandOverlay.classList.add('active');
             updateCommandPaletteState();
             requestAnimationFrame(() => {
@@ -14,7 +13,6 @@
         }
 
         async function importFromClipboard() {
-            if (!ensureAuthenticated({ mode: 'email' })) return;
             if (!navigator.clipboard?.readText) {
                 showToast('当前浏览器不支持读取剪贴板', 'error');
                 return;

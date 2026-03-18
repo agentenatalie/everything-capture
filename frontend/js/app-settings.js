@@ -5,32 +5,6 @@
             input.dataset.hasSavedSecret = hasSavedSecret ? 'true' : 'false';
         }
 
-        function setGoogleOAuthStatus(data) {
-            if (!googleOauthStatusText) return;
-            if (data?.google_oauth_ready) {
-                const managedBy = data.google_oauth_managed_by === 'env' ? '环境变量' : '设置页';
-                const redirectHint = data.google_oauth_redirect_uri
-                    ? ` Redirect URI：${data.google_oauth_redirect_uri}`
-                    : ' Redirect URI：使用当前服务默认回调地址。';
-                googleOauthStatusText.textContent = `状态：已配置，可在登录页使用 Google OAuth。来源：${managedBy}.${redirectHint}`;
-                googleOauthStatusText.style.color = '#1f7a4d';
-                return;
-            }
-
-            const missing = data?.google_oauth_missing_fields || [];
-            if (missing.length) {
-                const labels = [];
-                if (missing.includes('google_oauth_client_id')) labels.push('Client ID');
-                if (missing.includes('google_oauth_client_secret')) labels.push('Client Secret');
-                googleOauthStatusText.textContent = `状态：未完成配置，缺少 ${labels.join(' / ')}。`;
-                googleOauthStatusText.style.color = '#b7791f';
-                return;
-            }
-
-            googleOauthStatusText.textContent = '状态：未配置';
-            googleOauthStatusText.style.color = '#6b7280';
-        }
-
         const syncAllNotionBtn = document.getElementById('syncAllNotionBtn');
         const syncAllObsidianBtn = document.getElementById('syncAllObsidianBtn');
         const aiBaseUrlInput = document.getElementById('aiBaseUrl');
@@ -340,24 +314,11 @@
 
         async function loadSettings(options = {}) {
             const { includeNotionDatabases = false } = options;
-            if (!ensureAuthenticated({ showOverlay: false })) return null;
             try {
                 const res = await fetch('/api/settings');
                 if (res.ok) {
                     const data = await res.json();
                     latestSettings = data;
-                    if (googleOauthClientIdInput) {
-                        googleOauthClientIdInput.value = data.google_oauth_client_id || '';
-                    }
-                    applySecretInputState(
-                        googleOauthClientSecretInput,
-                        Boolean(data.google_oauth_client_secret_saved),
-                        'GOCSPX-...',
-                        '已保存，留空则保留当前 Client Secret'
-                    );
-                    if (googleOauthRedirectUriInput) {
-                        googleOauthRedirectUriInput.value = data.google_oauth_redirect_uri || '';
-                    }
                     applySecretInputState(
                         document.getElementById('notionApiToken'),
                         Boolean(data.notion_api_token_saved),
@@ -392,7 +353,6 @@
                     );
                     applyAiAgentPermissionInputs(data);
                     document.getElementById('autoSyncTarget').value = data.auto_sync_target || 'none';
-                    setGoogleOAuthStatus(data);
                     setNotionStatus(data);
                     setObsidianStatus(data);
                     setAiStatus(data);
@@ -456,17 +416,9 @@
                 ai_agent_can_sync_notion: document.getElementById('aiAgentCanSyncNotion').checked,
                 auto_sync_target: document.getElementById('autoSyncTarget').value
             };
-            if (googleOauthClientIdInput) {
-                payload.google_oauth_client_id = googleOauthClientIdInput.value.trim() || null;
-            }
-            if (googleOauthRedirectUriInput) {
-                payload.google_oauth_redirect_uri = googleOauthRedirectUriInput.value.trim() || null;
-            }
-            const googleOauthClientSecret = googleOauthClientSecretInput?.value.trim() || '';
             const notionClientSecret = document.getElementById('notionClientSecret').value.trim();
             const obsidianApiKey = document.getElementById('obsidianApiKey').value.trim();
             const aiApiKey = document.getElementById('aiApiKey').value.trim();
-            if (googleOauthClientSecret) payload.google_oauth_client_secret = googleOauthClientSecret;
             if (notionClientSecret) payload.notion_client_secret = notionClientSecret;
             if (obsidianApiKey) payload.obsidian_api_key = obsidianApiKey;
             if (aiApiKey) payload.ai_api_key = aiApiKey;
@@ -481,7 +433,6 @@
                 if (res.ok) {
                     const data = await res.json();
                     latestSettings = data;
-                    setGoogleOAuthStatus(data);
                     setNotionStatus(data);
                     setObsidianStatus(data);
                     setAiStatus(data);
@@ -492,7 +443,6 @@
                     if (typeof refreshAiAssistantUi === 'function') {
                         refreshAiAssistantUi();
                     }
-                    await refreshAuthSession({ silent: true });
                     showToast('设置已保存。', 'success');
                     closeSettingsPanel();
                 } else {

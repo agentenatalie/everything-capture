@@ -261,14 +261,6 @@
                 };
             }
 
-            if (!authState.authenticated) {
-                refreshMobileCaptureQueueFeedback(`已保存到本地待同步 ${mobileCaptureQueue.length} 条，连接电脑后会自动同步到本地资料库`, 'info');
-                return {
-                    deliveredCount: 0,
-                    pendingCount: mobileCaptureQueue.length,
-                };
-            }
-
             mobileCaptureQueueFlushInFlight = true;
             if (mobileSubmitBtn) {
                 mobileSubmitBtn.disabled = true;
@@ -878,7 +870,7 @@
                     continue;
                 }
                 if (block.type === 'image' && block.url) {
-                    htmlParts.push(`<div class="inline-img-wrap"><img src="${escapeAttribute(resolveMediaUrl(block.url))}" alt="" class="inline-img"></div>`);
+                    htmlParts.push(`<div class="inline-img-wrap"><img src="${escapeAttribute(resolveMediaUrl(block.url))}" alt="" class="inline-img" loading="lazy" decoding="async"></div>`);
                     continue;
                 }
                 if (block.type === 'video' && block.url) {
@@ -918,7 +910,7 @@
                 return renderPlainTextArticle(item);
             }
             if (!paragraphs.length) {
-                return imageUrls.map((url) => `<div class="inline-img-wrap"><img src="${escapeAttribute(resolveMediaUrl(url))}" alt="" class="inline-img"></div>`).join('');
+                return imageUrls.map((url) => `<div class="inline-img-wrap"><img src="${escapeAttribute(resolveMediaUrl(url))}" alt="" class="inline-img" loading="lazy" decoding="async"></div>`).join('');
             }
 
             const imageAnchors = new Map();
@@ -937,7 +929,7 @@
                 html += `<p class="content-para">${renderInlineMarkdown(paragraph).replace(/\n/g, '<br>')}</p>`;
                 const anchoredImages = imageAnchors.get(index) || [];
                 anchoredImages.forEach((url) => {
-                    html += `<div class="inline-img-wrap"><img src="${escapeAttribute(resolveMediaUrl(url))}" alt="" class="inline-img"></div>`;
+                    html += `<div class="inline-img-wrap"><img src="${escapeAttribute(resolveMediaUrl(url))}" alt="" class="inline-img" loading="lazy" decoding="async"></div>`;
                 });
             });
             return html;
@@ -949,6 +941,10 @@
             template.innerHTML = html;
 
             template.content.querySelectorAll('[src], [poster], [href], [srcset]').forEach((node) => {
+                if (node.tagName === 'IMG') {
+                    node.setAttribute('loading', 'lazy');
+                    node.setAttribute('decoding', 'async');
+                }
                 ['src', 'poster', 'href'].forEach((attr) => {
                     const value = node.getAttribute(attr);
                     if (value && value.startsWith('/static/')) {
@@ -1050,11 +1046,6 @@
                 clearCommandResults();
                 return;
             }
-            if (!ensureAuthenticated({ showOverlay: false })) {
-                clearCommandResults();
-                return;
-            }
-
             const requestId = ++commandRequestId;
             commandResults.innerHTML = '<div class="suggestion-empty">搜索中...</div>';
             try {
@@ -1087,7 +1078,6 @@
         }
 
         function applyCommandSearch() {
-            if (!ensureAuthenticated({ mode: 'email' })) return;
             const query = urlInput.value.trim();
             if (!query) {
                 showToast('请输入关键词', 'error');
@@ -1143,7 +1133,6 @@
         }
 
         async function extractURL(urlOverride = null) {
-            if (!ensureAuthenticated({ mode: 'email' })) return;
             const rawValue = urlOverride ?? urlInput.value.trim();
             const url = resolveCommandUrl(rawValue);
             if (!rawValue) { showToast('请输入链接', 'error'); return; }

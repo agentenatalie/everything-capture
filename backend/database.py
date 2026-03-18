@@ -1,4 +1,4 @@
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, event
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
 from paths import DB_PATH
@@ -15,8 +15,25 @@ from tenant import (
 SQLALCHEMY_DATABASE_URL = f"sqlite:///{DB_PATH}"
 
 engine = create_engine(
-    SQLALCHEMY_DATABASE_URL, connect_args={"check_same_thread": False}
+    SQLALCHEMY_DATABASE_URL,
+    connect_args={"check_same_thread": False},
+    pool_size=5,
+    pool_pre_ping=True,
 )
+
+
+@event.listens_for(engine, "connect")
+def _set_sqlite_pragmas(dbapi_connection, connection_record):
+    cursor = dbapi_connection.cursor()
+    cursor.execute("PRAGMA journal_mode=WAL")
+    cursor.execute("PRAGMA synchronous=NORMAL")
+    cursor.execute("PRAGMA cache_size=-32000")  # 32MB
+    cursor.execute("PRAGMA mmap_size=268435456")  # 256MB
+    cursor.execute("PRAGMA temp_store=MEMORY")
+    cursor.execute("PRAGMA busy_timeout=5000")
+    cursor.close()
+
+
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
 Base = declarative_base()
@@ -60,22 +77,6 @@ def _encrypt_existing_settings(connection) -> None:
         )
 
 
-def _encrypt_existing_app_config(connection) -> None:
-    app_config_columns = _table_columns(connection, "app_config")
-    if "google_oauth_client_secret" not in app_config_columns:
-        return
-
-    for row in connection.exec_driver_sql(
-        "SELECT id, google_oauth_client_secret FROM app_config"
-    ).mappings():
-        encrypted = encrypt_secret(row["google_oauth_client_secret"])
-        if not encrypted or encrypted == row["google_oauth_client_secret"]:
-            continue
-        connection.exec_driver_sql(
-            "UPDATE app_config SET google_oauth_client_secret = :secret WHERE id = :id",
-            {"id": row["id"], "secret": encrypted},
-        )
-
 
 def ensure_runtime_schema():
     with engine.begin() as connection:
@@ -97,21 +98,6 @@ def ensure_runtime_schema():
         )
         connection.exec_driver_sql("CREATE UNIQUE INDEX IF NOT EXISTS idx_users_email ON users(email)")
         connection.exec_driver_sql("CREATE INDEX IF NOT EXISTS idx_users_is_default ON users(is_default)")
-        user_columns = _table_columns(connection, "users")
-        if "phone_e164" not in user_columns:
-            connection.exec_driver_sql("ALTER TABLE users ADD COLUMN phone_e164 VARCHAR")
-        if "google_sub" not in user_columns:
-            connection.exec_driver_sql("ALTER TABLE users ADD COLUMN google_sub VARCHAR")
-        if "avatar_url" not in user_columns:
-            connection.exec_driver_sql("ALTER TABLE users ADD COLUMN avatar_url VARCHAR")
-        if "email_verified_at" not in user_columns:
-            connection.exec_driver_sql("ALTER TABLE users ADD COLUMN email_verified_at DATETIME")
-        if "phone_verified_at" not in user_columns:
-            connection.exec_driver_sql("ALTER TABLE users ADD COLUMN phone_verified_at DATETIME")
-        if "last_login_at" not in user_columns:
-            connection.exec_driver_sql("ALTER TABLE users ADD COLUMN last_login_at DATETIME")
-        connection.exec_driver_sql("CREATE UNIQUE INDEX IF NOT EXISTS idx_users_phone_e164 ON users(phone_e164)")
-        connection.exec_driver_sql("CREATE UNIQUE INDEX IF NOT EXISTS idx_users_google_sub ON users(google_sub)")
 
         connection.exec_driver_sql(
             """
@@ -456,68 +442,6 @@ def ensure_runtime_schema():
             "CREATE INDEX IF NOT EXISTS idx_item_page_notes_ai_conversation_id ON item_page_notes(ai_conversation_id)"
         )
 
-        connection.exec_driver_sql(
-            """
-            CREATE TABLE IF NOT EXISTS app_config (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                google_oauth_client_id VARCHAR,
-                google_oauth_client_secret VARCHAR,
-                google_oauth_redirect_uri VARCHAR
-            )
-            """
-        )
-        app_config_columns = _table_columns(connection, "app_config")
-        if "google_oauth_client_id" not in app_config_columns:
-            connection.exec_driver_sql("ALTER TABLE app_config ADD COLUMN google_oauth_client_id VARCHAR")
-        if "google_oauth_client_secret" not in app_config_columns:
-            connection.exec_driver_sql("ALTER TABLE app_config ADD COLUMN google_oauth_client_secret VARCHAR")
-        if "google_oauth_redirect_uri" not in app_config_columns:
-            connection.exec_driver_sql("ALTER TABLE app_config ADD COLUMN google_oauth_redirect_uri VARCHAR")
-        _encrypt_existing_app_config(connection)
-
-        connection.exec_driver_sql(
-            """
-            CREATE TABLE IF NOT EXISTS auth_sessions (
-                id VARCHAR PRIMARY KEY,
-                user_id VARCHAR NOT NULL REFERENCES users(id),
-                token_hash VARCHAR NOT NULL UNIQUE,
-                provider VARCHAR NOT NULL,
-                created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-                updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-                last_seen_at DATETIME,
-                expires_at DATETIME NOT NULL,
-                revoked_at DATETIME,
-                user_agent VARCHAR,
-                ip_address VARCHAR
-            )
-            """
-        )
-        connection.exec_driver_sql("CREATE UNIQUE INDEX IF NOT EXISTS idx_auth_sessions_token_hash ON auth_sessions(token_hash)")
-        connection.exec_driver_sql("CREATE INDEX IF NOT EXISTS idx_auth_sessions_user_id ON auth_sessions(user_id)")
-        connection.exec_driver_sql("CREATE INDEX IF NOT EXISTS idx_auth_sessions_expires_at ON auth_sessions(expires_at)")
-
-        connection.exec_driver_sql(
-            """
-            CREATE TABLE IF NOT EXISTS auth_verification_codes (
-                id VARCHAR PRIMARY KEY,
-                user_id VARCHAR REFERENCES users(id),
-                channel VARCHAR NOT NULL,
-                target VARCHAR NOT NULL,
-                code_salt VARCHAR NOT NULL,
-                code_hash VARCHAR NOT NULL,
-                purpose VARCHAR NOT NULL DEFAULT 'login',
-                created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-                expires_at DATETIME NOT NULL,
-                consumed_at DATETIME,
-                attempt_count INTEGER NOT NULL DEFAULT 0
-            )
-            """
-        )
-        connection.exec_driver_sql("CREATE INDEX IF NOT EXISTS idx_auth_codes_user_id ON auth_verification_codes(user_id)")
-        connection.exec_driver_sql("CREATE INDEX IF NOT EXISTS idx_auth_codes_target ON auth_verification_codes(target)")
-        connection.exec_driver_sql("CREATE INDEX IF NOT EXISTS idx_auth_codes_channel ON auth_verification_codes(channel)")
-        connection.exec_driver_sql("CREATE INDEX IF NOT EXISTS idx_auth_codes_purpose ON auth_verification_codes(purpose)")
-        connection.exec_driver_sql("CREATE INDEX IF NOT EXISTS idx_auth_codes_expires_at ON auth_verification_codes(expires_at)")
 
 
 def init_search_index():

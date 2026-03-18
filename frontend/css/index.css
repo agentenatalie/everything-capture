@@ -1814,6 +1814,8 @@
                 opacity 0.24s ease;
             overflow: hidden;
             height: min(85vh, 920px);
+            will-change: transform, opacity;
+            contain: layout style;
         }
 
         .modal.is-fullscreen {
@@ -2059,6 +2061,7 @@
             flex: 1;
             min-height: 0;
             background: #ffffff;
+            contain: content;
         }
 
         .modal-footer {
@@ -2895,6 +2898,7 @@
             z-index: 30;
             overflow: visible;
             transition: width var(--sidebar-transition), flex-basis var(--sidebar-transition);
+            will-change: width, flex-basis;
         }
 
         body.sidebar-collapsed .folder-sidebar {
@@ -2922,6 +2926,7 @@
             gap: 16px;
             border-bottom: none;
             overflow: hidden;
+            transition: padding var(--sidebar-transition);
         }
 
         .folder-panel-title {
@@ -2930,6 +2935,8 @@
             letter-spacing: 0.05em;
             text-transform: uppercase;
             color: #a0a5aa;
+            opacity: 1;
+            transition: opacity 0.2s ease;
         }
 
         .folder-panel-actions {
@@ -2948,6 +2955,8 @@
             font-size: 14px;
             font-weight: 500;
             box-shadow: none;
+            opacity: 1;
+            transition: opacity 0.2s ease;
         }
 
         .folder-create-btn:hover {
@@ -2999,10 +3008,14 @@
             border-radius: 6px;
             padding: 8px 12px;
             color: #71767a;
+            transition: padding var(--sidebar-transition);
         }
 
         .folder-search input {
             font-size: 14px;
+            opacity: 1;
+            max-width: 200px;
+            transition: opacity 0.22s ease 0.08s, max-width 0.22s ease 0.08s, padding 0.22s ease 0.08s;
         }
 
         body.sidebar-collapsed .folder-panel-header {
@@ -3011,7 +3024,12 @@
 
         body.sidebar-collapsed .folder-panel-title,
         body.sidebar-collapsed .folder-create-btn {
-            display: none;
+            opacity: 0;
+            visibility: hidden;
+            max-width: 0;
+            overflow: hidden;
+            pointer-events: none;
+            transition: opacity 0.18s ease, visibility 0s 0.18s, max-width 0s 0.18s;
         }
 
 
@@ -3021,12 +3039,18 @@
         }
 
         body.sidebar-collapsed .folder-search input {
-            display: none;
+            opacity: 0;
+            max-width: 0;
+            padding-left: 0;
+            padding-right: 0;
+            overflow: hidden;
+            transition: opacity 0.18s ease, max-width 0s 0.18s, padding 0s 0.18s;
         }
 
         .folder-list {
             padding: 0 12px 16px;
             gap: 0;
+            transition: padding var(--sidebar-transition);
         }
 
         body.sidebar-collapsed .folder-list {
@@ -3041,6 +3065,7 @@
             display: flex;
             align-items: center;
             justify-content: center;
+            transition: font-size 0.2s ease, color 0.18s ease;
         }
 
         body.sidebar-collapsed .folder-loading::before,
@@ -3053,7 +3078,8 @@
         }
 
         .folder-section-label {
-            transition: opacity 0.18s ease;
+            transition: opacity 0.2s ease, height 0.25s ease, margin 0.25s ease, padding 0.25s ease;
+            overflow: hidden;
         }
 
         body.sidebar-collapsed .folder-section-label {
@@ -3071,6 +3097,7 @@
             border-radius: 6px;
             border: none;
             color: #2a2c2e;
+            transition: padding var(--sidebar-transition);
         }
 
         .folder-item:hover,
@@ -3107,15 +3134,25 @@
         .folder-item-name {
             font-size: 14px;
             font-weight: 500;
+            white-space: nowrap;
+            overflow: hidden;
+            opacity: 1;
+            transition: opacity 0.22s ease 0.08s;
         }
 
         .folder-item-count {
             color: #8b94a6;
             font-size: 12px;
+            white-space: nowrap;
+            overflow: hidden;
+            opacity: 1;
+            transition: opacity 0.22s ease 0.08s;
         }
 
         .folder-item-menu {
             color: #a0a5aa;
+            opacity: 1;
+            transition: opacity 0.22s ease 0.08s;
         }
 
         body.sidebar-collapsed .folder-item {
@@ -3126,7 +3163,12 @@
         body.sidebar-collapsed .folder-item-name,
         body.sidebar-collapsed .folder-item-count,
         body.sidebar-collapsed .folder-item-menu {
-            display: none;
+            opacity: 0;
+            max-width: 0;
+            overflow: hidden;
+            visibility: hidden;
+            pointer-events: none;
+            transition: opacity 0.18s ease, visibility 0s 0.18s, max-width 0s 0.18s;
         }
 
         .sidebar-user {
@@ -3136,6 +3178,7 @@
             align-items: center;
             justify-content: space-between;
             gap: 12px;
+            transition: padding var(--sidebar-transition), gap var(--sidebar-transition);
         }
 
         body.sidebar-collapsed .sidebar-user {
@@ -3146,6 +3189,9 @@
         .sidebar-user-copy {
             min-width: 0;
             flex: 1;
+            overflow: hidden;
+            opacity: 1;
+            transition: opacity 0.22s ease 0.08s;
         }
 
         .sidebar-user-meta {
@@ -3154,6 +3200,9 @@
             align-items: flex-start;
             gap: 2px;
             min-width: 0;
+            overflow: hidden;
+            opacity: 1;
+            transition: opacity 0.22s ease 0.08s;
         }
 
         .sidebar-user-actions {
@@ -3161,6 +3210,7 @@
             align-items: center;
             justify-content: center;
             margin-left: auto;
+            transition: margin var(--sidebar-transition);
         }
 
         .sidebar-user-actions button {
@@ -3181,7 +3231,11 @@
 
         body.sidebar-collapsed .sidebar-user-copy,
         body.sidebar-collapsed .sidebar-user-meta {
-            display: none;
+            opacity: 0;
+            max-width: 0;
+            visibility: hidden;
+            pointer-events: none;
+            transition: opacity 0.18s ease, visibility 0s 0.18s, max-width 0s 0.18s;
         }
 
         body.sidebar-collapsed .sidebar-user-actions {
@@ -4248,21 +4302,14 @@
 
         #askAiOverlay {
             position: fixed;
-            top: 0;
-            left: 0;
-            width: 100%;
-            height: 100%;
+            inset: 0;
             display: flex;
-            justify-content: center;
-            align-items: center;
             z-index: 200;
-            padding: 16px;
-            background: rgba(15, 23, 42, 0.22);
-            backdrop-filter: blur(16px);
-            -webkit-backdrop-filter: blur(16px);
+            padding: 0;
+            background: #ffffff;
             opacity: 0;
             pointer-events: none;
-            transition: opacity 0.2s ease;
+            transition: opacity 0.28s cubic-bezier(0.2, 0, 0, 1);
         }
 
         #askAiOverlay.active {
@@ -4270,29 +4317,55 @@
             pointer-events: auto;
         }
 
+        #askAiOverlay.is-closing {
+            opacity: 0;
+            pointer-events: none;
+            transition: opacity 0.22s cubic-bezier(0.4, 0, 1, 1);
+        }
+
+        #askAiOverlay.is-behind-reader {
+            opacity: 0;
+            pointer-events: none;
+            transition: opacity 0.22s cubic-bezier(0.4, 0, 1, 1);
+        }
+
+        #askAiOverlay.is-behind-reader .ai-shell {
+            transform: scale(0.97);
+            opacity: 0;
+            transition:
+                transform 0.22s cubic-bezier(0.4, 0, 1, 1),
+                opacity 0.18s ease;
+        }
+
         #askAiOverlay .ai-shell {
             display: flex;
             flex-direction: row;
             align-items: stretch;
-            width: min(1120px, calc(100vw - 32px));
-            max-width: calc(100vw - 32px);
-            max-height: min(92vh, 880px);
-            height: min(92vh, 880px);
+            width: 100%;
+            height: 100%;
             min-height: 0;
-            margin: auto;
-            border-radius: 22px;
-            border: 1px solid rgba(15, 23, 42, 0.08);
+            border-radius: 0;
+            border: none;
             background: #ffffff;
-            box-shadow:
-                0 0 0 1px rgba(255, 255, 255, 0.54) inset,
-                0 28px 84px -34px rgba(15, 23, 42, 0.42);
             overflow: hidden;
-            transform: translateY(12px) scale(0.99);
-            transition: transform 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+            transform: translateY(10px);
+            opacity: 0;
+            transition:
+                transform 0.32s cubic-bezier(0.2, 0, 0, 1),
+                opacity 0.24s ease;
         }
 
         #askAiOverlay.active .ai-shell {
             transform: translateY(0) scale(1);
+            opacity: 1;
+        }
+
+        #askAiOverlay.is-closing .ai-shell {
+            transform: translateY(8px);
+            opacity: 0;
+            transition:
+                transform 0.22s cubic-bezier(0.4, 0, 1, 1),
+                opacity 0.18s ease;
         }
 
         /* 侧边栏 */
@@ -4541,8 +4614,8 @@
             flex-direction: column;
             min-width: 0;
             min-height: 0;
-            background: linear-gradient(180deg, #ffffff 0%, #fbfbfa 100%);
-            border-radius: 0 22px 22px 0;
+            background: #ffffff;
+            border-radius: 0;
             overflow: hidden;
         }
 
@@ -5221,19 +5294,12 @@
 
         /* 响应式 */
         @media (max-width: 900px) {
-            #askAiOverlay .ai-shell {
-                width: calc(100vw - 24px);
-                max-height: calc(100dvh - 24px);
-                height: auto;
-                border-radius: 14px;
-            }
-
             .ai-main {
-                border-radius: 0 18px 18px 0;
+                border-radius: 0;
             }
 
             .ai-topbar {
-                border-radius: 0 18px 0 0;
+                border-radius: 0;
             }
 
             .ai-welcome {
@@ -5256,14 +5322,7 @@
 
         @media (max-width: 768px) {
             #askAiOverlay {
-                padding: 8px;
-            }
-
-            #askAiOverlay .ai-shell {
-                width: calc(100vw - 16px);
-                max-height: calc(100dvh - 16px);
-                height: auto;
-                border-radius: 18px;
+                padding: 0;
             }
 
             .ai-sidebar {
@@ -5394,48 +5453,50 @@
             align-items: center;
             gap: 4px;
             padding: 0;
-            font-size: 13px;
+            font-size: 15px;
             font-weight: 400;
-            color: #94a3b8;
+            color: #8b9099;
             cursor: pointer;
             user-select: none;
             list-style: none;
         }
         .ai-thinking-summary::-webkit-details-marker { display: none; }
         .ai-thinking-summary::before {
-            content: '▸';
+            content: '●';
             display: inline-block;
-            font-size: 11px;
+            font-size: 5px;
             transition: transform 0.15s ease;
-        }
-        .ai-thinking-toggle[open] > .ai-thinking-summary::before {
-            transform: rotate(90deg);
         }
         .ai-thinking-summary:hover { color: #64748b; }
         .ai-thinking-status {
-            font-size: 12px;
-            color: #b0b8c4;
-            animation: ai-thinking-pulse 1.5s ease-in-out infinite;
-        }
-        @keyframes ai-thinking-pulse {
-            0%, 100% { opacity: 1; }
-            50% { opacity: 0.5; }
+            font-size: 11px;
+            color: #c0c8d4;
         }
         .ai-thinking-content {
             margin-top: 6px;
-            font-size: 13px;
-            line-height: 1.6;
-            color: #94a3b8;
-            max-height: 320px;
-            overflow-y: auto;
+            font-size: 15px;
+            line-height: 1.5;
+            color: #8b9099;
+            overflow-y: visible;
         }
-        .ai-thinking-content p { margin: 0 0 0.5em; }
+        .ai-thinking-content p { margin: 0 0 0.3em; }
         .ai-thinking-content p:last-child { margin-bottom: 0; }
+        .ai-thinking-content.ai-markdown,
+        .ai-thinking-content.ai-markdown p,
+        .ai-thinking-content.ai-markdown li,
+        .ai-thinking-content.ai-markdown code,
+        .ai-thinking-content.ai-markdown a,
+        .ai-thinking-content.ai-markdown h1,
+        .ai-thinking-content.ai-markdown h2,
+        .ai-thinking-content.ai-markdown h3 {
+            font-size: 15px;
+            color: #8b9099;
+        }
         .is-compact .ai-thinking-toggle { margin-bottom: 6px; }
-        .is-compact .ai-thinking-summary { font-size: 12px; }
+        .is-compact .ai-thinking-summary { font-size: 11px; color: #c0c8d4; }
         .is-compact .ai-thinking-content {
-            font-size: 12px;
-            max-height: 200px;
+            font-size: 11px;
+            color: #c0c8d4;
         }
 
         /* Reader AI Panel (in card modal) */

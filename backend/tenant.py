@@ -8,11 +8,8 @@ DEFAULT_WORKSPACE_SLUG = "local"
 
 
 def get_current_user_id() -> str:
-    from auth import get_current_user_id as _get_current_user_id
-
-    return _get_current_user_id()
+    return DEFAULT_USER_ID
 
 
 def get_current_workspace_id() -> str:
-    # Transitional compatibility for the previous workspace-scoped slice.
     return DEFAULT_WORKSPACE_ID

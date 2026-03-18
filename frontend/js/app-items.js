@@ -15,6 +15,7 @@
         let readerChromeHidden = false;
         let readerLastScrollTop = 0;
         const readerNavStack = []; // stack of item IDs for back-navigation from citations
+        let readerNavOrigin = null; // 'askAi' | 'readerAi' | null — where the citation nav started
         let readerScrollTicking = false;
         let readerScrollIntent = 0;
         const READER_SIDEBAR_MIN_WIDTH = 360;
@@ -102,41 +103,23 @@
                 return;
             }
 
-            // Near the bottom — always show bars
-            if (currentScrollTop >= maxScrollTop - 24) {
-                readerScrollIntent = 0;
-                setReaderChromeHidden(false);
-                return;
-            }
-
             // Ignore tiny jitter
             if (Math.abs(delta) < 2) return;
 
-            if (readerChromeHidden) {
-                // Bars hidden: accumulate upward scroll to reveal
-                if (delta < 0) {
-                    readerScrollIntent += Math.abs(delta);
-                    if (readerScrollIntent >= 24) {
-                        readerScrollIntent = 0;
-                        setReaderChromeHidden(false);
-                    }
-                } else {
-                    // Small downward scroll while hidden — decay intent instead of resetting
-                    readerScrollIntent = Math.max(0, readerScrollIntent - delta);
-                }
-                return;
-            }
-
-            // Bars visible: accumulate downward scroll to hide
             if (delta > 0) {
+                // Scrolling down — hide bars quickly
                 readerScrollIntent += delta;
-                if (currentScrollTop > 80 && readerScrollIntent >= 36) {
+                if (currentScrollTop > 60 && readerScrollIntent >= 20) {
                     readerScrollIntent = 0;
                     setReaderChromeHidden(true);
                 }
             } else {
-                // Scrolling up while visible — decay instead of hard reset
-                readerScrollIntent = Math.max(0, readerScrollIntent - Math.abs(delta));
+                // Scrolling up — reveal bars
+                readerScrollIntent += Math.abs(delta);
+                if (readerScrollIntent >= 24) {
+                    readerScrollIntent = 0;
+                    setReaderChromeHidden(false);
+                }
             }
         }
 
@@ -732,10 +715,6 @@
 
         async function fetchItems() {
             const requestId = ++libraryRequestId;
-            if (!ensureAuthenticated({ showOverlay: false })) {
-                resetAuthenticatedAppState();
-                return;
-            }
             const controller = new AbortController();
             if (currentItemsRequestController) {
                 currentItemsRequestController.abort();
@@ -772,7 +751,6 @@
                 }
             } catch (error) {
                 if (error?.name === 'AbortError') return;
-                if (!authState.authenticated) return;
                 setStatsMessage('加载失败');
                 grid.className = 'grid';
                 grid.innerHTML = '<div class="empty-state">无法连接到后端 API</div>';
@@ -1164,7 +1142,6 @@
 
         function triggerRemoteSyncRefresh(options = {}) {
             const { force = false, itemIds = null } = options;
-            if (!authState.authenticated) return;
             if (document.visibilityState === 'hidden') return;
             if (remoteSyncRefreshInFlight) return;
 
@@ -1526,11 +1503,16 @@
             const keepNotePanel = Boolean(options.keepNotePanel);
             const preserveSidebarTab = Boolean(options.preserveSidebarTab);
             const pushToNavStack = Boolean(options.pushToNavStack);
+            const navOrigin = options.navOrigin || null; // 'askAi' | 'readerAi'
             const previousOpenItemId = currentOpenItemId;
 
             // If navigating from a citation and we already have an item open, push it to the stack
             if (pushToNavStack && previousOpenItemId && previousOpenItemId !== item.id) {
                 readerNavStack.push(previousOpenItemId);
+            }
+            // Record where this citation navigation started (only on first push)
+            if (pushToNavStack && navOrigin && readerNavStack.length <= 1) {
+                readerNavOrigin = navOrigin;
             }
             currentOpenItemId = item.id;
             const isNewItem = previousOpenItemId !== currentOpenItemId;
@@ -1565,7 +1547,7 @@
                     html += `<div class="modal-media"><video controls preload="metadata" poster="${escapeAttribute(resolveMediaUrl(cover ? cover.url : ''))}"><source src="${escapeAttribute(resolveMediaUrl(videos[0].url || ''))}" type="video/mp4"></video></div>`;
                 }
                 if (images.length > 0) {
-                    html += `<div class="modal-media modal-media--carousel${images.length > 1 ? ' is-multi' : ''}"><div class="media-gallery">${images.map((img) => `<img src="${escapeAttribute(resolveMediaUrl(img.url || ''))}" alt="">`).join('')}</div>${images.length > 1 ? '<div class="gallery-hint">← 左右滑动查看更多图片 →</div>' : ''}</div>`;
+                    html += `<div class="modal-media modal-media--carousel${images.length > 1 ? ' is-multi' : ''}"><div class="media-gallery">${images.map((img, i) => `<img src="${escapeAttribute(resolveMediaUrl(img.url || ''))}" alt=""${i > 0 ? ' loading="lazy" decoding="async"' : ' decoding="async"'}>`).join('')}</div>${images.length > 1 ? '<div class="gallery-hint">← 左右滑动查看更多图片 →</div>' : ''}</div>`;
                 }
                 const plainArticleHtml = typeof renderPlainTextArticle === 'function'
                     ? renderPlainTextArticle(item)
@@ -1589,10 +1571,16 @@
             // Set fullscreen BEFORE active so overlay bg is white from frame 1 (no dark flash)
             toggleReaderFullscreen(true);
             modalOverlay.classList.remove('is-closing');
-            modalOverlay.classList.add('active');
             document.body.style.overflow = 'hidden';
-            resetReaderChromeState(isNewItem);
-            openReaderSidebarPanel(preferredSidebarTab);
+            // Force the browser to finish layout for the injected content in this frame,
+            // then start the animation in the next frame so they don't compete.
+            // eslint-disable-next-line no-unused-expressions
+            modalOverlay.offsetHeight;
+            requestAnimationFrame(() => {
+                modalOverlay.classList.add('active');
+                resetReaderChromeState(isNewItem);
+                openReaderSidebarPanel(preferredSidebarTab);
+            });
         }
 
         async function syncItem(id, target) {
@@ -1693,6 +1681,20 @@
                 readerNavStack.length = 0;
             }
 
+            // Return to the originating UI if applicable
+            const origin = readerNavOrigin;
+            readerNavOrigin = null;
+            const returningToAskAi = origin === 'askAi';
+            if (returningToAskAi) {
+                // Reveal the Ask AI overlay that was hidden behind the reader — no animation
+                const askAiOverlay = document.getElementById('askAiOverlay');
+                if (askAiOverlay?.classList.contains('is-behind-reader')) {
+                    askAiOverlay.classList.remove('is-behind-reader');
+                } else if (typeof window.openAskAiModal === 'function') {
+                    window.openAskAiModal();
+                }
+            }
+
             const previousOpenItemId = currentOpenItemId;
             currentOpenItemId = null;
             noteSaveInFlight = false;
@@ -1704,12 +1706,16 @@
 
             const cleanup = () => {
                 modalOverlay.classList.remove('active', 'is-closing');
-                document.body.style.overflow = '';
+                // Keep overflow hidden when Ask AI is on top to avoid scrollbar-induced reflow
+                if (!returningToAskAi) {
+                    document.body.style.overflow = '';
+                }
                 toggleReaderFullscreen(false);
                 readerSidebarOpen = false;
                 readerSidebarTab = 'note';
                 readerLastScrollTop = 0;
                 readerNavStack.length = 0;
+                readerNavOrigin = null;
 
                 if (readerNotePanel) {
                     readerNotePanel.innerHTML = '';
@@ -1804,7 +1810,7 @@
 
         function closeTopmostPopupOnEscape() {
             const askAiOverlay = document.getElementById('askAiOverlay');
-            if (askAiOverlay?.classList.contains('active') && typeof closeAskAiDialog === 'function') {
+            if (askAiOverlay?.classList.contains('active') && !askAiOverlay.classList.contains('is-behind-reader') && typeof closeAskAiDialog === 'function') {
                 closeAskAiDialog();
                 return true;
             }
@@ -1850,7 +1856,7 @@
             const detail = event?.detail || {};
             const item = detail.item || null;
             const itemId = String(detail.itemId || item?.id || '').trim();
-            const options = { pushToNavStack: true };
+            const options = { pushToNavStack: true, navOrigin: detail.navOrigin || null };
             if (item) {
                 openModalByItem(item, options);
                 event.preventDefault();
@@ -1878,4 +1884,4 @@
         window.openModalById = openModalById;
         window.openModalByItem = openModalByItem;
 
-        bootstrapAuth();
+        bootstrapApp();

@@ -39,6 +39,7 @@ from services.ai_client import (
     stream_chat_completion,
 )
 from services.ai_defaults import (
+    AI_AGENT_DEFAULT_CAN_EXECUTE_COMMANDS,
     AI_AGENT_DEFAULT_CAN_MANAGE_FOLDERS,
     AI_AGENT_DEFAULT_CAN_PARSE_CONTENT,
     AI_AGENT_DEFAULT_CAN_SYNC_NOTION,
@@ -64,7 +65,7 @@ _NOTION_ID_RE = re.compile(r"([0-9a-fA-F]{32}|[0-9a-fA-F]{8}(?:-[0-9a-fA-F]{4}){
 _CITATION_INDEX_PATTERN = re.compile(r"\[(\d{1,3})\]")
 _CHAT_HISTORY_LIMIT = 10
 _SAVED_CHAT_HISTORY_LIMIT = 120
-_AGENT_TOOL_STEP_LIMIT = 6
+_AGENT_TOOL_STEP_LIMIT = 10
 
 
 def _clean_optional_string(value: object | None) -> str | None:
@@ -409,6 +410,7 @@ def _assistant_agent_system_prompt(agent_permissions: list[str]) -> str:
         "parse_content": "触发内容解析",
         "sync_obsidian": "触发同步到 Obsidian",
         "sync_notion": "触发同步到 Notion",
+        "execute_commands": "执行沙箱命令（克隆仓库、下载文件、打包等）",
     }
     readable_permissions = "、".join(permission_lines[key] for key in agent_permissions if key in permission_lines)
     if not readable_permissions:
@@ -433,6 +435,15 @@ def _assistant_agent_system_prompt(agent_permissions: list[str]) -> str:
         "例如用户问'申请实习用什么工具'，你应该额外搜索'简历''求职''resume''job application'等。\n"
         "3. 如果第一次搜索结果不够理想（分数低或明显不相关），务必用不同的关键词再搜索1-2次。\n"
         "4. 综合所有搜索结果后再给出最终回答。\n"
+        "\n"
+        "【重要：导出/打包/下载请求】\n"
+        "当用户要求'打包''导出''下载''整理成文档'内容时：\n"
+        "1. 必须使用 export_items_to_zip 工具，不要自己搜索后在回复里摘要。\n"
+        "2. 用户要求的是完整内容，不是摘要或开头。该工具会导出全部正文。\n"
+        "3. 用户要一个文件时，用 format='merged_md' 合并成单个 markdown。\n"
+        "4. 用户要分开的文件时，用 format='zip_individual' 打包成 zip。\n"
+        "5. 导出完成后，告诉用户下载链接，不要在回复中重复粘贴内容。\n"
+        "\n"
         f"当前可用权限：{readable_permissions}。"
     )
 
@@ -1187,6 +1198,10 @@ def _agent_permission_flags(settings: Settings | None) -> dict[str, bool]:
             getattr(settings, "ai_agent_can_sync_notion", None),
             AI_AGENT_DEFAULT_CAN_SYNC_NOTION,
         ),
+        "execute_commands": coerce_bool(
+            getattr(settings, "ai_agent_can_execute_commands", None),
+            AI_AGENT_DEFAULT_CAN_EXECUTE_COMMANDS,
+        ),
     }
 
 
@@ -1211,6 +1226,8 @@ def _agent_permissions(settings: Settings | None) -> list[str]:
         permissions.append("sync_obsidian")
     if flags["sync_notion"] and notion_ready:
         permissions.append("sync_notion")
+    if flags["execute_commands"]:
+        permissions.append("execute_commands")
     return permissions
 
 
@@ -1366,6 +1383,90 @@ def _build_agent_tools(agent_permissions: list[str]) -> list[dict[str, Any]]:
                             "item_id": {"type": "string"},
                         },
                         "required": ["item_id"],
+                        "additionalProperties": False,
+                    },
+                },
+            }
+        )
+    if "execute_commands" in agent_permissions:
+        tools.append(
+            {
+                "type": "function",
+                "function": {
+                    "name": "export_items_to_zip",
+                    "description": (
+                        "Export saved items' COMPLETE text content to downloadable files in one step. "
+                        "Filters by query AND/OR platform AND/OR content_type simultaneously. "
+                        "IMPORTANT: Always includes the COMPLETE text, never truncated or summarized. "
+                        "Use format='merged_md' to create a single consolidated markdown file. "
+                        "IMPORTANT: output_filename must describe the content (e.g. '量化视频汇总.md'), never use generic names like 'export.md'. "
+                        "When user asks for '打包/导出/下载/整理成文档', ALWAYS use this tool."
+                    ),
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "query": {"type": "string", "description": "Search query to find items (e.g. 'github', 'AI', '量化', '股票')"},
+                            "platform": {
+                                "type": "string",
+                                "description": "Filter by platform. Can combine with comma: 'douyin,xiaohongshu'. Values: github, xiaohongshu, douyin, wechat, generic, web",
+                            },
+                            "content_type": {
+                                "type": "string",
+                                "enum": ["video", "article", "all"],
+                                "description": "video: only douyin/xiaohongshu video content. article: only wechat/web articles. all: everything (default).",
+                            },
+                            "item_ids": {"type": "array", "items": {"type": "string"}, "description": "Specific item IDs to export"},
+                            "output_filename": {"type": "string", "description": "Output filename — MUST describe content, e.g. '量化视频汇总.md', 'GitHub项目合集.zip'. Never use generic 'export.md'."},
+                            "format": {
+                                "type": "string",
+                                "enum": ["merged_md", "merged_txt", "zip_individual"],
+                                "description": "merged_md: single markdown (default). merged_txt: single text. zip_individual: ZIP with separate files.",
+                            },
+                            "limit": {"type": "integer", "minimum": 1, "maximum": 100, "description": "Max items to export (default 50)"},
+                        },
+                        "additionalProperties": False,
+                    },
+                },
+            }
+        )
+        tools.append(
+            {
+                "type": "function",
+                "function": {
+                    "name": "execute_sandbox_command",
+                    "description": (
+                        "Execute commands in a sandboxed environment (exports/ dir and /tmp only). "
+                        "Actions: git_clone, download_file, zip_files, list_files, read_file, write_file, "
+                        "move_file, delete_file, run_command (whitelisted: git,curl,zip,python3,ls,find,etc), "
+                        "batch (run multiple operations in one call). "
+                        "IMPORTANT: Use 'batch' action with 'operations' array to run multiple commands at once "
+                        "instead of calling this tool multiple times — this is MUCH faster."
+                    ),
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "action": {
+                                "type": "string",
+                                "enum": [
+                                    "batch",
+                                    "git_clone", "download_file", "zip_files",
+                                    "list_files", "read_file", "write_file",
+                                    "move_file", "delete_file", "run_command",
+                                ],
+                            },
+                            "operations": {
+                                "type": "array",
+                                "description": "For batch action: array of operations, each with its own action and params. Max 20.",
+                                "items": {"type": "object"},
+                            },
+                            "url": {"type": "string", "description": "URL for git_clone or download_file"},
+                            "path": {"type": "string", "description": "Relative file path within sandbox"},
+                            "paths": {"type": "array", "items": {"type": "string"}, "description": "Multiple paths for zip_files"},
+                            "content": {"type": "string", "description": "File content for write_file"},
+                            "command": {"type": "string", "description": "Shell command for run_command"},
+                            "output_filename": {"type": "string", "description": "Output filename for zip/download/move"},
+                        },
+                        "required": ["action"],
                         "additionalProperties": False,
                     },
                 },
@@ -1637,8 +1738,269 @@ async def _execute_agent_tool(
             result = {"status": "error", "message": str(exc.detail)}
             return result, AiToolEventResponse(name=tool_name, status="failed", summary=f"Notion 同步失败：{exc.detail}"), [], []
 
+    if tool_name == "export_items_to_zip":
+        if "execute_commands" not in agent_permissions:
+            result = {"status": "error", "message": "Permission denied"}
+            return result, AiToolEventResponse(name=tool_name, status="failed", summary="没有开放命令执行权限"), [], []
+
+        import zipfile
+        from pathlib import Path
+        from paths import EXPORTS_DIR
+
+        query = _clean_optional_string(arguments.get("query"))
+        platform = _clean_optional_string(arguments.get("platform"))
+        content_type = _clean_optional_string(arguments.get("content_type")) or "all"
+        item_ids_raw = arguments.get("item_ids") or []
+        export_format = _clean_optional_string(arguments.get("format")) or "merged_md"
+        export_limit = max(1, min(int(arguments.get("limit") or 50), 100))
+
+        # Determine default output filename based on format
+        default_filenames = {"merged_md": "export.md", "merged_txt": "export.txt", "zip_individual": "export.zip"}
+        output_filename = _clean_optional_string(arguments.get("output_filename")) or default_filenames.get(export_format, "export.md")
+
+        try:
+            # Build base query
+            q = db.query(Item).filter(Item.user_id == user_id, Item.status == "ready")
+
+            if item_ids_raw:
+                q = q.filter(Item.id.in_(item_ids_raw))
+            else:
+                # --- Platform filter ---
+                if platform:
+                    platforms = [p.strip().lower() for p in platform.split(",") if p.strip()]
+                    platform_conditions = []
+                    for p in platforms:
+                        if p == "github":
+                            platform_conditions.append(Item.platform == "github")
+                            platform_conditions.append(Item.source_url.like("%github.com/%"))
+                        else:
+                            platform_conditions.append(Item.platform == p)
+                    if platform_conditions:
+                        q = q.filter(or_(*platform_conditions))
+
+                # --- Content type filter ---
+                if content_type == "video":
+                    q = q.filter(Item.platform.in_(["douyin", "xiaohongshu"]))
+                elif content_type == "article":
+                    q = q.filter(Item.platform.in_(["wechat", "generic", "web"]))
+
+                # --- Query/keyword filter (applied ON TOP of platform filter, not replacing it) ---
+                if query:
+                    from routers.items import rank_search_rows
+
+                    # Get candidate IDs from the already-filtered query
+                    filtered_ids_q = q.with_entities(Item.id).all()
+                    filtered_id_set = {row[0] for row in filtered_ids_q}
+
+                    if filtered_id_set:
+                        candidate_rows = (
+                            db.query(Item.id, Item.user_id, Item.title, Item.canonical_text, Item.source_url, Item.platform, Item.created_at)
+                            .filter(Item.user_id == user_id, Item.id.in_(filtered_id_set))
+                            .all()
+                        )
+                        ranked_ids = rank_search_rows(candidate_rows, query)[:export_limit]
+
+                        # Fallback: if compound query matches nothing, try splitting into sub-terms
+                        if not ranked_ids and len(query) > 2:
+                            # Split by whitespace/punctuation first
+                            sub_terms = [w.strip() for w in re.split(r'[\s,，、/\-_]+', query) if len(w.strip()) > 1]
+                            # If still one big term, use 2-char sliding window (works for Chinese)
+                            if len(sub_terms) <= 1:
+                                sub_terms = [query[i:i+2] for i in range(0, len(query) - 1)]
+                            for sub in sub_terms:
+                                sub_ids = rank_search_rows(candidate_rows, sub)[:export_limit]
+                                if sub_ids:
+                                    ranked_ids = sub_ids
+                                    break
+
+                        if ranked_ids:
+                            q = q.filter(Item.id.in_(ranked_ids))
+
+            items = q.order_by(Item.created_at.desc()).limit(export_limit).all()
+
+            if not items:
+                result = {"status": "ok", "message": "没有找到匹配的内容", "exported_count": 0}
+                return result, AiToolEventResponse(name=tool_name, summary="没有找到匹配的内容"), [], []
+
+            EXPORTS_DIR.mkdir(parents=True, exist_ok=True)
+            exported_titles: list[str] = []
+
+            def _build_item_full_text(item: Item, index: int, is_markdown: bool) -> str:
+                """Build COMPLETE text for one item — never truncated."""
+                parts: list[str] = []
+                title = item.title or "无标题"
+                if is_markdown:
+                    parts.append(f"# {index}. {title}\n")
+                    parts.append(f"- **来源**: {item.source_url or '未知'}")
+                    parts.append(f"- **平台**: {item.platform or '未知'}")
+                    parts.append(f"- **保存时间**: {item.created_at}")
+                    if _extract_item_folder_names(item):
+                        parts.append(f"- **文件夹**: {', '.join(_extract_item_folder_names(item))}")
+                    parts.append("")
+                    parts.append("---\n")
+                else:
+                    parts.append(f"{'='*80}")
+                    parts.append(f"[{index}] {title}")
+                    parts.append(f"来源: {item.source_url or '未知'}")
+                    parts.append(f"平台: {item.platform or '未知'}")
+                    parts.append(f"保存时间: {item.created_at}")
+                    parts.append(f"{'='*80}\n")
+
+                # FULL canonical_text — no truncation
+                if item.canonical_text:
+                    parts.append(item.canonical_text)
+
+                # FULL extracted_text (OCR, subtitles, etc.)
+                if item.extracted_text:
+                    separator = "\n\n## 提取文本\n" if is_markdown else "\n\n--- 提取文本 ---\n"
+                    parts.append(separator)
+                    parts.append(item.extracted_text)
+
+                # FULL OCR text
+                if item.ocr_text:
+                    separator = "\n\n## OCR 文本\n" if is_markdown else "\n\n--- OCR 文本 ---\n"
+                    parts.append(separator)
+                    parts.append(item.ocr_text)
+
+                # Frame texts (video subtitles/transcripts)
+                frame_texts = []
+                try:
+                    frame_texts = json.loads(item.frame_texts_json) if item.frame_texts_json else []
+                except (json.JSONDecodeError, TypeError):
+                    pass
+                if frame_texts:
+                    separator = "\n\n## 视频字幕/帧文本\n" if is_markdown else "\n\n--- 视频字幕/帧文本 ---\n"
+                    parts.append(separator)
+                    for ft in frame_texts:
+                        if isinstance(ft, dict):
+                            ts = ft.get("timestamp", "")
+                            txt = ft.get("text", "")
+                            parts.append(f"[{ts}] {txt}" if ts else txt)
+                        elif isinstance(ft, str):
+                            parts.append(ft)
+
+                # Page notes (user's content analysis / AI analysis)
+                if hasattr(item, "page_notes") and item.page_notes:
+                    for pn in item.page_notes:
+                        if pn.content and pn.content.strip():
+                            separator = f"\n\n## 内容分析: {pn.title}\n" if is_markdown else f"\n\n--- 内容分析: {pn.title} ---\n"
+                            parts.append(separator)
+                            parts.append(pn.content)
+
+                parts.append("\n")
+                return "\n".join(parts)
+
+            if export_format in ("merged_md", "merged_txt"):
+                is_md = export_format == "merged_md"
+                merged_parts: list[str] = []
+
+                for i, item in enumerate(items):
+                    merged_parts.append(_build_item_full_text(item, i + 1, is_md))
+                    exported_titles.append(item.title or item.id)
+
+                merged_content = "\n".join(merged_parts)
+                out_path = EXPORTS_DIR / output_filename
+                out_path.write_text(merged_content, encoding="utf-8")
+
+            else:  # zip_individual
+                if not output_filename.endswith(".zip"):
+                    output_filename += ".zip"
+                out_path = EXPORTS_DIR / output_filename
+                with zipfile.ZipFile(str(out_path), "w", zipfile.ZIP_DEFLATED) as zf:
+                    for i, item in enumerate(items):
+                        content = _build_item_full_text(item, i + 1, is_markdown=True)
+                        safe_title = re.sub(r'[\\/:*?"<>|]', '_', (item.title or f"item_{i}")[:80])
+                        filename = f"{i+1:02d}_{safe_title}.md"
+                        zf.writestr(filename, content)
+                        exported_titles.append(item.title or item.id)
+
+            download_url = f"/api/ai/exports/{output_filename}"
+            summary = f"已导出 {len(items)} 条完整内容到 {output_filename}"
+            result = {
+                "status": "ok",
+                "exported_count": len(items),
+                "exported_titles": exported_titles[:30],
+                "download_url": download_url,
+                "output": summary,
+            }
+            return result, AiToolEventResponse(name=tool_name, summary=summary, download_url=download_url), [], []
+        except Exception as exc:
+            logger.exception("Export items error")
+            result = {"status": "error", "message": str(exc)}
+            return result, AiToolEventResponse(name=tool_name, status="failed", summary=f"导出失败：{exc}"), [], []
+
+    if tool_name == "execute_sandbox_command":
+        if "execute_commands" not in agent_permissions:
+            result = {"status": "error", "message": "Permission denied"}
+            return result, AiToolEventResponse(name=tool_name, status="failed", summary="没有开放命令执行权限"), [], []
+
+        from services.sandbox_executor import execute_sandbox_action, SandboxError
+
+        action = _clean_optional_string(arguments.get("action")) or ""
+        try:
+            result = await execute_sandbox_action(action, arguments)
+            summary = f"已执行 {action}"
+            if result.get("files_created"):
+                summary += f"，创建了 {len(result['files_created'])} 个文件"
+            download_url = result.get("download_url")
+            return result, AiToolEventResponse(name=tool_name, summary=summary, download_url=download_url), [], []
+        except SandboxError as exc:
+            result = {"status": "error", "message": str(exc)}
+            return result, AiToolEventResponse(name=tool_name, status="failed", summary=f"命令执行失败：{exc}"), [], []
+        except Exception as exc:
+            logger.exception("Sandbox execution error")
+            result = {"status": "error", "message": str(exc)}
+            return result, AiToolEventResponse(name=tool_name, status="failed", summary=f"命令执行异常：{exc}"), [], []
+
     result = {"status": "error", "message": f"Unknown tool: {tool_name}"}
     return result, AiToolEventResponse(name=tool_name, status="failed", summary=f"未知工具：{tool_name}"), [], []
+
+
+_PLAN_AND_EXECUTE_SYSTEM_PROMPT = (
+    "你是一个工具调用规划器。分析用户请求，输出一个 JSON 数组，包含需要顺序执行的工具调用。\n"
+    "每个元素格式：{\"name\": \"工具名\", \"arguments\": {...}}\n"
+    "规则：\n"
+    "1. 尽可能用最少的工具调用完成任务。优先使用高级工具（如 export_items_to_zip）而不是多次低级调用。\n"
+    "2. 用户要求导出/打包/下载/整理内容时，直接用 export_items_to_zip，不要先搜索再导出。\n"
+    "3. 用户要求执行多个命令时，用 execute_sandbox_command 的 batch action。\n"
+    "4. 如果用户只是提问（不需要执行操作），返回空数组 []。\n"
+    "5. 只输出 JSON 数组，不要解释。\n"
+    "\n"
+    "【关键：正确拆分 query / content_type / platform 参数】\n"
+    "用户说的'视频'→ content_type='video'，不要放到 query 里。\n"
+    "用户说的'文章'→ content_type='article'。\n"
+    "用户说的'GitHub'→ platform='github'。\n"
+    "用户说的'抖音'→ platform='douyin'。\n"
+    "用户说的'小红书'→ platform='xiaohongshu'。\n"
+    "用户说的'微信'→ platform='wechat'。\n"
+    "query 只放主题关键词，不要混入内容类型或平台。\n"
+    "\n"
+    "【关键：output_filename 必须根据任务内容命名】\n"
+    "不要用 export.md / export.zip 这种通用名，要根据用户请求的主题命名文件。\n"
+    "命名规则：用简短中文或英文描述内容，用下划线连接，加上正确后缀。\n"
+    "\n"
+    "示例：\n"
+    "用户：'整理所有量化视频的内容写成md'\n"
+    "→ [{\"name\":\"export_items_to_zip\",\"arguments\":{\"query\":\"量化\",\"content_type\":\"video\",\"format\":\"merged_md\",\"output_filename\":\"量化视频内容汇总.md\"}}]\n"
+    "\n"
+    "用户：'下载所有GitHub的内容打包成zip'\n"
+    "→ [{\"name\":\"export_items_to_zip\",\"arguments\":{\"platform\":\"github\",\"format\":\"zip_individual\",\"output_filename\":\"GitHub项目内容.zip\"}}]\n"
+    "\n"
+    "用户：'把所有股票相关的抖音视频导出'\n"
+    "→ [{\"name\":\"export_items_to_zip\",\"arguments\":{\"query\":\"股票\",\"platform\":\"douyin\",\"format\":\"merged_md\",\"output_filename\":\"抖音股票视频合集.md\"}}]\n"
+)
+
+
+def _is_action_request(user_message: str) -> bool:
+    """Heuristic: does the user's last message look like an action/execution request?"""
+    action_keywords = [
+        "打包", "导出", "下载", "整理", "创建", "生成", "写成", "合并",
+        "克隆", "clone", "zip", "export",
+        "同步", "移到", "归类", "分类到",
+        "执行", "运行",
+    ]
+    lower = user_message.lower()
+    return any(kw in lower for kw in action_keywords)
 
 
 async def _run_agent_assistant(
@@ -1656,6 +2018,223 @@ async def _run_agent_assistant(
     snapshot = _build_items_only_snapshot(db, user_id)
     current_page_notes = _get_item_page_notes(db, user_id, current_item.id) if current_item else []
     current_item_context = _build_current_item_context(current_item, current_item_note, current_page_notes) if current_item is not None else ""
+
+    # Detect if user is requesting an action vs asking a question
+    last_user_msg = ""
+    for msg in reversed(conversation):
+        if msg.get("role") == "user":
+            last_user_msg = msg.get("content", "")
+            break
+
+    use_plan_mode = (
+        _is_action_request(last_user_msg)
+        and "execute_commands" in agent_permissions
+    )
+
+    if use_plan_mode:
+        return await _run_plan_and_execute(
+            db=db,
+            user_id=user_id,
+            ai_config=ai_config,
+            settings=settings,
+            conversation=conversation,
+            tools=tools,
+            agent_permissions=agent_permissions,
+            snapshot=snapshot,
+            current_item=current_item,
+            current_item_note=current_item_note,
+            current_item_context=current_item_context,
+        )
+
+    return await _run_agent_loop(
+        db=db,
+        user_id=user_id,
+        ai_config=ai_config,
+        settings=settings,
+        conversation=conversation,
+        tools=tools,
+        agent_permissions=agent_permissions,
+        snapshot=snapshot,
+        current_item=current_item,
+        current_item_note=current_item_note,
+        current_item_context=current_item_context,
+    )
+
+
+async def _run_plan_and_execute(
+    *,
+    db: Session,
+    user_id: str,
+    ai_config: dict[str, str],
+    settings: Settings | None,
+    conversation: list[dict[str, str]],
+    tools: list[dict[str, Any]],
+    agent_permissions: list[str],
+    snapshot: KnowledgeBaseSnapshot,
+    current_item: Item | None = None,
+    current_item_note: KnowledgeBaseNote | None = None,
+    current_item_context: str = "",
+) -> AiAssistantResponse:
+    """Plan-then-execute: 2 LLM calls instead of N.
+
+    Phase 1: LLM analyzes request → outputs a JSON plan of tool calls
+    Phase 2: Execute all planned tool calls
+    Phase 3: LLM summarizes results with download links
+    """
+    tool_events: list[AiToolEventResponse] = []
+    collected_notes: list[tuple[KnowledgeBaseNote, float]] = []
+    if current_item_note is not None:
+        collected_notes.append((current_item_note, 1.0))
+    updated_items: list[dict[str, Any]] = []
+    download_urls: list[str] = []
+
+    # --- Phase 1: Planning ---
+    tool_descriptions = "\n".join(
+        f"- {t['function']['name']}: {t['function']['description']}"
+        for t in tools
+    )
+    plan_system = _PLAN_AND_EXECUTE_SYSTEM_PROMPT + f"\n可用工具：\n{tool_descriptions}"
+    if current_item_context:
+        plan_system += (
+            f"\n\n当前文章上下文（item_id 可直接使用）：\n{current_item_context}"
+        )
+
+    plan_messages: list[dict[str, Any]] = [
+        {"role": "system", "content": plan_system},
+        *conversation,
+    ]
+
+    try:
+        plan_text = await chat_completion(
+            api_key=ai_config["api_key"],
+            base_url=ai_config["base_url"],
+            model=ai_config["model"],
+            messages=plan_messages,
+            temperature=0.1,
+        )
+    except AiClientError as exc:
+        raise _ai_request_failed(exc) from exc
+
+    # Parse plan
+    planned_calls: list[dict[str, Any]] = []
+    try:
+        stripped = _JSON_FENCE_PATTERN.sub("", (plan_text or "").strip())
+        start = stripped.find("[")
+        end = stripped.rfind("]")
+        if start != -1 and end > start:
+            planned_calls = json.loads(stripped[start : end + 1])
+    except (json.JSONDecodeError, ValueError):
+        pass
+
+    # If no planned actions (question, not action), fall back to normal loop
+    if not planned_calls:
+        return await _run_agent_loop(
+            db=db,
+            user_id=user_id,
+            ai_config=ai_config,
+            settings=settings,
+            conversation=conversation,
+            tools=tools,
+            agent_permissions=agent_permissions,
+            snapshot=snapshot,
+            current_item=current_item,
+            current_item_note=current_item_note,
+            current_item_context=current_item_context,
+        )
+
+    # --- Phase 2: Execute all planned tools ---
+    execution_results: list[dict[str, Any]] = []
+    for call in planned_calls[:_AGENT_TOOL_STEP_LIMIT]:
+        tool_name = _clean_optional_string(call.get("name")) or ""
+        arguments = call.get("arguments") or {}
+
+        result, event, ranked_notes, changed_items = await _execute_agent_tool(
+            tool_name=tool_name,
+            arguments=arguments,
+            db=db,
+            user_id=user_id,
+            snapshot=snapshot,
+            agent_permissions=agent_permissions,
+            ai_config=ai_config,
+        )
+        tool_events.append(event)
+        _append_unique_ranked_notes(collected_notes, ranked_notes)
+        _append_unique_updated_items(updated_items, changed_items)
+        execution_results.append({"tool": tool_name, "result": result})
+
+        if event.download_url:
+            download_urls.append(event.download_url)
+
+    # --- Phase 3: Summarize with download links ---
+    results_text = json.dumps(execution_results, ensure_ascii=False, default=str)
+    download_hint = ""
+    if download_urls:
+        links = "\n".join(f"- {url}" for url in download_urls)
+        download_hint = f"\n\n以下文件已生成，请在回答中告知用户可以点击下载：\n{links}"
+
+    agent_system = _compose_system_message(
+        _assistant_agent_system_prompt(agent_permissions),
+        (
+            "下面是当前文章上下文。\n\n" + current_item_context
+        ) if current_item_context else "",
+    )
+    summary_messages: list[dict[str, Any]] = [
+        {"role": "system", "content": agent_system},
+        *conversation,
+        {
+            "role": "system",
+            "content": (
+                f"以下是工具执行结果，请基于结果给用户简洁的回答。"
+                f"不要重复粘贴完整内容，只需说明执行情况和提供下载链接。"
+                f"{download_hint}\n\n"
+                f"执行结果：{results_text[:3000]}"
+            ),
+        },
+    ]
+
+    try:
+        final_text = await chat_completion(
+            api_key=ai_config["api_key"],
+            base_url=ai_config["base_url"],
+            model=ai_config["model"],
+            messages=summary_messages,
+            temperature=0.2,
+        )
+    except AiClientError as exc:
+        raise _ai_request_failed(exc) from exc
+
+    return AiAssistantResponse(
+        mode="agent",
+        message=final_text.strip() or "已完成执行。",
+        citations=_serialize_citations(
+            db,
+            user_id,
+            _filter_ranked_notes_by_citation_markers(final_text, collected_notes),
+        ),
+        tool_events=tool_events,
+        knowledge_base_path=None,
+        note_count=snapshot.note_count,
+        insufficient_context=False,
+        agent_permissions=agent_permissions,
+        updated_items=updated_items,
+    )
+
+
+async def _run_agent_loop(
+    *,
+    db: Session,
+    user_id: str,
+    ai_config: dict[str, str],
+    settings: Settings | None,
+    conversation: list[dict[str, str]],
+    tools: list[dict[str, Any]],
+    agent_permissions: list[str],
+    snapshot: KnowledgeBaseSnapshot,
+    current_item: Item | None = None,
+    current_item_note: KnowledgeBaseNote | None = None,
+    current_item_context: str = "",
+) -> AiAssistantResponse:
+    """Original agent loop — used for questions and complex multi-step tasks."""
     system_message = _compose_system_message(
         _assistant_agent_system_prompt(agent_permissions),
         (
@@ -2411,3 +2990,20 @@ async def analyze_item(item_id: str, db: Session = Depends(get_db)):
         citations=_serialize_citations(db, user_id, deduped_citations),
         knowledge_base_path=None,
     )
+
+
+# ---------------------------------------------------------------------------
+# Exports download endpoint
+# ---------------------------------------------------------------------------
+
+@router.get("/exports/{file_path:path}")
+def download_export(file_path: str):
+    from fastapi.responses import FileResponse
+    from paths import EXPORTS_DIR
+
+    full_path = (EXPORTS_DIR / file_path).resolve()
+    if not str(full_path).startswith(str(EXPORTS_DIR.resolve())):
+        raise HTTPException(status_code=403, detail="Access denied")
+    if not full_path.exists() or not full_path.is_file():
+        raise HTTPException(status_code=404, detail="File not found")
+    return FileResponse(full_path, filename=full_path.name)

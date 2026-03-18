@@ -153,6 +153,7 @@ class Settings(Base):
     ai_agent_can_parse_content = Column(Boolean, nullable=False, default=True)
     ai_agent_can_sync_obsidian = Column(Boolean, nullable=False, default=False)
     ai_agent_can_sync_notion = Column(Boolean, nullable=False, default=False)
+    ai_agent_can_execute_commands = Column(Boolean, nullable=False, default=False)
     auto_sync_target = Column(String, default="none") # "none", "notion", "obsidian", "both"
 
     user = relationship("User", back_populates="settings", lazy="joined")

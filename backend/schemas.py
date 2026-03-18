@@ -107,6 +107,7 @@ class SettingsResponse(BaseModel):
     ai_agent_can_parse_content: bool = True
     ai_agent_can_sync_obsidian: bool = False
     ai_agent_can_sync_notion: bool = False
+    ai_agent_can_execute_commands: bool = False
     auto_sync_target: str = "none"
     notion_ready: bool = False
     notion_missing_fields: list[str] = Field(default_factory=list)
@@ -136,6 +137,7 @@ class SettingsUpdateRequest(BaseModel):
     ai_agent_can_parse_content: Optional[bool] = None
     ai_agent_can_sync_obsidian: Optional[bool] = None
     ai_agent_can_sync_notion: Optional[bool] = None
+    ai_agent_can_execute_commands: Optional[bool] = None
     auto_sync_target: Optional[str] = None
 
 
@@ -203,6 +205,7 @@ class AiToolEventResponse(BaseModel):
     name: str
     status: str = "completed"
     summary: str
+    download_url: Optional[str] = None
 
 
 class AiAssistantResponse(BaseModel):

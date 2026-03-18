@@ -28,12 +28,16 @@
             parse_item_content: '内容解析',
             sync_item_to_obsidian: '同步到 Obsidian',
             sync_item_to_notion: '同步到 Notion',
+            execute_sandbox_command: '沙箱命令执行',
+            export_items_to_zip: '导出内容打包',
         };
         const AI_MUTATING_TOOLS = new Set([
             'assign_item_folders',
             'parse_item_content',
             'sync_item_to_obsidian',
             'sync_item_to_notion',
+            'execute_sandbox_command',
+            'export_items_to_zip',
         ]);
         const READER_AI_SUGGESTIONS = [
             '结合正文和我的笔记，总结核心观点',
@@ -1002,6 +1006,9 @@
             if (latestSettings?.ai_agent_can_sync_notion && latestSettings?.notion_ready) {
                 permissions.push('sync_notion');
             }
+            if (latestSettings?.ai_agent_can_execute_commands) {
+                permissions.push('execute_commands');
+            }
             return permissions;
         }
 
@@ -1189,7 +1196,7 @@
                     ${toolEvents.map((event) => `
                         <div class="ai-tool-event${event.status === 'failed' ? ' is-failed' : ''}">
                             <div class="ai-tool-event-name">${escapeHtml(AI_TOOL_LABELS[event.name] || event.name || 'Agent')}</div>
-                            <div class="ai-tool-event-summary">${escapeHtml(event.summary || '')}</div>
+                            <div class="ai-tool-event-summary">${escapeHtml(event.summary || '')}${event.download_url ? ` <a href="${escapeHtml(event.download_url)}" download style="color:#3b82f6;text-decoration:underline;margin-left:6px;">下载文件</a>` : ''}</div>
                         </div>
                     `).join('')}
                 </div>

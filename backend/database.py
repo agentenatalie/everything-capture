@@ -314,6 +314,10 @@ def ensure_runtime_schema():
             connection.exec_driver_sql(
                 "ALTER TABLE settings ADD COLUMN ai_agent_can_sync_notion BOOLEAN NOT NULL DEFAULT 0"
             )
+        if "ai_agent_can_execute_commands" not in settings_columns:
+            connection.exec_driver_sql(
+                "ALTER TABLE settings ADD COLUMN ai_agent_can_execute_commands BOOLEAN NOT NULL DEFAULT 0"
+            )
         connection.exec_driver_sql(
             "UPDATE settings SET user_id = ? WHERE user_id IS NULL OR trim(user_id) = ''",
             (DEFAULT_USER_ID,),
@@ -333,6 +337,9 @@ def ensure_runtime_schema():
         )
         connection.exec_driver_sql(
             "UPDATE settings SET ai_agent_can_sync_notion = 0 WHERE ai_agent_can_sync_notion IS NULL"
+        )
+        connection.exec_driver_sql(
+            "UPDATE settings SET ai_agent_can_execute_commands = 0 WHERE ai_agent_can_execute_commands IS NULL"
         )
         connection.exec_driver_sql("DROP INDEX IF EXISTS idx_settings_workspace_id")
         connection.exec_driver_sql("CREATE UNIQUE INDEX IF NOT EXISTS idx_settings_user_id ON settings(user_id)")

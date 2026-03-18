@@ -5,6 +5,7 @@ from database import get_db
 from models import Settings
 from security import encrypt_secret, has_secret_value
 from services.ai_defaults import (
+    AI_AGENT_DEFAULT_CAN_EXECUTE_COMMANDS,
     AI_AGENT_DEFAULT_CAN_MANAGE_FOLDERS,
     AI_AGENT_DEFAULT_CAN_PARSE_CONTENT,
     AI_AGENT_DEFAULT_CAN_SYNC_NOTION,
@@ -48,6 +49,7 @@ def _build_settings_response(settings_obj: Optional[Settings], db: Session) -> S
             ai_agent_can_parse_content=AI_AGENT_DEFAULT_CAN_PARSE_CONTENT,
             ai_agent_can_sync_obsidian=AI_AGENT_DEFAULT_CAN_SYNC_OBSIDIAN,
             ai_agent_can_sync_notion=AI_AGENT_DEFAULT_CAN_SYNC_NOTION,
+            ai_agent_can_execute_commands=AI_AGENT_DEFAULT_CAN_EXECUTE_COMMANDS,
             ai_knowledge_base_path=ai_knowledge_base_path,
             ai_knowledge_base_available=bool(ai_knowledge_base_path),
         )
@@ -110,6 +112,10 @@ def _build_settings_response(settings_obj: Optional[Settings], db: Session) -> S
             settings_obj.ai_agent_can_sync_notion,
             AI_AGENT_DEFAULT_CAN_SYNC_NOTION,
         ),
+        ai_agent_can_execute_commands=_settings_bool(
+            settings_obj.ai_agent_can_execute_commands,
+            AI_AGENT_DEFAULT_CAN_EXECUTE_COMMANDS,
+        ),
         auto_sync_target=settings_obj.auto_sync_target or "none",
         notion_ready=len(notion_missing_fields) == 0,
         notion_missing_fields=notion_missing_fields,
@@ -166,6 +172,8 @@ def update_settings(request: SettingsUpdateRequest, db: Session = Depends(get_db
         settings_obj.ai_agent_can_sync_obsidian = request.ai_agent_can_sync_obsidian
     if request.ai_agent_can_sync_notion is not None:
         settings_obj.ai_agent_can_sync_notion = request.ai_agent_can_sync_notion
+    if request.ai_agent_can_execute_commands is not None:
+        settings_obj.ai_agent_can_execute_commands = request.ai_agent_can_execute_commands
     if request.auto_sync_target is not None:
         settings_obj.auto_sync_target = request.auto_sync_target
 

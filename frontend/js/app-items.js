@@ -1277,10 +1277,11 @@
         }
 
         /* ── Background refresh: poll processing items & detect new external captures ── */
-        let _bgRefreshTimer = null;
+        let _bgIntervalId = null;
         let _bgRefreshInFlight = false;
-        const BG_REFRESH_INTERVAL_MS = 3000;
-        const BG_REFRESH_IDLE_INTERVAL_MS = 8000;
+        const BG_REFRESH_FAST_MS = 2500;
+        const BG_REFRESH_SLOW_MS = 8000;
+        let _bgCurrentInterval = 0;
 
         function _getProcessingItemIds() {
             return itemsData
@@ -1288,31 +1289,55 @@
                 .map((item) => item.id);
         }
 
+        // Items created within the last 60s that have no media yet — likely still downloading
+        function _getIncompleteNewItemIds() {
+            const cutoff = Date.now() - 60000;
+            return itemsData
+                .filter((item) => {
+                    if (item.parse_status === 'processing') return false; // already tracked
+                    const createdAt = item.created_at ? new Date(item.created_at).getTime() : 0;
+                    if (createdAt < cutoff) return false;
+                    const hasMedia = Array.isArray(item.media) && item.media.length > 0;
+                    const hasContent = !!(item.canonical_text || item.extracted_text || item.canonical_html);
+                    return !hasMedia || !hasContent;
+                })
+                .map((item) => item.id);
+        }
+
+        function _getPollableItemIds() {
+            return [...new Set([..._getProcessingItemIds(), ..._getIncompleteNewItemIds()])];
+        }
+
         function startBackgroundRefresh() {
-            if (_bgRefreshTimer) return;
-            _scheduleNextRefresh();
+            const wantFast = _getPollableItemIds().length > 0;
+            const interval = wantFast ? BG_REFRESH_FAST_MS : BG_REFRESH_SLOW_MS;
+            if (_bgIntervalId && _bgCurrentInterval === interval) return;
+            if (_bgIntervalId) window.clearInterval(_bgIntervalId);
+            _bgCurrentInterval = interval;
+            _bgIntervalId = window.setInterval(_bgRefreshTick, interval);
+            console.log('[bg-refresh] started, interval=' + interval + 'ms');
         }
 
-        function _scheduleNextRefresh() {
-            if (_bgRefreshTimer) window.clearTimeout(_bgRefreshTimer);
-            const hasProcessing = _getProcessingItemIds().length > 0;
-            const interval = hasProcessing ? BG_REFRESH_INTERVAL_MS : BG_REFRESH_IDLE_INTERVAL_MS;
-            _bgRefreshTimer = window.setTimeout(_doBackgroundRefresh, interval);
-        }
-
-        async function _doBackgroundRefresh() {
-            _bgRefreshTimer = null;
-            if (_bgRefreshInFlight || document.visibilityState === 'hidden') {
-                _scheduleNextRefresh();
-                return;
+        function stopBackgroundRefresh() {
+            if (_bgIntervalId) {
+                window.clearInterval(_bgIntervalId);
+                _bgIntervalId = null;
+                _bgCurrentInterval = 0;
             }
+        }
+
+        async function _bgRefreshTick() {
+            if (_bgRefreshInFlight || document.visibilityState === 'hidden') return;
             _bgRefreshInFlight = true;
             try {
-                // 1) Poll processing items for status change
-                const processingIds = _getProcessingItemIds();
-                for (const itemId of processingIds) {
+                // 1) Poll items that need updates (processing + incomplete new items)
+                const pollIds = _getPollableItemIds();
+                if (pollIds.length) {
+                    console.log('[bg-refresh] polling ' + pollIds.length + ' items');
+                }
+                for (const itemId of pollIds) {
                     try {
-                        const res = await fetch(`/api/items/${itemId}`);
+                        const res = await fetch('/api/items/' + itemId);
                         if (!res.ok) continue;
                         const updated = await res.json();
                         const prev = getItemById(itemId);
@@ -1323,33 +1348,55 @@
                             openModalByItem(updated, { preserveSidebarTab: true });
                         }
                         if (wasProcessing && updated.parse_status === 'completed') {
+                            console.log('[bg-refresh] item ' + itemId + ' parse completed, triggering AI organize');
                             organizeItemAnalysis(itemId);
                         }
-                    } catch (_) { /* retry next tick */ }
+                        if (wasProcessing && updated.parse_status === 'failed') {
+                            console.log('[bg-refresh] item ' + itemId + ' parse failed');
+                        }
+                    } catch (err) {
+                        console.warn('[bg-refresh] poll item error', itemId, err);
+                    }
                 }
 
-                // 2) Check for new items from external sources (phone shortcuts, etc.)
+                // 2) Check total count for new items from external sources (phone shortcuts, etc.)
                 try {
-                    const countRes = await fetch(`/api/items?${getActiveSearchParams(1).toString()}`, {
-                        method: 'GET',
-                    });
+                    const params = new URLSearchParams();
+                    params.set('limit', '1');
+                    const countRes = await fetch('/api/items?' + params.toString());
                     if (countRes.ok) {
                         const serverTotal = Number(countRes.headers.get('X-Total-Count') || '0');
-                        if (serverTotal > latestTotalCount) {
+                        if (serverTotal > 0 && serverTotal > latestTotalCount) {
+                            console.log('[bg-refresh] new items detected: server=' + serverTotal + ' local=' + latestTotalCount);
+                            latestTotalCount = serverTotal;
                             await fetchItems();
                         }
                     }
-                } catch (_) { /* retry next tick */ }
+                } catch (err) {
+                    console.warn('[bg-refresh] count check error', err);
+                }
+
+                // Adjust interval speed based on current state
+                const wantFast = _getPollableItemIds().length > 0;
+                const desiredInterval = wantFast ? BG_REFRESH_FAST_MS : BG_REFRESH_SLOW_MS;
+                if (desiredInterval !== _bgCurrentInterval) {
+                    console.log('[bg-refresh] switching interval to ' + desiredInterval + 'ms');
+                    stopBackgroundRefresh();
+                    _bgCurrentInterval = desiredInterval;
+                    _bgIntervalId = window.setInterval(_bgRefreshTick, desiredInterval);
+                }
+            } catch (err) {
+                console.error('[bg-refresh] unexpected error', err);
             } finally {
                 _bgRefreshInFlight = false;
-                _scheduleNextRefresh();
             }
         }
 
         // Pause polling when tab is hidden, resume when visible
         document.addEventListener('visibilitychange', () => {
-            if (document.visibilityState === 'visible' && !_bgRefreshTimer) {
-                _doBackgroundRefresh();
+            if (document.visibilityState === 'visible') {
+                startBackgroundRefresh();
+                _bgRefreshTick();
             }
         });
 

@@ -862,7 +862,7 @@ def get_item(
     item = db.query(Item).filter(Item.user_id == user_id, Item.id == item_id).first()
     if not item:
         raise HTTPException(status_code=404, detail="Item not found")
-    return item
+    return serialize_items([item])[0]
 
 
 @router.get("/items", response_model=List[ItemResponse])

@@ -1527,22 +1527,76 @@
             box-shadow: 0 10px 22px -20px rgba(15, 23, 42, 0.14);
         }
 
+        /* ── Skeleton loading cards ── */
+        .skeleton-card {
+            pointer-events: none;
+        }
+
         .skeleton {
-            background: linear-gradient(90deg, rgba(230, 235, 243, 0.75), rgba(243, 246, 250, 0.95), rgba(230, 235, 243, 0.75));
-            background-size: 180% 100%;
-            animation: pulse 1.3s ease-in-out infinite;
-            border-radius: 8px;
+            background: #f0f1f4;
+            border-radius: 6px;
+            position: relative;
+            overflow: hidden;
         }
 
-        @keyframes pulse {
-            0% {
-                background-position: 100% 0;
-            }
-
-            100% {
-                background-position: -100% 0;
-            }
+        .skeleton::after {
+            content: '';
+            position: absolute;
+            inset: 0;
+            background: linear-gradient(90deg, transparent 0%, rgba(255,255,255,0.5) 50%, transparent 100%);
+            animation: skeleton-shimmer 1.6s ease-in-out infinite;
         }
+
+        @keyframes skeleton-shimmer {
+            0%   { transform: translateX(-100%); }
+            100% { transform: translateX(100%); }
+        }
+
+        .skeleton-cover {
+            height: 160px;
+            border-radius: 0;
+            background: #ebebef;
+        }
+
+        .skeleton-content {
+            padding: 16px;
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+            min-height: 132px;
+        }
+
+        .skeleton-meta {
+            height: 12px;
+            width: 45%;
+            border-radius: 4px;
+        }
+
+        .skeleton-title {
+            height: 14px;
+            width: 90%;
+            border-radius: 4px;
+        }
+
+        .skeleton-title-short {
+            height: 14px;
+            width: 60%;
+            border-radius: 4px;
+        }
+
+        .skeleton-tags {
+            height: 22px;
+            width: 35%;
+            border-radius: 11px;
+            margin-top: auto;
+        }
+
+        .skeleton-card:nth-child(1) .skeleton::after { animation-delay: 0s; }
+        .skeleton-card:nth-child(2) .skeleton::after { animation-delay: 0.08s; }
+        .skeleton-card:nth-child(3) .skeleton::after { animation-delay: 0.16s; }
+        .skeleton-card:nth-child(4) .skeleton::after { animation-delay: 0.24s; }
+        .skeleton-card:nth-child(5) .skeleton::after { animation-delay: 0.32s; }
+        .skeleton-card:nth-child(6) .skeleton::after { animation-delay: 0.40s; }
 
         .modal-overlay {
             position: fixed;

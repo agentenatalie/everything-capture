@@ -266,7 +266,6 @@
             if (sidebarUserSubtitle) {
                 sidebarUserSubtitle.textContent = '本地模式';
             }
-            resetAppState();
             updateSidebarState();
             updateCommandPaletteState();
             if (typeof startMobileCaptureAutomation === 'function' && window.matchMedia('(max-width: 860px)').matches) {
@@ -275,9 +274,9 @@
 
             await bootstrapAppData({ force: true });
             if (typeof flushMobileCaptureQueue === 'function') {
-                await flushMobileCaptureQueue({ silent: true });
+                flushMobileCaptureQueue({ silent: true });
             }
-            await handleUrlCallbacks();
+            handleUrlCallbacks();
         }
 
         function markScrollActivity() {

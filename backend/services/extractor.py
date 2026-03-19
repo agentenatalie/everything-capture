@@ -399,6 +399,12 @@ def _extract_twitter_media(payload: dict) -> list[dict]:
         value = payload.get(key)
         if isinstance(value, list):
             candidates.extend(item for item in value if isinstance(item, dict))
+        elif isinstance(value, dict):
+            # fxtwitter 返回 media 为 dict：{"all": [...], "videos": [...], ...}
+            for sub_key in ("all", "videos", "photos"):
+                sub = value.get(sub_key)
+                if isinstance(sub, list):
+                    candidates.extend(item for item in sub if isinstance(item, dict))
 
     for index, media in enumerate(candidates):
         media_type = str(media.get("type", "")).lower()
@@ -422,6 +428,9 @@ def _extract_twitter_media(payload: dict) -> list[dict]:
             variants = media["video_info"].get("variants") or []
             if isinstance(variants, list):
                 video_sources.extend(v for v in variants if isinstance(v, dict))
+        # fxtwitter 把 variants 直接放在 media 对象上
+        if isinstance(media.get("variants"), list):
+            video_sources.extend(v for v in media["variants"] if isinstance(v, dict))
 
         best_variant = ""
         best_bitrate = -1
@@ -445,6 +454,75 @@ def _extract_twitter_media(payload: dict) -> list[dict]:
                 "image" if media_type not in {"video"} else "video",
                 index,
             )
+
+    # 为视频提取封面缩略图（thumbnail_url / media_url_https）
+    has_cover = any(m["type"] == "cover" for m in media_urls)
+    if not has_cover:
+        for media in candidates:
+            mtype = str(media.get("type", "")).lower()
+            if mtype in {"video", "animated_gif"}:
+                thumb = (
+                    media.get("thumbnail_url", "")
+                    or media.get("media_url_https", "")
+                    or media.get("media_url", "")
+                )
+                if thumb:
+                    add_media(thumb, "cover", 0)
+                    break
+
+    return media_urls
+
+
+def _extract_syndication_media(data: dict) -> list[dict]:
+    """从 Twitter syndication API 响应中提取媒体 URL。"""
+    media_urls: list[dict] = []
+    seen: set[str] = set()
+
+    def add(url: str, media_type: str, order: int) -> None:
+        normalized = _normalize_media_url(url)
+        if not normalized or normalized in seen:
+            return
+        seen.add(normalized)
+        media_urls.append({"type": media_type, "url": normalized, "order": order, "inline_position": -1.0})
+
+    for index, m in enumerate(data.get("mediaDetails", [])):
+        mtype = str(m.get("type", "")).lower()
+        if mtype == "photo":
+            add(m.get("media_url_https", "") or m.get("media_url", ""), "image", index)
+        elif mtype == "video" or mtype == "animated_gif":
+            # 选最高码率 MP4
+            best_url = ""
+            best_bitrate = -1
+            for v in (m.get("video_info", {}) or {}).get("variants", []):
+                vurl = v.get("url", "")
+                ct = str(v.get("content_type", "")).lower()
+                br = int(v.get("bitrate", -1) or -1)
+                if vurl and ("mp4" in ct or vurl.lower().split("?")[0].endswith(".mp4")):
+                    if br >= best_bitrate:
+                        best_url = vurl
+                        best_bitrate = br
+            if best_url:
+                add(best_url, "video", index)
+            else:
+                # fallback 到缩略图
+                add(m.get("media_url_https", ""), "image", index)
+
+    # photos 字段（有些推文同时有）
+    for index, p in enumerate(data.get("photos", [])):
+        url = p.get("url", "") or p.get("media_url_https", "")
+        if url:
+            add(url, "image", len(media_urls) + index)
+
+    # 为视频提取封面缩略图
+    has_cover = any(m["type"] == "cover" for m in media_urls)
+    if not has_cover:
+        for m in data.get("mediaDetails", []):
+            mtype = str(m.get("type", "")).lower()
+            if mtype in {"video", "animated_gif"}:
+                thumb = m.get("media_url_https", "") or m.get("media_url", "")
+                if thumb:
+                    add(thumb, "cover", 0)
+                    break
 
     return media_urls
 
@@ -639,24 +717,188 @@ def _extract_x_media_url(media_info: dict) -> tuple[str, str]:
     return image_url, "image"
 
 
+def _render_draft_blocks_to_markdown(blocks: list[dict]) -> str:
+    """将 Draft.js blocks 渲染为 Markdown 文本。"""
+    _LIST_TYPES = {"unordered-list-item", "ordered-list-item"}
+    rendered: list[tuple[str, str]] = []  # (block_type, text)
+    prev_type = ""
+    ol_counter = 0
+    for block in blocks:
+        if not isinstance(block, dict):
+            continue
+        text = str(block.get("text") or "").strip()
+        if not text:
+            if prev_type != "empty":
+                rendered.append(("empty", ""))
+            prev_type = "empty"
+            continue
+        btype = block.get("type", "unstyled")
+
+        # 应用 inline styles（Bold / Italic）
+        inline_ranges = block.get("inlineStyleRanges") or []
+        if inline_ranges:
+            sorted_ranges = sorted(inline_ranges, key=lambda r: r.get("offset", 0), reverse=True)
+            chars = list(text)
+            for r in sorted_ranges:
+                style = r.get("style", "")
+                offset = r.get("offset", 0)
+                length = r.get("length", 0)
+                if offset < 0 or offset + length > len(chars):
+                    continue
+                if style == "Bold":
+                    chars.insert(offset + length, "**")
+                    chars.insert(offset, "**")
+                elif style == "Italic":
+                    chars.insert(offset + length, "*")
+                    chars.insert(offset, "*")
+            text = "".join(chars)
+
+        if btype == "header-one":
+            rendered.append((btype, f"# {text}"))
+        elif btype == "header-two":
+            rendered.append((btype, f"## {text}"))
+        elif btype == "header-three":
+            rendered.append((btype, f"### {text}"))
+        elif btype == "blockquote":
+            rendered.append((btype, f"> {text}"))
+        elif btype == "unordered-list-item":
+            rendered.append((btype, f"- {text}"))
+        elif btype == "ordered-list-item":
+            ol_counter = 1 if prev_type != "ordered-list-item" else ol_counter + 1
+            rendered.append((btype, f"{ol_counter}. {text}"))
+        elif btype == "code-block":
+            rendered.append((btype, f"```\n{text}\n```"))
+        else:
+            rendered.append((btype, text))
+
+        prev_type = btype
+
+    # 拼接：相邻列表项用单换行，其余用双换行
+    lines: list[str] = []
+    for i, (btype, text) in enumerate(rendered):
+        if i == 0:
+            lines.append(text)
+            continue
+        prev_bt = rendered[i - 1][0]
+        if btype in _LIST_TYPES and prev_bt in _LIST_TYPES:
+            lines.append(text)
+        else:
+            lines.append("")
+            lines.append(text)
+
+    return "\n".join(lines)
+
+
+def _render_draft_blocks_to_html(blocks: list[dict]) -> str:
+    """将 Draft.js blocks 渲染为 HTML。"""
+    from html import escape as _esc
+
+    def _apply_inline_styles(text: str, ranges: list[dict]) -> str:
+        if not ranges:
+            return _esc(text)
+        # 按 offset 降序，避免插入标记后偏移错乱
+        sorted_ranges = sorted(ranges, key=lambda r: r.get("offset", 0), reverse=True)
+        chars = list(text)
+        for r in sorted_ranges:
+            style = r.get("style", "")
+            offset = r.get("offset", 0)
+            length = r.get("length", 0)
+            if offset < 0 or offset + length > len(chars):
+                continue
+            if style == "Bold":
+                chars.insert(offset + length, "</strong>")
+                chars.insert(offset, "<strong>")
+            elif style == "Italic":
+                chars.insert(offset + length, "</em>")
+                chars.insert(offset, "<em>")
+        # 先 escape 原始文本字符，保留插入的 HTML 标签
+        result = []
+        for ch in chars:
+            if ch in ("<strong>", "</strong>", "<em>", "</em>"):
+                result.append(ch)
+            else:
+                result.append(_esc(ch))
+        return "".join(result)
+
+    _LIST_TYPES = {"unordered-list-item", "ordered-list-item"}
+    parts: list[str] = []
+    prev_type = ""
+    list_tag = ""
+    list_items: list[str] = []
+
+    def flush_list() -> None:
+        nonlocal list_tag, list_items
+        if list_items and list_tag:
+            items_html = "".join(f"<li>{item}</li>" for item in list_items)
+            parts.append(f"<{list_tag}>{items_html}</{list_tag}>")
+        list_tag = ""
+        list_items = []
+
+    for block in blocks:
+        if not isinstance(block, dict):
+            continue
+        text = str(block.get("text") or "").strip()
+        btype = block.get("type", "unstyled")
+        inline_ranges = block.get("inlineStyleRanges") or []
+        styled = _apply_inline_styles(text, inline_ranges) if text else ""
+
+        if not text:
+            flush_list()
+            prev_type = "empty"
+            continue
+
+        if btype in _LIST_TYPES:
+            new_tag = "ol" if btype == "ordered-list-item" else "ul"
+            if list_tag and list_tag != new_tag:
+                flush_list()
+            list_tag = new_tag
+            list_items.append(styled)
+            prev_type = btype
+            continue
+
+        flush_list()
+
+        if btype == "header-one":
+            parts.append(f"<h1>{styled}</h1>")
+        elif btype == "header-two":
+            parts.append(f"<h2>{styled}</h2>")
+        elif btype == "header-three":
+            parts.append(f"<h3>{styled}</h3>")
+        elif btype == "blockquote":
+            parts.append(f"<blockquote>{styled}</blockquote>")
+        elif btype == "code-block":
+            parts.append(f"<pre><code>{_esc(text)}</code></pre>")
+        else:
+            parts.append(f"<p>{styled}</p>")
+
+        prev_type = btype
+
+    flush_list()
+    return "\n".join(parts)
+
+
 def _extract_x_article_text(article: dict) -> str:
     plain_text = str(article.get("plain_text") or "").strip()
     if plain_text:
         return plain_text
 
+    # 尝试从 content_state.blocks 或 content.blocks 提取全文并渲染为 Markdown
+    blocks = (
+        (article.get("content_state") or {}).get("blocks")
+        or (article.get("content") or {}).get("blocks")
+        or []
+    )
+    if blocks:
+        rendered = _render_draft_blocks_to_markdown(blocks)
+        if rendered.strip():
+            return rendered.strip()
+
+    # blocks 也没有时才用 preview_text
     preview_text = str(article.get("preview_text") or "").strip()
     if preview_text:
         return preview_text
 
-    blocks = ((article.get("content_state") or {}).get("blocks") or [])
-    parts: list[str] = []
-    for block in blocks:
-        if not isinstance(block, dict):
-            continue
-        text = str(block.get("text") or "").strip()
-        if text:
-            parts.append(text)
-    return _clean_text("\n\n".join(parts))
+    return ""
 
 
 def _parse_x_article_result(article: dict, final_url: str) -> ExtractResult | None:
@@ -696,6 +938,14 @@ def _parse_x_article_result(article: dict, final_url: str) -> ExtractResult | No
     if not text and not media_urls:
         return None
 
+    # 尝试从 blocks 生成 HTML 供前端 article-html 渲染
+    blocks = (
+        (article.get("content_state") or {}).get("blocks")
+        or (article.get("content") or {}).get("blocks")
+        or []
+    )
+    content_html = _render_draft_blocks_to_html(blocks) if blocks else None
+
     canonical_text = text or title
     return ExtractResult(
         title=title,
@@ -703,6 +953,7 @@ def _parse_x_article_result(article: dict, final_url: str) -> ExtractResult | No
         platform="twitter",
         final_url=final_url,
         media_urls=media_urls or None,
+        content_html=content_html or None,
     )
 
 
@@ -1416,6 +1667,13 @@ async def extract_twitter(url: str) -> ExtractResult | None:
                 created = tweet.get("created_at", "")
                 media_urls = _extract_twitter_media(tweet)
 
+                # fxtwitter 返回 article 字段时（X 长文），text 通常为空
+                fx_article = tweet.get("article")
+                if not text and isinstance(fx_article, dict) and fx_article.get("title"):
+                    article_result = _parse_x_article_result(fx_article, url)
+                    if article_result:
+                        return article_result
+
                 if text:
                     header = f"@{author_handle}" if author_handle else ""
                     if author_name:
@@ -1475,7 +1733,59 @@ async def extract_twitter(url: str) -> ExtractResult | None:
         except Exception as e:
             logger.debug("vxtwitter API 失败: %s", e)
 
+    # ---- Twitter syndication API（公开嵌入数据，含媒体）----
     tweet_id = _extract_tweet_id(url)
+    if tweet_id:
+        syndication_url = f"https://cdn.syndication.twimg.com/tweet-result?id={tweet_id}&lang=en&token=0"
+        async with _build_client() as client:
+            try:
+                resp = await client.get(
+                    syndication_url,
+                    headers={"Referer": "https://platform.twitter.com/"},
+                )
+                if resp.status_code == 200:
+                    ctype = resp.headers.get("content-type", "")
+                    if "json" in ctype:
+                        data = resp.json()
+                        if data.get("__typename") == "Tweet":
+                            # syndication 也可能返回 article
+                            synd_article = data.get("article")
+                            synd_text = data.get("text", "")
+                            if not synd_text and isinstance(synd_article, dict) and synd_article.get("title"):
+                                article_result = _parse_x_article_result(synd_article, url)
+                                if article_result:
+                                    return article_result
+
+                            text = synd_text
+                            user_info = data.get("user", {})
+                            author_name = user_info.get("name", "")
+                            author_handle = user_info.get("screen_name", "")
+                            created = data.get("created_at", "")
+                            media_urls = _extract_syndication_media(data)
+
+                            if text:
+                                header = f"@{author_handle}" if author_handle else ""
+                                if author_name:
+                                    header = f"{author_name} ({header})" if header else author_name
+                                full_text = ""
+                                if header:
+                                    full_text += header + "\n\n"
+                                full_text += text
+                                if created:
+                                    full_text += f"\n\n{created}"
+
+                                title = f"{author_name}: {text[:60]}..." if author_name else text[:80]
+                                return ExtractResult(
+                                    title=title,
+                                    text=_clean_text(full_text),
+                                    platform="twitter",
+                                    final_url=url,
+                                    media_urls=media_urls or None,
+                                )
+            except Exception as e:
+                logger.debug("Twitter syndication API 失败: %s", e)
+
+    # ---- oEmbed 回退（纯文本，无媒体）----
     if tweet_id:
         async with _build_client() as client:
             try:
@@ -1681,7 +1991,9 @@ _BLOCK_LEVEL_TAGS = {"p", "h1", "h2", "h3", "h4", "h5", "h6", "blockquote", "pre
                      "td", "th", "dt", "dd", "figcaption", "caption"}
 _SKIP_TAGS = {"script", "style", "nav", "footer", "header", "noscript",
               "button", "form", "aside", "figure"}
-_RECURSIVE_CONTAINER_TAGS = {"div", "section", "article", "main", "picture", "a", "span"}
+_RECURSIVE_CONTAINER_TAGS = {"div", "section", "article", "main", "picture", "a", "span",
+                              "details", "summary", "ul", "ol", "dl",
+                              "table", "thead", "tbody", "tfoot", "tr"}
 
 
 def _extract_article_blocks(soup: BeautifulSoup, base_url: str = "") -> list[dict]:
@@ -1820,9 +2132,10 @@ _SAFE_TAGS = {
     "p", "h1", "h2", "h3", "h4", "h5", "h6",
     "img", "figure", "figcaption", "picture", "source",
     "video", "audio", "iframe",
-    "ul", "ol", "li",
+    "ul", "ol", "li", "dl", "dt", "dd",
     "blockquote", "pre", "code",
-    "table", "thead", "tbody", "tr", "th", "td",
+    "table", "thead", "tbody", "tfoot", "tr", "th", "td",
+    "details", "summary",
     "a", "strong", "b", "em", "i", "u", "s",
     "br", "hr", "div", "span", "section",
 }
@@ -1835,6 +2148,7 @@ _SAFE_ATTRS = {
     "iframe": {"src", "title", "width", "height", "allow", "allowfullscreen", "frameborder", "loading", "referrerpolicy"},
     "td": {"colspan", "rowspan"},
     "th": {"colspan", "rowspan"},
+    "details": {"open"},
 }
 
 _ARTICLE_ROOT_SELECTORS = [
@@ -1961,6 +2275,10 @@ def _extract_article_html(soup: BeautifulSoup, base_url: str = "") -> str | None
         iframe["loading"] = "lazy"
         iframe["referrerpolicy"] = "strict-origin-when-cross-origin"
         iframe["allowfullscreen"] = "allowfullscreen"
+
+    # 强制 <details> 展开
+    for details_tag in container.find_all("details"):
+        details_tag["open"] = "open"
 
     # 移除空的 div/span/section（避免页面顶部大量空白）
     changed = True

@@ -330,6 +330,12 @@ class ItemFolderUpdateRequest(BaseModel):
     folder_ids: list[str] = Field(default_factory=list)
 
 
+class ItemContentUpdateRequest(BaseModel):
+    title: Optional[str] = None
+    canonical_text: Optional[str] = None
+    canonical_html: Optional[str] = None
+
+
 class ItemNoteUpdateRequest(BaseModel):
     extracted_text: str = ""
 

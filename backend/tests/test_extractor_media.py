@@ -6,7 +6,7 @@ import threading
 import unittest
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 from bs4 import BeautifulSoup
 
@@ -19,6 +19,8 @@ from services.extractor import (  # noqa: E402
     _extract_article_blocks,
     _extract_article_html,
     _extract_page_media,
+    _extract_syndication_media,
+    _extract_twitter_media,
     _parse_douyin_slides_response,
     _parse_xhs_initial_state,
     _parse_douyin_router_data,
@@ -596,6 +598,206 @@ class ExtractorMediaTests(unittest.IsolatedAsyncioTestCase):
             "https://x.com/i/article/2030427028026277888",
             "2030427028026277888",
         )
+
+    def test_extract_twitter_media_fxtwitter_dict_video(self) -> None:
+        """fxtwitter 返回 media 为 dict 而非 list，包含视频和封面。"""
+        payload = {
+            "media": {
+                "all": [
+                    {
+                        "type": "video",
+                        "url": "https://video.twimg.com/ext_tw_video/123/pu/vid/avc1/1280x720/best.mp4?tag=12",
+                        "thumbnail_url": "https://pbs.twimg.com/ext_tw_video_thumb/123/pu/img/thumb.jpg",
+                        "format": "video/mp4",
+                        "variants": [
+                            {"content_type": "application/x-mpegURL", "url": "https://video.twimg.com/test.m3u8"},
+                            {"bitrate": 256000, "content_type": "video/mp4", "url": "https://video.twimg.com/low.mp4"},
+                            {"bitrate": 2176000, "content_type": "video/mp4", "url": "https://video.twimg.com/high.mp4"},
+                        ],
+                    }
+                ],
+                "videos": [],
+            }
+        }
+        result = _extract_twitter_media(payload)
+        types = [m["type"] for m in result]
+        self.assertIn("video", types)
+        self.assertIn("cover", types)
+        video = next(m for m in result if m["type"] == "video")
+        cover = next(m for m in result if m["type"] == "cover")
+        self.assertIn("high.mp4", video["url"])
+        self.assertIn("thumb.jpg", cover["url"])
+
+    def test_extract_twitter_media_fxtwitter_dict_photo(self) -> None:
+        """fxtwitter 返回 media 为 dict，包含图片。"""
+        payload = {
+            "media": {
+                "all": [
+                    {
+                        "type": "photo",
+                        "url": "https://pbs.twimg.com/media/abc123.jpg",
+                        "width": 1920,
+                        "height": 1080,
+                    }
+                ],
+            }
+        }
+        result = _extract_twitter_media(payload)
+        self.assertEqual(len(result), 1)
+        self.assertEqual(result[0]["type"], "image")
+        self.assertIn("abc123.jpg", result[0]["url"])
+
+    def test_extract_syndication_media_photos(self) -> None:
+        data = {
+            "__typename": "Tweet",
+            "mediaDetails": [
+                {
+                    "type": "photo",
+                    "media_url_https": "https://pbs.twimg.com/media/abc123.jpg",
+                },
+                {
+                    "type": "photo",
+                    "media_url_https": "https://pbs.twimg.com/media/def456.jpg",
+                },
+            ],
+            "photos": [
+                {"url": "https://pbs.twimg.com/media/abc123.jpg"},
+                {"url": "https://pbs.twimg.com/media/ghi789.png"},
+            ],
+        }
+        result = _extract_syndication_media(data)
+        urls = [m["url"] for m in result]
+        self.assertEqual(len(result), 3)
+        self.assertIn("https://pbs.twimg.com/media/abc123.jpg", urls)
+        self.assertIn("https://pbs.twimg.com/media/def456.jpg", urls)
+        self.assertIn("https://pbs.twimg.com/media/ghi789.png", urls)
+        self.assertTrue(all(m["type"] == "image" for m in result))
+
+    def test_extract_syndication_media_video(self) -> None:
+        data = {
+            "mediaDetails": [
+                {
+                    "type": "video",
+                    "media_url_https": "https://pbs.twimg.com/ext_tw_video_thumb/123/pu/img/thumb.jpg",
+                    "video_info": {
+                        "variants": [
+                            {"content_type": "application/x-mpegURL", "url": "https://video.twimg.com/test.m3u8"},
+                            {"bitrate": 256000, "content_type": "video/mp4", "url": "https://video.twimg.com/low.mp4"},
+                            {"bitrate": 2176000, "content_type": "video/mp4", "url": "https://video.twimg.com/high.mp4"},
+                        ]
+                    },
+                }
+            ],
+        }
+        result = _extract_syndication_media(data)
+        types = [m["type"] for m in result]
+        self.assertIn("video", types)
+        self.assertIn("cover", types)
+        video = next(m for m in result if m["type"] == "video")
+        cover = next(m for m in result if m["type"] == "cover")
+        self.assertEqual(video["url"], "https://video.twimg.com/high.mp4")
+        self.assertIn("thumb.jpg", cover["url"])
+
+    def test_extract_syndication_media_empty(self) -> None:
+        self.assertEqual(_extract_syndication_media({}), [])
+        self.assertEqual(_extract_syndication_media({"mediaDetails": []}), [])
+
+    async def test_extract_twitter_fxtwitter_article_with_cover(self) -> None:
+        """fxtwitter 返回 text 为空但有 article 字段时，应提取长文内容和封面。"""
+        fx_response = {
+            "code": 200,
+            "tweet": {
+                "text": "",
+                "author": {"name": "TestAuthor", "screen_name": "testauthor"},
+                "article": {
+                    "title": "Test Article Title",
+                    "preview_text": "This is a preview of the article content.",
+                    "cover_media": {
+                        "media_info": {
+                            "__typename": "ApiImage",
+                            "original_img_url": "https://pbs.twimg.com/media/cover123.jpg",
+                        }
+                    },
+                },
+            },
+        }
+
+        mock_resp = MagicMock()
+        mock_resp.status_code = 200
+        mock_resp.json.return_value = fx_response
+
+        mock_client = AsyncMock()
+        mock_client.get = AsyncMock(return_value=mock_resp)
+        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+        mock_client.__aexit__ = AsyncMock(return_value=False)
+
+        with patch("services.extractor._build_client", return_value=mock_client):
+            result = await extract_twitter("https://x.com/testauthor/status/999888777")
+
+        self.assertIsNotNone(result)
+        self.assertEqual(result.title, "Test Article Title")
+        self.assertIn("preview of the article", result.text)
+        self.assertIsNotNone(result.media_urls)
+        cover = next((m for m in result.media_urls if m["type"] == "cover"), None)
+        self.assertIsNotNone(cover)
+        self.assertIn("cover123.jpg", cover["url"])
+
+    async def test_extract_twitter_syndication_fallback_with_media(self) -> None:
+        """当 fxtwitter/vxtwitter 都失败时，syndication API 应能提取含媒体的推文。"""
+        syndication_response = {
+            "__typename": "Tweet",
+            "text": "Check out this photo!",
+            "user": {"name": "TestUser", "screen_name": "testuser"},
+            "created_at": "2026-01-15T12:00:00.000Z",
+            "mediaDetails": [
+                {
+                    "type": "photo",
+                    "media_url_https": "https://pbs.twimg.com/media/test123.jpg",
+                }
+            ],
+            "photos": [],
+        }
+
+        mock_fx_resp = MagicMock()
+        mock_fx_resp.status_code = 404
+        mock_fx_resp.json.return_value = {"code": 404, "message": "NOT_FOUND", "tweet": None}
+
+        mock_vx_resp = MagicMock()
+        mock_vx_resp.status_code = 404
+
+        mock_synd_resp = MagicMock()
+        mock_synd_resp.status_code = 200
+        mock_synd_resp.headers = {"content-type": "application/json"}
+        mock_synd_resp.json.return_value = syndication_response
+
+        call_count = 0
+
+        async def mock_get(url, **kwargs):
+            nonlocal call_count
+            call_count += 1
+            if "fxtwitter" in url:
+                return mock_fx_resp
+            if "vxtwitter" in url:
+                return mock_vx_resp
+            if "syndication" in url:
+                return mock_synd_resp
+            return mock_fx_resp
+
+        mock_client = AsyncMock()
+        mock_client.get = mock_get
+        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+        mock_client.__aexit__ = AsyncMock(return_value=False)
+
+        with patch("services.extractor._build_client", return_value=mock_client):
+            result = await extract_twitter("https://x.com/testuser/status/123456789")
+
+        self.assertIsNotNone(result)
+        self.assertIn("Check out this photo!", result.text)
+        self.assertIn("TestUser", result.text)
+        self.assertIsNotNone(result.media_urls)
+        self.assertEqual(len(result.media_urls), 1)
+        self.assertEqual(result.media_urls[0]["type"], "image")
+        self.assertIn("test123.jpg", result.media_urls[0]["url"])
 
     async def test_download_media_list_keeps_external_reference_when_video_url_returns_html(self) -> None:
         _StaticHtmlHandler.html = "<html><body>embed page</body></html>"

@@ -3196,9 +3196,6 @@ async def organize_item_analysis(item_id: str, db: Session = Depends(get_db)):
         item.ocr_text = None
 
     item.extracted_text = organized_text
-    # AI-organized content overwrites the original scraped text
-    item.canonical_text = organized_text
-    item.canonical_text_length = len(organized_text)
     item.parse_status = "completed"
     item.parse_error = None
     if item.parsed_at is None:

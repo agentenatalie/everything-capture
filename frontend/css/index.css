@@ -2176,6 +2176,68 @@
             transform: translateY(0);
         }
 
+        /* ── Icon-only footer buttons ────────────────────── */
+        .modal-footer-icons {
+            gap: 8px !important;
+        }
+
+        .modal-icon-btn {
+            min-width: 0 !important;
+            width: 40px;
+            height: 40px;
+            padding: 0;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            background: transparent;
+            border: none;
+            color: #94a3b8;
+            cursor: pointer;
+            transition: color 0.18s;
+        }
+
+        .modal-icon-btn:hover:not(:disabled) {
+            color: #0f172a;
+        }
+
+        .modal-icon-btn:active:not(:disabled) {
+        }
+
+        .modal-icon-btn svg {
+            flex-shrink: 0;
+        }
+
+        .modal-icon-btn.is-loading {
+            pointer-events: none;
+            opacity: 0.6;
+        }
+
+        .modal-icon-btn.is-loading svg {
+            animation: activity-pulse 1.2s ease-in-out infinite;
+        }
+
+        /* ── Content inline edit mode ────────────────────── */
+        .modal-title.is-editable {
+            outline: none;
+            border-bottom: 1.5px dashed #cbd5e1;
+            padding-bottom: 2px;
+            cursor: text;
+        }
+
+        .modal-title.is-editable:focus {
+            border-color: #94a3b8;
+        }
+
+        .modal-body.is-content-editable {
+            outline: none;
+            cursor: text;
+        }
+        .modal-body.is-content-editable img,
+        .modal-body.is-content-editable video {
+            pointer-events: none;
+            user-select: none;
+        }
+
         .folder-action-btn.is-processing {
             color: var(--parse-accent);
         }
@@ -2834,6 +2896,34 @@
             margin-top: 6px;
         }
 
+        .article-html details {
+            display: block;
+        }
+
+        .article-html details[open] > summary ~ * {
+            display: block;
+        }
+
+        .article-html summary {
+            cursor: pointer;
+            font-weight: 600;
+            margin-bottom: 0.5rem;
+        }
+
+        .article-html dl {
+            margin: 1rem 0;
+        }
+
+        .article-html dt {
+            font-weight: 600;
+            margin-top: 0.5rem;
+        }
+
+        .article-html dd {
+            margin-left: 1.5rem;
+            margin-bottom: 0.5rem;
+        }
+
         /* 通用网站 / 微信：行内图片 */
         .inline-img-wrap {
             margin: 1rem 0;
@@ -2927,7 +3017,8 @@
 
         main {
             padding: 0;
-            min-height: 100vh;
+            height: 100vh;
+            overflow: hidden;
         }
 
         body.sidebar-collapsed main {
@@ -2936,8 +3027,8 @@
 
         .board-shell {
             display: flex;
-            align-items: flex-start;
-            min-height: 100vh;
+            align-items: stretch;
+            height: 100%;
             background: #f9fafb;
             width: 100%;
         }
@@ -3570,6 +3661,7 @@
             border: none;
             border-radius: 0;
             box-shadow: none;
+            flex-shrink: 0;
         }
 
         .list-row {
@@ -6795,6 +6887,9 @@
         .modal.is-fullscreen .modal-footer .modal-action-btn {
             min-width: 180px;
             border-radius: 999px;
+        }
+
+        .modal.is-fullscreen .modal-footer .modal-icon-btn {
         }
 
         .modal.is-fullscreen.is-reader-chrome-hidden .reader-toolbar {

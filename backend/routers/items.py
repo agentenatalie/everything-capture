@@ -16,6 +16,7 @@ from models import AiConversation, Folder, Item, ItemFolderLink, ItemPageNote
 from schemas import (
     BulkFolderUpdateRequest,
     BulkFolderUpdateResponse,
+    ItemContentUpdateRequest,
     ItemFolderUpdateRequest,
     ItemNoteUpdateRequest,
     ItemPageNoteCreateRequest,
@@ -1053,6 +1054,45 @@ def parse_item_content_endpoint(item_id: str, db: Session = Depends(get_db)):
             _store_item_parse_failure(item, "Content parsing failed")
             db.commit()
         raise HTTPException(status_code=500, detail="Content parsing failed") from exc
+
+
+@router.patch("/items/{item_id}/content", response_model=ItemResponse)
+def update_item_content(
+    item_id: str,
+    request: ItemContentUpdateRequest,
+    db: Session = Depends(get_db),
+):
+    user_id = get_current_user_id()
+    item = db.query(Item).filter(Item.id == item_id, Item.user_id == user_id).first()
+    if not item:
+        raise HTTPException(status_code=404, detail="Item not found")
+
+    if request.title is not None:
+        new_title = request.title.strip() or None
+        item.title = new_title
+        # Also update [detected_title] in extracted_text so getDisplayItemTitle picks it up
+        if new_title and item.extracted_text:
+            if re.search(r'^\[detected_title\]', item.extracted_text, re.MULTILINE):
+                item.extracted_text = re.sub(
+                    r'(\[detected_title\]\n?).*?(?=\n\[|\Z)',
+                    rf'\g<1>{new_title}\n',
+                    item.extracted_text,
+                    count=1,
+                    flags=re.DOTALL,
+                )
+            else:
+                item.extracted_text = f"[detected_title]\n{new_title}\n{item.extracted_text}"
+    if request.canonical_text is not None:
+        item.canonical_text = request.canonical_text
+        item.canonical_text_length = len(request.canonical_text) if request.canonical_text else 0
+    if request.canonical_html is not None:
+        item.canonical_html = request.canonical_html
+        # Clear content_blocks_json so renderWebArticle falls back to canonical_html
+        item.content_blocks_json = None
+
+    db.commit()
+    db.refresh(item)
+    return serialize_items([item])[0]
 
 
 @router.patch("/items/{item_id}/note", response_model=ItemResponse)

@@ -599,6 +599,14 @@
                     continue;
                 }
 
+                const blockquoteMatch = trimmed.match(/^>\s?(.*)$/);
+                if (blockquoteMatch) {
+                    flushParagraph();
+                    flushList();
+                    html.push(`<blockquote class="note-quote">${renderInlineMarkdown(blockquoteMatch[1])}</blockquote>`);
+                    continue;
+                }
+
                 const unorderedMatch = line.match(/^\s*[-*+]\s+(.*)$/);
                 const orderedMatch = line.match(/^\s*\d+\.\s+(.*)$/);
                 if (unorderedMatch || orderedMatch) {
@@ -902,6 +910,13 @@
             if (!summary.hasRichStructure && (htmlHasRichFormatting || htmlHasInlineFormatting)) return true;
             if (blocksContainInlineFormatting && (htmlHasRichFormatting || htmlHasInlineFormatting)) return true;
             if (hasSuspiciousRepeatedImages(htmlImageUrls, mediaImageUrls)) return false;
+
+            // If canonical_html text is significantly longer than blocks text, prefer HTML
+            // (blocks may have been truncated by missing container tags like <details>, <ul>, <table>)
+            const blocksTextLen = blocks.reduce((sum, b) => sum + (b.type === 'text' || b.type === 'paragraph' ? (b.content || b.markdown || '').length : 0), 0);
+            const htmlTextLen = item.canonical_html.replace(/<[^>]*>/g, '').length;
+            if (htmlTextLen > blocksTextLen * 2 && htmlTextLen - blocksTextLen > 200) return true;
+
             return false;
         }
 

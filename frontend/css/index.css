@@ -2209,11 +2209,24 @@
 
         .modal-icon-btn.is-loading {
             pointer-events: none;
-            opacity: 0.6;
         }
 
         .modal-icon-btn.is-loading svg {
-            animation: activity-pulse 1.2s ease-in-out infinite;
+            display: none;
+        }
+
+        .modal-icon-btn.is-loading::after {
+            content: '';
+            width: 14px;
+            height: 14px;
+            border-radius: 50%;
+            border: 2px solid #cbd5e1;
+            border-top-color: #64748b;
+            animation: modal-icon-spin 0.6s linear infinite;
+        }
+
+        @keyframes modal-icon-spin {
+            to { transform: rotate(360deg); }
         }
 
         /* ── Content inline edit mode ────────────────────── */

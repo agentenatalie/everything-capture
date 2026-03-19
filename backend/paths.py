@@ -23,7 +23,6 @@ DATA_ROOT = Path(
 DB_PATH = Path(os.getenv("SQLITE_PATH") or str(DATA_ROOT / "app.db"))
 MEDIA_DIR = Path(os.getenv("MEDIA_DIR") or str(DATA_ROOT / "media"))
 EXPORTS_DIR = Path(os.getenv("EXPORTS_DIR") or str(DATA_ROOT / "exports"))
-BACKUPS_DIR = Path(os.getenv("BACKUPS_DIR") or str(DATA_ROOT / "backups"))
 LOCAL_STATE_DIR = DATA_ROOT / ".local"
 
 # Backward-compatible alias: existing code does `STATIC_DIR / local_path` where
@@ -41,7 +40,7 @@ _OLD_LOCAL_STATE_DIR = BACKEND_DIR / ".local"
 
 def ensure_data_dirs() -> None:
     """Create the external data directory tree if it doesn't exist."""
-    for d in (DATA_ROOT, MEDIA_DIR, EXPORTS_DIR, BACKUPS_DIR, LOCAL_STATE_DIR):
+    for d in (DATA_ROOT, MEDIA_DIR, EXPORTS_DIR, LOCAL_STATE_DIR):
         d.mkdir(parents=True, exist_ok=True)
 
 

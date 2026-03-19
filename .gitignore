@@ -6,6 +6,10 @@
 # Media uploads/downloads (legacy in-project path)
 backend/static/media/
 
+# SQLite WAL/SHM files
+*.db-shm
+*.db-wal
+
 # External data directory
 ../everything-capture-data/
 

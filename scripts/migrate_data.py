@@ -79,8 +79,7 @@ def migrate(use_move: bool = False):
         print(f"  media: skipped (src missing or dst exists)")
 
     # 4. Create empty dirs
-    for d in (DATA_ROOT / "exports", DATA_ROOT / "backups"):
-        d.mkdir(parents=True, exist_ok=True)
+    (DATA_ROOT / "exports").mkdir(parents=True, exist_ok=True)
 
     print(f"\nDone! Data directory: {DATA_ROOT}")
 

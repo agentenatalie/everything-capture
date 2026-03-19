@@ -1,129 +1,157 @@
 # Everything Capture
 
-Everything Capture 是一个本地优先的内容采集和知识库整理系统。
+[中文文档](./README_CN.md)
 
-它把「采集入口」和「真正的抓取/下载/同步」拆开：
+A local-first content capture and personal knowledge base system. Capture URLs, articles, social media posts, videos, and text from any device — extract, store, and organize everything on your own machine.
 
-- 本地 `backend/` 负责正文提取、媒体下载、知识库浏览、Notion / Obsidian 同步、AI 能力
-- 可选云端 `capture_service/` 只负责接收手机网页 / Shortcut / Share Sheet 的收录请求，并把任务放进队列
-- 本地 `processing_worker` 从云端队列拉任务，完成真正的 extraction
+## Why
 
-这套结构适合你把手机端入口部署出去，同时把敏感或重型的 extraction 保留在自己的电脑上。
+Most "read-it-later" services store your data on their servers. Everything Capture keeps all content, media, and metadata in a local SQLite database on your machine. An optional cloud capture service lets your phone queue items, but the heavy extraction always runs locally.
 
-## 功能概览
+## Features
 
-- 从桌面、本地网页、手机网页、iPhone Shortcut 提交 URL 或文本
-- 抓取网页 / 社交平台内容
-- 下载图片、封面、视频等媒体到本地
-- 把内容存入本地 SQLite 知识库并在 Web UI 中浏览、搜索、整理、归档到文件夹
-- 可选同步到 Notion / Obsidian
-- 可选接入 AI，对本地知识库做问答、分析和关联
+- **Multi-source capture** — Desktop browser, mobile web, iOS Shortcuts, Share Sheet
+- **Content extraction** — Articles, social media posts, images, videos, covers
+- **Local media storage** — Downloads all media (images, videos) to your disk
+- **Web UI** — Browse, search, edit, and organize your knowledge base with folders
+- **Optional sync** — Push to Notion or Obsidian
+- **Optional AI** — Q&A and analysis over your knowledge base (supports any OpenAI-compatible API)
+- **Optional cloud inbox** — Deploy a lightweight capture service (e.g. on Vercel) so your phone can submit URLs anytime
 
-## 架构
+## Architecture
 
-```text
+```
 Desktop browser / local UI
-        -> frontend/ (served on a separate local port)
-        -> local backend API
-        -> everything-capture-data/app.db + everything-capture-data/media/
+    → frontend/ (static, served on port 8010)
+    → backend/ (FastAPI on port 8000)
+    → ../everything-capture-data/app.db + media/
 
 Phone / Share Sheet / Shortcut
-        -> optional cloud capture_service
-        -> pending queue
-        -> local processing_worker
-        -> local backend extraction pipeline
-        -> everything-capture-data/app.db + everything-capture-data/media/
+    → optional cloud capture_service/
+    → pending queue
+    → local processing_worker
+    → backend extraction pipeline
+    → ../everything-capture-data/app.db + media/
 ```
 
-一句话版本：
+**TL;DR:** Run `backend/` for local-only use. Deploy `capture_service/` if you want mobile capture.
 
-- 只想本地用：跑 `backend/` 就够了
-- 想让手机也能随时投递：再部署 `capture_service/`
+## Project Structure
 
-## 仓库结构
-
-```text
+```
 everything-capture/
-├── backend/            本地 FastAPI API、同步与 AI 能力（代码only，不含数据）
-├── capture_service/    可单独部署的手机收件箱 / 队列服务
-├── frontend/           独立静态前端，由本地 HTTP 服务单独启动
-├── scripts/            部署辅助脚本
-├── run                 本地启动入口
-└── .gitignore          已忽略本地数据库、媒体、日志、私有笔记等
+├── backend/              FastAPI API, extraction, sync, AI
+│   ├── routers/          API route modules
+│   ├── models.py         SQLAlchemy models
+│   ├── database.py       DB setup and migrations
+│   ├── security.py       Encryption for API keys
+│   ├── processing_worker.py  Cloud queue consumer
+│   └── main.py           App entry point
+├── capture_service/      Deployable cloud capture inbox
+├── frontend/             Vanilla JS web UI
+│   ├── index.html
+│   ├── css/
+│   └── js/
+├── scripts/              Deployment helpers
+├── run                   Local start script
+├── requirements.txt      Python dependencies
+└── LICENSE
 ```
 
-关键文件：
+## Quick Start
 
-- `backend/main.py`
-  本地 FastAPI 应用入口，`/` 会重定向到独立前端地址，后端负责 API 与媒体服务。
-- `backend/paths.py`
-  所有数据路径的集中配置，定义外部数据目录位置。
-- `frontend/index.html`
-  本地知识库 UI 入口页面，由 `./run` 启动的静态文件服务提供。
-- `backend/processing_worker.py`
-  本地队列消费者。只有配置了 `CAPTURE_SERVICE_URL` 时才需要。
-- `capture_service/api.py`
-  云端 capture API + 手机网页入口。
-- `scripts/prepare_capture_vercel_deploy.py`
-  生成一个只包含 `capture_service` 的 Vercel 部署包。
+### Prerequisites
 
-## 本地运行
+- Python 3.11+
+- (Optional) `ffmpeg` for video processing
 
-### 前提
-
-- Python 3.11
-- 一个可用的虚拟环境，路径为 `backend/venv`
-- 如果要处理视频，建议本机安装 `ffmpeg`
-
-说明：
-
-- 这个仓库当前默认使用 `backend/venv` 这一路径
-- 项目里暂时没有公开发布用的锁定依赖清单；README 以下命令默认你已经准备好了这个虚拟环境
-
-### 启动主应用
+### Setup
 
 ```bash
-cd /path/to/everything-capture
+git clone https://github.com/YOUR_USERNAME/everything-capture.git
+cd everything-capture
+
+# Create virtualenv
+python3 -m venv backend/venv
+backend/venv/bin/pip install -r requirements.txt
+
+# Start
 ./run
 ```
 
-默认行为：
+This launches:
+- Backend API at `http://127.0.0.1:8000`
+- Frontend UI at `http://127.0.0.1:8010`
 
-- 启动本地后端：`http://127.0.0.1:8000`
-- 启动本地前端：`http://127.0.0.1:8010`
-- 如果 `backend/.local/capture_service.env` 存在且配置了 `CAPTURE_SERVICE_URL`，自动同时启动本地 processing worker
+### Data Storage
 
-本地数据默认写到项目同级的外部数据目录（代码与数据分离）：
+All data is stored **outside** the repo in a sibling directory:
 
-- 数据目录：`../everything-capture-data/`
-- 数据库：`../everything-capture-data/app.db`
-- 媒体：`../everything-capture-data/media/`
-- 加密密钥：`../everything-capture-data/.local/master.key`
-- 导出/备份：`../everything-capture-data/exports/`、`../everything-capture-data/backups/`
+```
+../everything-capture-data/
+├── app.db              SQLite database
+├── media/              Downloaded media files
+├── .local/master.key   Encryption key for API secrets
+└── exports/            Data exports
+```
 
-可通过环境变量覆盖：`DATA_DIR`、`SQLITE_PATH`、`MEDIA_DIR`、`EXPORTS_DIR`、`BACKUPS_DIR`
+Override with environment variables: `DATA_DIR`, `SQLITE_PATH`, `MEDIA_DIR`, `EXPORTS_DIR`.
 
-### 不启用云端队列时
+## Mobile / Cloud Capture
 
-如果你只在本机浏览器里使用这个项目，不需要部署任何云端服务：
+To capture from your phone, deploy the lightweight `capture_service/` (e.g. to Vercel):
 
-1. 运行 `./run`
-2. 打开 `http://127.0.0.1:8010`
-3. 直接在本地 UI 里导入 / 抓取内容
+```bash
+# Generate a Vercel-ready deploy package
+backend/venv/bin/python scripts/prepare_capture_vercel_deploy.py ./deploy_output
+cd deploy_output && vercel
+```
 
-## 手机端 / 云端收件箱
+Then configure locally:
 
-如果你想从手机、Shortcut、分享菜单把内容先丢到云上，再由自己电脑慢慢处理，就部署 `capture_service/`。
+```bash
+mkdir -p backend/.local
+echo 'CAPTURE_SERVICE_URL="https://your-deployment.vercel.app"' > backend/.local/capture_service.env
+```
 
-- 云端 capture 组件说明：[capture_service/README.md](./capture_service/README.md)
+The local `processing_worker` will automatically pull from the cloud queue when you run `./run`.
 
-## 可选集成
+See [capture_service/README.md](./capture_service/README.md) for details.
 
-这些都不是项目运行的硬前提，但可以在本地模式里打开：
+## Optional Integrations
 
-- Notion 同步
-- Obsidian 同步
-- AI Base URL / Model / API Key
-- Google / Email / Phone 认证相关能力
+Configure these through the web UI settings page — no config files needed:
 
-如果你只是把这个仓库作为单人、本地优先工具来使用，可以完全不配置这些。
+| Integration | Purpose |
+|---|---|
+| Notion | Sync items to a Notion database |
+| Obsidian | Export items as Markdown to an Obsidian vault |
+| AI (OpenAI-compatible) | Knowledge base Q&A and analysis |
+
+API keys are encrypted at rest using Fernet encryption.
+
+## Configuration
+
+| Env Variable | Default | Description |
+|---|---|---|
+| `DATA_DIR` | `../everything-capture-data/` | Root data directory |
+| `SQLITE_PATH` | `$DATA_DIR/app.db` | Database path |
+| `MEDIA_DIR` | `$DATA_DIR/media/` | Media storage path |
+| `FRONTEND_PORT` | `8010` | Frontend server port |
+| `CAPTURE_SERVICE_URL` | *(none)* | Cloud capture service URL |
+| `RUN_RELOAD` | `1` | Enable uvicorn hot-reload |
+
+## Development
+
+```bash
+# Run tests
+backend/venv/bin/python -m pytest backend/tests/ -v
+
+# Install optional dependencies
+backend/venv/bin/pip install playwright tiktoken huggingface-hub
+playwright install chromium
+```
+
+## License
+
+[MIT](./LICENSE)

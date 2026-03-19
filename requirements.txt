@@ -1,0 +1,34 @@
+# Core
+fastapi>=0.135.0
+uvicorn[standard]>=0.41.0
+sqlalchemy>=2.0.40
+pydantic>=2.12.0
+httpx>=0.28.0
+beautifulsoup4>=4.14.0
+cryptography>=46.0.0
+python-dotenv>=1.2.0
+python-multipart>=0.0.22
+
+# Content extraction
+trafilatura>=2.0.0
+lxml>=6.0.0
+yt-dlp>=2026.3.0
+
+# Optional: Cloud capture service (PostgreSQL backend)
+# psycopg[binary]>=3.2.0
+
+# Optional: AI features
+# tiktoken>=0.12.0
+# huggingface-hub>=1.6.0
+
+# Optional: Local whisper transcription (macOS Apple Silicon)
+# mlx>=0.31.0
+# mlx-whisper>=0.4.0
+
+# Optional: Browser automation for JS-heavy pages
+# playwright>=1.58.0
+
+# Development
+# pytest>=9.0.0
+# pytest-asyncio>=1.3.0
+# pytest-timeout>=2.4.0

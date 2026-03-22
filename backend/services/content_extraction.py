@@ -469,6 +469,11 @@ def _normalize_http_url(candidate: str | None) -> str | None:
     value = str(candidate or "").strip()
     if not value:
         return None
+    if not re.fullmatch(r"https?://\S+", value, re.IGNORECASE):
+        match = HTTP_URL_PATTERN.search(value)
+        if not match:
+            return None
+        value = match.group(0)
     trimmed = re.sub(r"[)\]}>.,!?;:'\"。，！？；：]+$", "", value)
     if not re.match(r"^https?://", trimmed, re.IGNORECASE):
         return None

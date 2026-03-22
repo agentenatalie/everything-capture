@@ -59,6 +59,16 @@ class ShortcutCompatibilityTests(unittest.TestCase):
             "https://example.com/article?id=1&utm=test",
         )
 
+    def test_resolve_extract_url_strips_share_copy_from_url_field(self) -> None:
+        request = ExtractRequest(
+            url="“ http://xhslink.com/o/2fPl87fcb7H   复制后打开【小红书】查看笔记！”"
+        )
+
+        self.assertEqual(
+            _resolve_extract_url(request),
+            "http://xhslink.com/o/2fPl87fcb7H",
+        )
+
     def test_store_shared_text_capture_saves_text_when_no_url_exists(self) -> None:
         background_tasks = _BackgroundTasksStub()
         request = ExtractRequest(

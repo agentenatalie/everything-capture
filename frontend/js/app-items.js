@@ -900,7 +900,7 @@
                         ? itemsData.find((item) => item.id === currentOpenItemId) || commandSearchResults.find((item) => item.id === currentOpenItemId)
                         : null;
                     if (refreshedItem && currentOpenItemId === refreshedItem.id && !contentWasEdited && contentViewMode !== 'edit') {
-                        openModalByItem(refreshedItem, { preserveSidebarTab: true });
+                        refreshOpenModalChrome(refreshedItem, { preserveSidebarTab: true });
                     }
                 }
             } catch (error) {
@@ -1045,7 +1045,7 @@
             patchRenderedItemsById(itemId);
             const refreshedItem = getItemById(itemId);
             if (refreshedItem && currentOpenItemId === itemId) {
-                openModalByItem(refreshedItem, { keepNotePanel: isNotePanelOpen, preserveSidebarTab: true });
+                refreshOpenModalChrome(refreshedItem, { preserveSidebarTab: true });
             }
         }
 
@@ -1427,7 +1427,7 @@
                         mergeUpdatedItem(updated);
                         patchRenderedItemsById(itemId);
                         if (currentOpenItemId === itemId && !contentWasEdited && contentViewMode !== 'edit') {
-                            openModalByItem(updated, { preserveSidebarTab: true });
+                            refreshOpenModalChrome(updated, { preserveSidebarTab: true });
                         }
                         if (wasProcessing && updated.parse_status === 'completed') {
                             console.log('[bg-refresh] item ' + itemId + ' parse completed, triggering AI organize');
@@ -1549,6 +1549,76 @@
             setNotePanelOpen(isNotePanelOpen);
         }
 
+        function renderModalFooter(item) {
+            if (!modalFooter || !item) return;
+
+            const parseIcon = `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="m17.729 23.2502 4.671 -8.763c0.0513 -0.0959 0.0832 -0.2009 0.0939 -0.3091 0.0106 -0.1082 -0.0001 -0.2174 -0.0317 -0.3214 -0.0316 -0.1041 -0.0834 -0.2008 -0.1524 -0.2848 -0.069 -0.084 -0.1539 -0.1536 -0.2498 -0.2047l-1.46 -0.779c-0.1938 -0.103 -0.4206 -0.125 -0.6305 -0.061 -0.21 0.0639 -0.386 0.2084 -0.4895 0.402l-5.5 10.321"/><path d="m20.8449 17.4081 -2.9209 -1.558"/><path d="M14.25 12v3"/><path d="M15.75 13.5h-3"/><path d="M21.75 6v3"/><path d="M23.25 7.5h-3"/><path d="M0.75 5.25h4.5"/><path d="M18.75 5.25h-4.5"/><path d="M9.75 23.25h-7.5c-0.39782 0 -0.77936 -0.158 -1.06066 -0.4393C0.908035 22.5294 0.75 22.1478 0.75 21.75V2.25c0 -0.39782 0.158035 -0.77936 0.43934 -1.06066C1.47064 0.908035 1.85218 0.75 2.25 0.75h15c0.3978 0 0.7794 0.158035 1.0607 0.43934 0.2813 0.2813 0.4393 0.66284 0.4393 1.06066v3"/><path d="M5.25 23.25v-9"/><path d="M14.25 9.75v-9"/><path d="M5.25 9.75v-9"/><path d="M0.75 18.75h4.5"/><path d="M0.75 14.25h9"/><path d="M0.75 9.75h18"/></svg>`;
+            const notionIcon = `<svg width="16" height="16" viewBox="0 0 100 100" fill="none"><path d="M6.017 4.313l55.333 -4.087c6.797 -0.583 8.543 -0.19 12.817 2.917l17.663 12.443c2.913 2.14 3.883 2.723 3.883 5.053v68.243c0 4.277 -1.553 6.807 -6.99 7.193L24.467 99.967c-4.08 0.193 -6.023 -0.39 -8.16 -3.113L3.3 79.94c-2.333 -3.113 -3.3 -5.443 -3.3 -8.167V11.113c0 -3.497 1.553 -6.413 6.017 -6.8z" fill="#fff"/><path fill-rule="evenodd" clip-rule="evenodd" d="M61.35 0.227l-55.333 4.087C1.553 4.7 0 7.617 0 11.113v60.66c0 2.723 0.967 5.053 3.3 8.167l13.007 16.913c2.137 2.723 4.08 3.307 8.16 3.113l64.257 -3.89c5.433 -0.387 6.99 -2.917 6.99 -7.193V20.64c0 -2.21 -0.873 -2.847 -3.443 -4.733L74.167 3.143c-4.273 -3.107 -6.02 -3.5 -12.817 -2.917zM25.92 19.523c-5.247 0.353 -6.437 0.433 -9.417 -1.99L8.927 11.507c-0.77 -0.78 -0.383 -1.753 1.557 -1.947l53.193 -3.887c4.467 -0.39 6.793 1.167 8.54 2.527l9.123 6.61c0.39 0.197 1.36 1.36 0.193 1.36l-54.933 3.307 -0.68 0.047zM19.803 88.3V30.367c0 -2.53 0.777 -3.697 3.103 -3.893L86 22.78c2.14 -0.193 3.107 1.167 3.107 3.693v57.547c0 2.53 -0.39 4.67 -3.883 4.863l-60.377 3.5c-3.493 0.193 -5.043 -0.97 -5.043 -4.083zm59.6 -54.827c0.387 1.75 0 3.5 -1.75 3.7l-2.91 0.577v42.773c-2.527 1.36 -4.853 2.137 -6.797 2.137 -3.107 0 -3.883 -0.973 -6.21 -3.887l-19.03 -29.94v28.967l6.02 1.363s0 3.5 -4.857 3.5l-13.39 0.777c-0.39 -0.78 0 -2.723 1.357 -3.11l3.497 -0.97v-38.3L30.48 40.667c-0.39 -1.75 0.58 -4.277 3.3 -4.473l14.367 -0.967 19.8 30.327v-26.83l-5.047 -0.58c-0.39 -2.143 1.163 -3.7 3.103 -3.89l13.4 -0.78z" fill="currentColor"/></svg>`;
+            const obsidianIcon = `<svg width="16" height="16" viewBox="0 0 256 256" fill="none"><path d="M94.82 149.44c6.53-1.94 17.13-4.9 29.26-5.71a102.97 102.97 0 0 1-7.64-48.84c1.63-16.51 7.54-30.38 13.25-42.1l3.47-7.14 4.48-9.18c2.35-5 4.08-9.38 4.9-13.56.81-4.07.81-7.64-.2-11.11-1.03-3.47-3.07-7.14-7.15-11.21a17.02 17.02 0 0 0-15.8 3.77l-52.81 47.5a17.12 17.12 0 0 0-5.5 10.2l-4.5 30.18a149.26 149.26 0 0 1 38.24 57.2ZM54.45 106l-1.02 3.06-27.94 62.2a17.33 17.33 0 0 0 3.27 18.96l43.94 45.16a88.7 88.7 0 0 0 8.97-88.5A139.47 139.47 0 0 0 54.45 106Z" fill="currentColor"/><path d="m82.9 240.79 2.34.2c8.26.2 22.33 1.02 33.64 3.06 9.28 1.73 27.73 6.83 42.82 11.21 11.52 3.47 23.45-5.8 25.08-17.73 1.23-8.67 3.57-18.46 7.75-27.53a94.81 94.81 0 0 0-25.9-40.99 56.48 56.48 0 0 0-29.56-13.35 96.55 96.55 0 0 0-40.99 4.79 98.89 98.89 0 0 1-15.29 80.34h.1Z" fill="currentColor"/><path d="M201.87 197.76a574.87 574.87 0 0 0 19.78-31.6 8.67 8.67 0 0 0-.61-9.48 185.58 185.58 0 0 1-21.82-35.9c-5.91-14.16-6.73-36.08-6.83-46.69 0-4.07-1.22-8.05-3.77-11.21l-34.16-43.33c0 1.94-.4 3.87-.81 5.81a76.42 76.42 0 0 1-5.71 15.9l-4.7 9.8-3.36 6.72a111.95 111.95 0 0 0-12.03 38.23 93.9 93.9 0 0 0 8.67 47.92 67.9 67.9 0 0 1 39.56 16.52 99.4 99.4 0 0 1 25.8 37.31Z" fill="currentColor"/></svg>`;
+            const editIcon = `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>`;
+            const viewIcon = `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>`;
+            const isParseLoading = manualParseInFlightItemId === item.id || item.parse_status === 'processing';
+            const isNotionLoading = isItemSyncInFlight(item.id, 'notion');
+            const isObsidianLoading = isItemSyncInFlight(item.id, 'obsidian');
+            const notionTitle = isNotionLoading ? 'Notion 同步中...' : (item.notion_page_id ? '再次检查 Notion 同步' : '同步至 Notion');
+            const obsidianTitle = isObsidianLoading ? 'Obsidian 同步中...' : getObsidianSyncButtonLabel(item);
+            const contentModeTitle = contentViewMode === 'edit' ? '预览模式' : '编辑模式';
+            const contentModeIcon = contentViewMode === 'edit' ? viewIcon : editIcon;
+
+            modalFooter.innerHTML = `
+                <div class="modal-footer-actions modal-footer-icons">
+                    <button onclick="parseItemContent('${item.id}')" class="extract-btn modal-icon-btn parse-action-btn${isParseLoading ? ' is-loading' : ''}" title="${isParseLoading ? '解析中...' : '解析内容'}" ${isParseLoading ? 'disabled' : ''}>${parseIcon}</button>
+                    <button onclick="syncItem('${item.id}', 'notion')" class="extract-btn modal-icon-btn${isNotionLoading ? ' is-loading' : ''}" title="${notionTitle}" ${isNotionLoading ? 'disabled' : ''}>${notionIcon}</button>
+                    <button onclick="syncItem('${item.id}', 'obsidian')" class="extract-btn modal-icon-btn${isObsidianLoading ? ' is-loading' : ''}" title="${obsidianTitle}" ${isObsidianLoading ? 'disabled' : ''}>${obsidianIcon}</button>
+                    <button class="extract-btn modal-icon-btn content-mode-toggle" title="${contentModeTitle}">${contentModeIcon}</button>
+                </div>
+            `;
+
+            modalFooter.querySelector('.content-mode-toggle')?.addEventListener('click', async () => {
+                const toggleBtn = modalFooter.querySelector('.content-mode-toggle');
+                if (contentViewMode === 'edit') {
+                    clearTimeout(contentAutoSaveTimer);
+                    const vals = readContentEditorDOM();
+                    await saveContentToServer(item.id, vals);
+                    _disableContentEditing();
+                    contentViewMode = 'view';
+                    if (toggleBtn) {
+                        toggleBtn.title = '编辑模式';
+                        toggleBtn.innerHTML = editIcon;
+                    }
+                } else {
+                    contentViewMode = 'edit';
+                    _enableContentEditing(item.id);
+                    if (toggleBtn) {
+                        toggleBtn.title = '预览模式';
+                        toggleBtn.innerHTML = viewIcon;
+                    }
+                }
+            });
+        }
+
+        function refreshOpenModalChrome(item, options = {}) {
+            if (!item || currentOpenItemId !== item.id || !modalOverlay?.classList.contains('active')) return;
+
+            const preserveSidebarTab = Boolean(options.preserveSidebarTab);
+            modalTitle.innerText = getDisplayItemTitle(item);
+            if (readerMetaLine) {
+                readerMetaLine.textContent = buildReaderMeta(item);
+            }
+            readerStatusDots.innerHTML = renderKnowledgeDotMarkup(item);
+            if (toggleNoteBtn) {
+                const parsedContentReady = hasParsedContent(item);
+                toggleNoteBtn.classList.toggle('is-available', parsedContentReady);
+                toggleNoteBtn.setAttribute('title', parsedContentReady ? '查看解析笔记（已解析）' : '查看解析笔记');
+            }
+            renderNotePanel(item);
+            renderModalFooter(item);
+
+            if (readerSidebarOpen && preserveSidebarTab && readerSidebarTab === 'note') {
+                openReaderSidebarPanel('note');
+            }
+        }
+
         async function parseItemContent(itemId, event = null) {
             event?.stopPropagation?.();
             if (manualParseInFlightItemId === itemId) return;
@@ -1564,10 +1634,7 @@
             });
             patchRenderedItemsById(itemId);
             if (currentOpenItemId === itemId) {
-                openModalByItem(getItemById(itemId));
-                if (readerSidebarOpen && readerSidebarTab === 'note') {
-                    openReaderSidebarPanel('note');
-                }
+                refreshOpenModalChrome(getItemById(itemId), { preserveSidebarTab: true });
             }
 
             try {
@@ -1575,19 +1642,17 @@
                 const data = await response.json().catch(() => ({}));
                 if (!response.ok) throw new Error(data.detail || '解析失败');
 
+                manualParseInFlightItemId = null;
                 mergeUpdatedItem(data);
                 patchRenderedItemsById(itemId);
                 if (currentOpenItemId === itemId) {
-                    openModalByItem(data, { preserveSidebarTab: true });
-                    if (readerSidebarOpen && readerSidebarTab === 'note') {
-                        openReaderSidebarPanel('note');
-                    }
+                    refreshOpenModalChrome(data, { preserveSidebarTab: true });
                 }
                 showToast('内容解析完成', 'success');
-                manualParseInFlightItemId = null;
                 organizeItemAnalysis(itemId);
                 return;
             } catch (error) {
+                manualParseInFlightItemId = null;
                 const failedItem = getItemById(itemId);
                 if (failedItem) {
                     mergeUpdatedItem({
@@ -1597,10 +1662,7 @@
                     });
                     patchRenderedItemsById(itemId);
                     if (currentOpenItemId === itemId) {
-                        openModalByItem(getItemById(itemId), { preserveSidebarTab: true });
-                        if (readerSidebarOpen && readerSidebarTab === 'note') {
-                            openReaderSidebarPanel('note');
-                        }
+                        refreshOpenModalChrome(getItemById(itemId), { preserveSidebarTab: true });
                     }
                 }
                 showToast(`解析失败：${error.message}`, 'error');
@@ -1622,7 +1684,7 @@
 
             analysisOrganizeInFlightItemId = itemId;
             if (currentOpenItemId === itemId) {
-                openModalByItem(currentItem, { keepNotePanel: isNotePanelOpen, preserveSidebarTab: true });
+                refreshOpenModalChrome(currentItem, { preserveSidebarTab: true });
             }
 
             try {
@@ -1639,7 +1701,7 @@
                 mergeUpdatedItem(data);
                 patchRenderedItemsById(itemId);
                 if (currentOpenItemId === itemId) {
-                    openModalByItem(data, { keepNotePanel: isNotePanelOpen, preserveSidebarTab: true });
+                    refreshOpenModalChrome(data, { preserveSidebarTab: true });
                 }
                 showToast('内容分析已整理', 'success');
             } catch (error) {
@@ -1648,7 +1710,7 @@
                 analysisOrganizeInFlightItemId = null;
                 const nextItem = getItemById(itemId);
                 if (nextItem && currentOpenItemId === itemId) {
-                    openModalByItem(nextItem, { keepNotePanel: isNotePanelOpen, preserveSidebarTab: true });
+                    refreshOpenModalChrome(nextItem, { preserveSidebarTab: true });
                 }
             }
         }
@@ -1676,10 +1738,7 @@
                 mergeUpdatedItem(data);
                 patchRenderedItemsById(itemId);
                 if (currentOpenItemId === itemId) {
-                    openModalByItem(data, { preserveSidebarTab: true });
-                    if (readerSidebarOpen && readerSidebarTab === 'note') {
-                        openReaderSidebarPanel('note');
-                    }
+                    refreshOpenModalChrome(data, { preserveSidebarTab: true });
                 }
                 showToast('解析笔记已保存', 'success');
             } catch (error) {
@@ -1688,10 +1747,7 @@
                 noteSaveInFlight = false;
                 const nextItem = getItemById(itemId);
                 if (nextItem && currentOpenItemId === itemId) {
-                    openModalByItem(nextItem, { preserveSidebarTab: true });
-                    if (readerSidebarOpen && readerSidebarTab === 'note') {
-                        openReaderSidebarPanel('note');
-                    }
+                    refreshOpenModalChrome(nextItem, { preserveSidebarTab: true });
                 }
             }
         }
@@ -1858,54 +1914,7 @@
                 modalContent.classList.remove('is-content-editable');
             }
 
-            // ── SVG icons for footer ──────────────────────────────
-            const parseIcon = `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="m17.729 23.2502 4.671 -8.763c0.0513 -0.0959 0.0832 -0.2009 0.0939 -0.3091 0.0106 -0.1082 -0.0001 -0.2174 -0.0317 -0.3214 -0.0316 -0.1041 -0.0834 -0.2008 -0.1524 -0.2848 -0.069 -0.084 -0.1539 -0.1536 -0.2498 -0.2047l-1.46 -0.779c-0.1938 -0.103 -0.4206 -0.125 -0.6305 -0.061 -0.21 0.0639 -0.386 0.2084 -0.4895 0.402l-5.5 10.321"/><path d="m20.8449 17.4081 -2.9209 -1.558"/><path d="M14.25 12v3"/><path d="M15.75 13.5h-3"/><path d="M21.75 6v3"/><path d="M23.25 7.5h-3"/><path d="M0.75 5.25h4.5"/><path d="M18.75 5.25h-4.5"/><path d="M9.75 23.25h-7.5c-0.39782 0 -0.77936 -0.158 -1.06066 -0.4393C0.908035 22.5294 0.75 22.1478 0.75 21.75V2.25c0 -0.39782 0.158035 -0.77936 0.43934 -1.06066C1.47064 0.908035 1.85218 0.75 2.25 0.75h15c0.3978 0 0.7794 0.158035 1.0607 0.43934 0.2813 0.2813 0.4393 0.66284 0.4393 1.06066v3"/><path d="M5.25 23.25v-9"/><path d="M14.25 9.75v-9"/><path d="M5.25 9.75v-9"/><path d="M0.75 18.75h4.5"/><path d="M0.75 14.25h9"/><path d="M0.75 9.75h18"/></svg>`;
-            const notionIcon = `<svg width="16" height="16" viewBox="0 0 100 100" fill="none"><path d="M6.017 4.313l55.333 -4.087c6.797 -0.583 8.543 -0.19 12.817 2.917l17.663 12.443c2.913 2.14 3.883 2.723 3.883 5.053v68.243c0 4.277 -1.553 6.807 -6.99 7.193L24.467 99.967c-4.08 0.193 -6.023 -0.39 -8.16 -3.113L3.3 79.94c-2.333 -3.113 -3.3 -5.443 -3.3 -8.167V11.113c0 -3.497 1.553 -6.413 6.017 -6.8z" fill="#fff"/><path fill-rule="evenodd" clip-rule="evenodd" d="M61.35 0.227l-55.333 4.087C1.553 4.7 0 7.617 0 11.113v60.66c0 2.723 0.967 5.053 3.3 8.167l13.007 16.913c2.137 2.723 4.08 3.307 8.16 3.113l64.257 -3.89c5.433 -0.387 6.99 -2.917 6.99 -7.193V20.64c0 -2.21 -0.873 -2.847 -3.443 -4.733L74.167 3.143c-4.273 -3.107 -6.02 -3.5 -12.817 -2.917zM25.92 19.523c-5.247 0.353 -6.437 0.433 -9.417 -1.99L8.927 11.507c-0.77 -0.78 -0.383 -1.753 1.557 -1.947l53.193 -3.887c4.467 -0.39 6.793 1.167 8.54 2.527l9.123 6.61c0.39 0.197 1.36 1.36 0.193 1.36l-54.933 3.307 -0.68 0.047zM19.803 88.3V30.367c0 -2.53 0.777 -3.697 3.103 -3.893L86 22.78c2.14 -0.193 3.107 1.167 3.107 3.693v57.547c0 2.53 -0.39 4.67 -3.883 4.863l-60.377 3.5c-3.493 0.193 -5.043 -0.97 -5.043 -4.083zm59.6 -54.827c0.387 1.75 0 3.5 -1.75 3.7l-2.91 0.577v42.773c-2.527 1.36 -4.853 2.137 -6.797 2.137 -3.107 0 -3.883 -0.973 -6.21 -3.887l-19.03 -29.94v28.967l6.02 1.363s0 3.5 -4.857 3.5l-13.39 0.777c-0.39 -0.78 0 -2.723 1.357 -3.11l3.497 -0.97v-38.3L30.48 40.667c-0.39 -1.75 0.58 -4.277 3.3 -4.473l14.367 -0.967 19.8 30.327v-26.83l-5.047 -0.58c-0.39 -2.143 1.163 -3.7 3.103 -3.89l13.4 -0.78z" fill="currentColor"/></svg>`;
-            const obsidianIcon = `<svg width="16" height="16" viewBox="0 0 256 256" fill="none"><path d="M94.82 149.44c6.53-1.94 17.13-4.9 29.26-5.71a102.97 102.97 0 0 1-7.64-48.84c1.63-16.51 7.54-30.38 13.25-42.1l3.47-7.14 4.48-9.18c2.35-5 4.08-9.38 4.9-13.56.81-4.07.81-7.64-.2-11.11-1.03-3.47-3.07-7.14-7.15-11.21a17.02 17.02 0 0 0-15.8 3.77l-52.81 47.5a17.12 17.12 0 0 0-5.5 10.2l-4.5 30.18a149.26 149.26 0 0 1 38.24 57.2ZM54.45 106l-1.02 3.06-27.94 62.2a17.33 17.33 0 0 0 3.27 18.96l43.94 45.16a88.7 88.7 0 0 0 8.97-88.5A139.47 139.47 0 0 0 54.45 106Z" fill="currentColor"/><path d="m82.9 240.79 2.34.2c8.26.2 22.33 1.02 33.64 3.06 9.28 1.73 27.73 6.83 42.82 11.21 11.52 3.47 23.45-5.8 25.08-17.73 1.23-8.67 3.57-18.46 7.75-27.53a94.81 94.81 0 0 0-25.9-40.99 56.48 56.48 0 0 0-29.56-13.35 96.55 96.55 0 0 0-40.99 4.79 98.89 98.89 0 0 1-15.29 80.34h.1Z" fill="currentColor"/><path d="M201.87 197.76a574.87 574.87 0 0 0 19.78-31.6 8.67 8.67 0 0 0-.61-9.48 185.58 185.58 0 0 1-21.82-35.9c-5.91-14.16-6.73-36.08-6.83-46.69 0-4.07-1.22-8.05-3.77-11.21l-34.16-43.33c0 1.94-.4 3.87-.81 5.81a76.42 76.42 0 0 1-5.71 15.9l-4.7 9.8-3.36 6.72a111.95 111.95 0 0 0-12.03 38.23 93.9 93.9 0 0 0 8.67 47.92 67.9 67.9 0 0 1 39.56 16.52 99.4 99.4 0 0 1 25.8 37.31Z" fill="currentColor"/></svg>`;
-            const editIcon = `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>`;
-            const viewIcon = `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>`;
-            const isParseLoading = manualParseInFlightItemId === item.id || item.parse_status === 'processing';
-            const isNotionLoading = isItemSyncInFlight(item.id, 'notion');
-            const isObsidianLoading = isItemSyncInFlight(item.id, 'obsidian');
-            const notionTitle = isNotionLoading ? 'Notion 同步中...' : (item.notion_page_id ? '再次检查 Notion 同步' : '同步至 Notion');
-            const obsidianTitle = isObsidianLoading ? 'Obsidian 同步中...' : getObsidianSyncButtonLabel(item);
-            const contentModeTitle = contentViewMode === 'edit' ? '预览模式' : '编辑模式';
-            const contentModeIcon = contentViewMode === 'edit' ? viewIcon : editIcon;
-
-            modalFooter.innerHTML = `
-                <div class="modal-footer-actions modal-footer-icons">
-                    <button onclick="parseItemContent('${item.id}')" class="extract-btn modal-icon-btn${isParseLoading ? ' is-loading' : ''}" title="${isParseLoading ? '解析中...' : '解析内容'}" ${isParseLoading ? 'disabled' : ''}>${parseIcon}</button>
-                    <button onclick="syncItem('${item.id}', 'notion')" class="extract-btn modal-icon-btn${isNotionLoading ? ' is-loading' : ''}" title="${notionTitle}" ${isNotionLoading ? 'disabled' : ''}>${notionIcon}</button>
-                    <button onclick="syncItem('${item.id}', 'obsidian')" class="extract-btn modal-icon-btn${isObsidianLoading ? ' is-loading' : ''}" title="${obsidianTitle}" ${isObsidianLoading ? 'disabled' : ''}>${obsidianIcon}</button>
-                    <button class="extract-btn modal-icon-btn content-mode-toggle" title="${contentModeTitle}">${contentModeIcon}</button>
-                </div>
-            `;
-
-            // Content mode toggle handler
-            modalFooter.querySelector('.content-mode-toggle')?.addEventListener('click', async () => {
-                const toggleBtn = modalFooter.querySelector('.content-mode-toggle');
-                if (contentViewMode === 'edit') {
-                    // Save pending edits, then switch to view mode
-                    clearTimeout(contentAutoSaveTimer);
-                    const vals = readContentEditorDOM();
-                    await saveContentToServer(item.id, vals);
-                    // Disable contenteditable
-                    _disableContentEditing();
-                    contentViewMode = 'view';
-                    if (toggleBtn) {
-                        toggleBtn.title = '编辑模式';
-                        toggleBtn.innerHTML = editIcon;
-                    }
-                } else {
-                    // Switch to edit mode — just enable contenteditable, no re-render
-                    contentViewMode = 'edit';
-                    _enableContentEditing(item.id);
-                    if (toggleBtn) {
-                        toggleBtn.title = '预览模式';
-                        toggleBtn.innerHTML = viewIcon;
-                    }
-                }
-            });
+            renderModalFooter(item);
 
             // Set fullscreen BEFORE active so overlay bg is white from frame 1 (no dark flash)
             toggleReaderFullscreen(true);
@@ -1951,7 +1960,7 @@
                     patchRenderedItemsById(id);
                     const refreshedItem = itemsData.find(item => item.id === id) || commandSearchResults.find(item => item.id === id);
                     if (currentOpenItemId === id && refreshedItem) {
-                        openModalByItem(refreshedItem, { preserveSidebarTab: true });
+                        refreshOpenModalChrome(refreshedItem, { preserveSidebarTab: true });
                     }
                     if (target === 'notion' && data.target_object) {
                         const targetLabel = data.target_object === 'database' ? 'Database' : 'Page';

@@ -168,6 +168,101 @@ class ExtractorMediaTests(unittest.IsolatedAsyncioTestCase):
             ],
         )
 
+    def test_parse_xhs_initial_state_uses_html_title_when_note_title_is_empty(self) -> None:
+        html = """
+        <html>
+        <head>
+          <title>#洛克王国世界 #洛克王国世界正式上线 - 小红书</title>
+        </head>
+        <body><script>
+        window.__INITIAL_STATE__ = {
+          "note": {
+            "noteDetailMap": {
+              "69beac84000000001b023da0": {
+                "note": {
+                  "title": "",
+                  "desc": "#洛克王国世界[话题]# #洛克王国世界正式上线[话题]#",
+                  "imageList": [
+                    {
+                      "urlDefault": "http://sns-webpic-qc.xhscdn.com/video-cover.jpg"
+                    }
+                  ],
+                  "video": {
+                    "media": {
+                      "stream": {
+                        "h264": [
+                          {
+                            "masterUrl": "http://sns-video-zl.xhscdn.com/example.mp4",
+                            "avgBitrate": 800000
+                          }
+                        ]
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        };
+        </script></body></html>
+        """
+
+        result = _parse_xhs_initial_state(html)
+
+        self.assertIsNotNone(result)
+        self.assertEqual(result["title"], "#洛克王国世界 #洛克王国世界正式上线")
+        self.assertEqual(
+            result["media_urls"],
+            [
+                {"type": "video", "url": "http://sns-video-zl.xhscdn.com/example.mp4", "order": 0},
+                {"type": "cover", "url": "http://sns-webpic-qc.xhscdn.com/video-cover.jpg", "order": 0},
+            ],
+        )
+
+    def test_parse_xhs_initial_state_uses_tag_list_when_title_and_html_title_are_empty(self) -> None:
+        html = """
+        <html><body><script>
+        window.__INITIAL_STATE__ = {
+          "note": {
+            "noteDetailMap": {
+              "69beac84000000001b023da0": {
+                "note": {
+                  "title": "",
+                  "desc": "#洛克王国世界[话题]# #洛克王国世界正式上线[话题]#",
+                  "tagList": [
+                    {"name": "洛克王国世界"},
+                    {"name": "洛克王国世界正式上线"}
+                  ],
+                  "imageList": [
+                    {
+                      "urlDefault": "http://sns-webpic-qc.xhscdn.com/video-cover.jpg"
+                    }
+                  ],
+                  "video": {
+                    "media": {
+                      "stream": {
+                        "h264": [
+                          {
+                            "masterUrl": "http://sns-video-zl.xhscdn.com/example.mp4",
+                            "avgBitrate": 800000
+                          }
+                        ]
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        };
+        </script></body></html>
+        """
+
+        result = _parse_xhs_initial_state(html)
+
+        self.assertIsNotNone(result)
+        self.assertEqual(result["title"], "#洛克王国世界 #洛克王国世界正式上线")
+
     def test_build_douyin_page_media_reference_returns_video_entry(self) -> None:
         self.assertEqual(
             _build_douyin_page_media_reference("https://v.douyin.com/test123/"),
@@ -533,6 +628,30 @@ class ExtractorMediaTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result.text, "")
         self.assertEqual(result.platform, "wechat")
         self.assertEqual(result.final_url, "https://mp.weixin.qq.com/s/example")
+
+    async def test_extract_content_rejects_xiaohongshu_generic_landing_page(self) -> None:
+        interstitial = ExtractResult(
+            title="小红书 - 你的生活兴趣社区",
+            text="打开小红书App查看完整内容",
+            platform="generic",
+            final_url="https://www.xiaohongshu.com/",
+        )
+
+        with patch.dict(
+            "services.extractor._EXTRACTORS",
+            {"xiaohongshu": AsyncMock(return_value=None)},
+            clear=False,
+        ):
+            with patch(
+                "services.extractor.extract_generic",
+                new=AsyncMock(return_value=interstitial),
+            ):
+                result = await extract_content("http://xhslink.com/o/test123")
+
+        self.assertEqual(result.title, "提取失败")
+        self.assertEqual(result.text, "")
+        self.assertEqual(result.platform, "xiaohongshu")
+        self.assertEqual(result.final_url, "http://xhslink.com/o/test123")
 
     def test_parse_twitter_oembed_html_extracts_text(self) -> None:
         result = _parse_twitter_oembed_html(

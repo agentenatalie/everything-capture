@@ -151,13 +151,47 @@ def _clean_text(text: str) -> str:
 
 
 _XHS_GENERIC_TITLES = {"小红书", "小红书 - 你的生活兴趣社区"}
+_XHS_NOTE_PATH_PATTERN = re.compile(r"^/(?:discovery/item|explore)/[A-Za-z0-9]+/?$", re.IGNORECASE)
+_XHS_GENERIC_PAGE_MARKERS = (
+    "你的生活兴趣社区",
+    "打开小红书",
+    "小红书App内打开",
+    "复制后打开【小红书】查看笔记",
+)
 
 
 def _normalize_xhs_title_candidate(value: str | None) -> str:
     candidate = re.sub(r"\s+", " ", str(value or "")).strip()
+    candidate = re.sub(r"\s*[-|｜]\s*小红书$", "", candidate)
     if not candidate or candidate in _XHS_GENERIC_TITLES:
         return ""
     return candidate[:200]
+
+
+def _is_xhs_note_url(url: str | None) -> bool:
+    value = str(url or "").strip()
+    if not value or detect_platform(value) != "xiaohongshu":
+        return False
+    try:
+        path = urlparse(value).path or ""
+    except Exception:
+        return False
+    return bool(_XHS_NOTE_PATH_PATTERN.match(path))
+
+
+def _looks_like_xhs_generic_landing(final_url: str | None, title: str | None = None, text: str | None = None) -> bool:
+    value = str(final_url or "").strip()
+    if not value or detect_platform(value) != "xiaohongshu":
+        return False
+    if _is_xhs_note_url(value):
+        return False
+
+    normalized_title = re.sub(r"\s+", " ", str(title or "")).strip()
+    if normalized_title in _XHS_GENERIC_TITLES:
+        return True
+
+    normalized_text = re.sub(r"\s+", " ", str(text or "")).strip()
+    return any(marker in normalized_text for marker in _XHS_GENERIC_PAGE_MARKERS)
 
 
 def _first_meaningful_text_line(text: str | None) -> str:
@@ -192,6 +226,17 @@ def _resolve_xhs_title(title: str | None, desc: str | None = None, fallback_text
         or _first_meaningful_text_line(desc)
         or _first_meaningful_text_line(fallback_text)
     )
+
+
+def _extract_xhs_html_title(html: str) -> str:
+    head_match = re.search(r"<head[^>]*>(.*?)</head>", html, flags=re.IGNORECASE | re.DOTALL)
+    scope = head_match.group(1) if head_match else html
+    match = re.search(r"<title[^>]*>(.*?)</title>", scope, flags=re.IGNORECASE | re.DOTALL)
+    if not match:
+        return ""
+    title_html = match.group(1)
+    title_text = BeautifulSoup(title_html, "html.parser").get_text(" ", strip=True)
+    return _normalize_xhs_title_candidate(title_text)
 
 
 def _normalize_media_url(src: str, base_url: str = "") -> str:
@@ -1101,6 +1146,7 @@ def _extract_xhs_video_url(note: dict) -> str:
 
 def _parse_xhs_initial_state(html: str) -> dict | None:
     """解析小红书 SSR JSON: window.__INITIAL_STATE__ = {...}"""
+    fallback_title = _extract_xhs_html_title(html)
     for marker in ("window.__INITIAL_STATE__", "window.__INITIAL_SSR_STATE__"):
         idx = html.find(marker)
         if idx == -1:
@@ -1134,7 +1180,7 @@ def _parse_xhs_initial_state(html: str) -> dict | None:
         detail_map = note_section.get("noteDetailMap", {})
         for val in detail_map.values():
             note_obj = val.get("note", val) if isinstance(val, dict) else {}
-            r = _extract_xhs_note(note_obj)
+            r = _extract_xhs_note(note_obj, fallback_title=fallback_title)
             if r:
                 return r
 
@@ -1144,25 +1190,25 @@ def _parse_xhs_initial_state(html: str) -> dict | None:
         for val in data_map.values():
             if isinstance(val, dict):
                 note_obj = val.get("note", val)
-                r = _extract_xhs_note(note_obj)
+                r = _extract_xhs_note(note_obj, fallback_title=fallback_title)
                 if r:
                     return r
 
     return None
 
 
-def _extract_xhs_note(note: dict) -> dict | None:
+def _extract_xhs_note(note: dict, fallback_title: str | None = None) -> dict | None:
     raw_title = note.get("title", "")
     desc = str(note.get("desc", "") or "")
-    title = _resolve_xhs_title(raw_title, desc)
     tags = ""
     tag_list = note.get("tagList", [])
     if tag_list:
         names = [t.get("name") or t.get("tagName", "") for t in tag_list if isinstance(t, dict)]
         tags = " ".join(f"#{n}" for n in names if n)
+    title = _resolve_xhs_title(raw_title, desc, fallback_title or tags)
 
     full = _compose_title_and_desc(title, desc)
-    if tags:
+    if tags and tags != title:
         full = f"{full}\n\n{tags}" if full else tags
 
     full = full.strip()
@@ -2479,6 +2525,13 @@ async def extract_content(url: str) -> ExtractResult:
     extractor = _EXTRACTORS.get(platform)
     if extractor and platform != "generic":
         result = await extractor(url)
+        if platform == "xiaohongshu" and result and _looks_like_xhs_generic_landing(
+            result.final_url,
+            result.title,
+            result.text,
+        ):
+            logger.warning("小红书提取命中通用落地页，忽略该结果: %s -> %s", url, result.final_url)
+            result = None
         if platform == "wechat" and result and _is_wechat_interstitial_url(result.final_url):
             logger.warning("微信提取命中验证码页: %s -> %s", url, result.final_url)
             result = None
@@ -2488,6 +2541,13 @@ async def extract_content(url: str) -> ExtractResult:
 
     # 通用提取器
     result = await extract_generic(url)
+    if platform == "xiaohongshu" and result and _looks_like_xhs_generic_landing(
+        result.final_url,
+        result.title,
+        result.text,
+    ):
+        logger.warning("小红书通用提取命中通用落地页，忽略该结果: %s -> %s", url, result.final_url)
+        result = None
     if platform == "wechat" and result and _is_wechat_interstitial_url(result.final_url):
         logger.warning("微信通用提取命中验证码页: %s -> %s", url, result.final_url)
         result = None

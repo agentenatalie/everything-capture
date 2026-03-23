@@ -3232,9 +3232,11 @@
         body.sidebar-collapsed .folder-search {
             padding: 8px;
             justify-content: center;
+            gap: 0;
         }
 
         body.sidebar-collapsed .folder-search input {
+            display: none;
             opacity: 0;
             max-width: 0;
             padding-left: 0;
@@ -3354,11 +3356,13 @@
         body.sidebar-collapsed .folder-item {
             justify-content: center;
             padding: 8px;
+            gap: 0;
         }
 
         body.sidebar-collapsed .folder-item-name,
         body.sidebar-collapsed .folder-item-count,
         body.sidebar-collapsed .folder-item-menu {
+            display: none;
             opacity: 0;
             max-width: 0;
             overflow: hidden;
@@ -3380,6 +3384,7 @@
         body.sidebar-collapsed .sidebar-user {
             justify-content: center;
             padding: 12px 10px;
+            gap: 0;
         }
 
         .sidebar-user-copy {
@@ -3427,6 +3432,7 @@
 
         body.sidebar-collapsed .sidebar-user-copy,
         body.sidebar-collapsed .sidebar-user-meta {
+            display: none;
             opacity: 0;
             max-width: 0;
             visibility: hidden;

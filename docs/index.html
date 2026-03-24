@@ -7,7 +7,7 @@
   <meta name="description" content="个人内容收藏与知识管理工具。采集任意网页内容，AI 智能分析，同步到 Notion 和 Obsidian。">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Noto+Serif+SC:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Noto+Serif+SC:wght@400;500;600;700&family=Pangolin&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="css/style.css">
   <!-- Inline logo SVG as favicon -->
   <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 128 128' fill='none'%3E%3Cpath d='M64 20 L73 50 L105 45 L82 66 L94 96 L64 78 L34 96 L46 66 L23 45 L55 50 Z' stroke='%23111' stroke-width='6' stroke-linejoin='round' stroke-linecap='round' fill='none'/%3E%3C/svg%3E">
@@ -28,11 +28,15 @@
       Everything Capture
     </a>
     <ul class="nav-links">
-      <li><a href="#features"><span class="nav-link-text">我能做什么？</span></a></li>
-      <li><a href="#how-it-works"><span class="nav-link-text">我厉害在哪？</span></a></li>
-      <li><a href="#faq"><span class="nav-link-text">关于你的问题</span></a></li>
+      <li><a href="#setup"><span class="nav-link-text">快速开始</span></a></li>
+      <li><a href="#features"><span class="nav-link-text">功能</span></a></li>
+      <li><a href="#how-it-works"><span class="nav-link-text">Why Me</span></a></li>
+      <li><a href="#faq"><span class="nav-link-text">FAQ</span></a></li>
     </ul>
-    <a href="https://github.com/agentenatalie/everything-capture" class="nav-github"><svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0 0 24 12c0-6.63-5.37-12-12-12z"/></svg></a>
+    <div class="nav-actions">
+      <a href="https://github.com/agentenatalie/everything-capture/releases/latest/download/EverythingCapture-0.1.0-arm64.dmg" class="nav-icon-link" title="下载 macOS 版本"><svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M18.71 19.5c-.83 1.24-1.71 2.45-3.05 2.47-1.34.03-1.77-.79-3.29-.79-1.53 0-2 .77-3.27.82-1.31.05-2.3-1.32-3.14-2.53C4.25 17 2.94 12.45 4.7 9.39c.87-1.52 2.43-2.48 4.12-2.51 1.28-.02 2.5.87 3.29.87.78 0 2.26-1.07 3.8-.91.65.03 2.47.26 3.64 1.98-.09.06-2.17 1.28-2.15 3.81.03 3.02 2.65 4.03 2.68 4.04-.03.07-.42 1.44-1.38 2.83M13 3.5c.73-.83 1.94-1.46 2.94-1.5.13 1.17-.34 2.35-1.04 3.19-.69.85-1.83 1.51-2.95 1.42-.15-1.15.41-2.35 1.05-3.11z"/></svg></a>
+      <a href="https://github.com/agentenatalie/everything-capture" class="nav-icon-link" title="GitHub"><svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0 0 24 12c0-6.63-5.37-12-12-12z"/></svg></a>
+    </div>
   </div>
 </nav>
 
@@ -46,19 +50,20 @@
       看到好内容，<span class="highlight">先收了再说</span>
     </h1>
     <p class="hero-sub reveal">
-      收藏夹里 200 条链接，半年后一条都找不到？<br>
-      我可以帮你把网页内容<strong>真正用起来</strong>，不再只是存个链接。
+      收藏夹里 <strong>200 条链接</strong>，半年后一条都找不到？<br>
+      我帮你把网页内容<strong>真正用起来</strong>，不再只是存个链接。
     </p>
     <div class="hero-actions reveal">
-      <a href="https://github.com/agentenatalie/everything-capture/releases/latest/download/EverythingCapture-0.1.0-arm64.dmg" class="btn btn-primary">
-        <svg class="btn-apple" width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><path d="M18.71 19.5c-.83 1.24-1.71 2.45-3.05 2.47-1.34.03-1.77-.79-3.29-.79-1.53 0-2 .77-3.27.82-1.31.05-2.3-1.32-3.14-2.53C4.25 17 2.94 12.45 4.7 9.39c.87-1.52 2.43-2.48 4.12-2.51 1.28-.02 2.5.87 3.29.87.78 0 2.26-1.07 3.8-.91.65.03 2.47.26 3.64 1.98-.09.06-2.17 1.28-2.15 3.81.03 3.02 2.65 4.03 2.68 4.04-.03.07-.42 1.44-1.38 2.83M13 3.5c.73-.83 1.94-1.46 2.94-1.5.13 1.17-.34 2.35-1.04 3.19-.69.85-1.83 1.51-2.95 1.42-.15-1.15.41-2.35 1.05-3.11z"/></svg>
-        <span class="btn-text">下载 macOS 版本</span>
+      <a href="#setup" class="btn btn-primary">
+        <span class="btn-text">一键启动</span>
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M4 17l6-5-6-5"/><path d="M12 19h8"/></svg>
       </a>
-      <a href="https://github.com/agentenatalie/everything-capture" class="hero-github">
-        <svg width="28" height="28" viewBox="0 0 24 24" fill="currentColor"><path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0 0 24 12c0-6.63-5.37-12-12-12z"/></svg>
+      <a href="https://github.com/agentenatalie/everything-capture" class="btn btn-secondary">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0 0 24 12c0-6.63-5.37-12-12-12z"/></svg>
+        GitHub
       </a>
     </div>
-    <p class="hero-meta reveal">需要 macOS 13.0+ &middot; Apple Silicon &middot; v0.1.0</p>
+    <p class="hero-meta reveal">macOS 13.0+ &middot; Apple Silicon &middot; Python 3.9+</p>
 
     <!-- Hero video -->
     <div class="hero-video-wrap reveal">
@@ -87,6 +92,45 @@
   </div>
 </section>
 
+<!-- ===== Setup ===== -->
+<section id="setup">
+  <div class="container">
+    <div class="setup-header reveal">
+      <div class="section-label">快速开始</div>
+      <h2 class="section-title">五行命令，跑起来</h2>
+      <p class="section-desc">只需要 Python 3 和一台 Mac。</p>
+    </div>
+    <div class="setup-terminal reveal">
+      <div class="setup-cmd-box" style="cursor:pointer" onclick="navigator.clipboard.writeText(document.getElementById('setup-code').textContent);var b=this.querySelector('.setup-copy-btn');b.classList.add('copied');clearTimeout(b._t);b._t=setTimeout(()=>b.classList.remove('copied'),2000)">
+        <div class="setup-cmd-dots"><span></span><span></span><span></span></div>
+<pre class="setup-code" id="setup-code">git clone https://github.com/agentenatalie/everything-capture.git
+cd everything-capture
+python3 -m venv backend/venv
+backend/venv/bin/pip install -r requirements.txt
+./run</pre>
+        <span class="setup-copy-btn">
+          <svg class="icon-copy" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+          <svg class="icon-check" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12.5l6 6L20 6"/></svg>
+        </span>
+      </div>
+    </div>
+    <div class="setup-notes reveal">
+      <div class="setup-note">
+        <strong>环境要求</strong>
+        <span>Python 3.9+、macOS 13.0+（Apple Silicon）、Git</span>
+      </div>
+      <div class="setup-note">
+        <strong>AI 功能</strong>
+        <span>在设置里填入你自己的 API key（DeepSeek、OpenAI 等都行）</span>
+      </div>
+      <div class="setup-note">
+        <strong>数据存储</strong>
+        <span>所有数据在本地 everything-capture-data/ 目录</span>
+      </div>
+    </div>
+  </div>
+</section>
+
 <!-- ===== Steps ===== -->
 <section id="features">
   <div class="container">
@@ -100,7 +144,7 @@
           <svg width="44" height="44" viewBox="0 0 48 48" fill="none" stroke="#1e3a8a" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="24" cy="24" r="20"/><path d="M22 16l2-1v17"/></svg>
         </div>
         <h3>看到就收</h3>
-        <p>浏览器扩展、手机快捷指令<br>⌘K 粘个链接就行</p>
+        <p>浏览器扩展、手机快捷指令<br><strong>⌘K</strong> 粘个链接就行</p>
       </div>
       <div class="step-arrow reveal" aria-hidden="true">
         <svg width="48" height="24" viewBox="0 0 44 20" fill="none" stroke="#1e3a8a" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" opacity="0.25"><path d="M2 10c7-3 13-3 18 0s13 3 18 0"/><path d="M33 5l7 5-7 5"/></svg>
@@ -110,7 +154,7 @@
           <svg width="44" height="44" viewBox="0 0 48 48" fill="none" stroke="#1e3a8a" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="24" cy="24" r="20"/><path d="M18 17c0-3 2.5-4.5 6-4.5s6 2 6 4.5-2 4.5-4.5 6.5l-8 9h13"/></svg>
         </div>
         <h3>自动提取</h3>
-        <p>正文、图片、视频存到本地<br>OCR 识字，Whisper 转录语音</p>
+        <p>正文、图片、视频<strong>全部存到本地</strong><br>OCR 识字，Whisper 转录语音</p>
       </div>
       <div class="step-arrow reveal" aria-hidden="true">
         <svg width="48" height="24" viewBox="0 0 44 20" fill="none" stroke="#1e3a8a" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" opacity="0.25"><path d="M2 10c7-3 13-3 18 0s13 3 18 0"/><path d="M33 5l7 5-7 5"/></svg>
@@ -120,7 +164,7 @@
           <svg width="44" height="44" viewBox="0 0 48 48" fill="none" stroke="#1e3a8a" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="24" cy="24" r="20"/><path d="M17 18c1-1.5 3.5-2.5 6.5-2.5 3 0 5 1.5 5 3.5 0 2.5-2.5 3-5 3.5M18 30c1 2 3.5 3 6.5 3 3 0 5.5-1.5 5.5-4s-2.5-3.5-5.5-3.5"/></svg>
         </div>
         <h3>搜就能找到</h3>
-        <p>全文搜索所有内容<br>图片里的字、视频里的话都能搜</p>
+        <p><strong>全文 + 语义搜索</strong>所有内容<br>图片里的字、视频里的话都能搜</p>
       </div>
       <div class="step-arrow reveal" aria-hidden="true">
         <svg width="48" height="24" viewBox="0 0 44 20" fill="none" stroke="#1e3a8a" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" opacity="0.25"><path d="M2 10c7-3 13-3 18 0s13 3 18 0"/><path d="M33 5l7 5-7 5"/></svg>
@@ -130,7 +174,7 @@
           <svg width="44" height="44" viewBox="0 0 48 48" fill="none" stroke="#1e3a8a" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="24" cy="24" r="20"/><path d="M27 14l-10 13h11M27 14v20"/></svg>
         </div>
         <h3>问 AI</h3>
-        <p>「给我洛克王国的全攻略」<br>AI 从收藏库里找到、摘要、总结</p>
+        <p>「给我洛克王国的全攻略」<br>AI 从收藏库里<strong>找到、摘要、总结</strong></p>
       </div>
     </div>
   </div>
@@ -177,9 +221,9 @@
             Everything Capture
           </div>
           <ul class="comparison-list">
-            <li>正文、图片、视频全部保存到本地</li>
-            <li>原网页挂了也没关系，内容都在</li>
-            <li>全文搜索 + AI 问答，想找什么直接问</li>
+            <li>正文、图片、视频<strong>全部保存到本地</strong></li>
+            <li>原网页挂了也没关系，<strong>内容都在</strong></li>
+            <li><strong>全文搜索 + AI 问答</strong>，想找什么直接问</li>
             <li>OCR 识别图片文字，Whisper 转录视频语音</li>
           </ul>
         </div>
@@ -201,35 +245,35 @@
           <span class="faq-q-marker"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#1e3a8a" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="10.5" r="6.5"/><path d="M15 15l3.5 4"/></svg></span>
           我的数据会不会被上传到你们的服务器？
         </div>
-        <div class="faq-answer">不会。所有内容存在你 Mac 本地的 SQLite 数据库里，媒体文件也在本地。AI 功能用的是你自己的 API key，我们没有服务器。</div>
+        <div class="faq-answer"><strong>不会。</strong>所有内容存在你 Mac 本地的 SQLite 数据库里，媒体文件也在本地。AI 功能用的是你自己的 API key，我们没有服务器。</div>
       </div>
       <div class="faq-item reveal">
         <div class="faq-question">
           <span class="faq-q-marker"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#1e3a8a" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="10.5" r="6.5"/><path d="M15 15l3.5 4"/></svg></span>
           要花钱吗？
         </div>
-        <div class="faq-answer">软件免费开源。AI 功能需要你自备 API key（DeepSeek、OpenAI 等都行，几块钱能用很久）。不用 AI 也完全能用。</div>
+        <div class="faq-answer"><strong>免费开源。</strong>AI 功能需要你自备 API key（DeepSeek、OpenAI 等都行，几块钱能用很久）。不用 AI 也完全能用。</div>
       </div>
       <div class="faq-item reveal">
         <div class="faq-question">
           <span class="faq-q-marker"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#1e3a8a" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="10.5" r="6.5"/><path d="M15 15l3.5 4"/></svg></span>
           小红书/抖音这种平台的内容也能存？
         </div>
-        <div class="faq-answer">能。小红书图文、抖音视频、Twitter、公众号文章都有专门的解析器，图片和视频都会下载到本地。其他网页走通用提取。</div>
+        <div class="faq-answer"><strong>能。</strong>小红书图文、抖音视频、Twitter、公众号文章都有专门的解析器，图片和视频都会下载到本地。其他网页走通用提取。</div>
       </div>
       <div class="faq-item reveal">
         <div class="faq-question">
           <span class="faq-q-marker"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#1e3a8a" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="10.5" r="6.5"/><path d="M15 15l3.5 4"/></svg></span>
           已经在用 Notion / Obsidian 了，还需要这个吗？
         </div>
-        <div class="faq-answer">正好。这个工具不是要替代它们，而是给它们多一个自动化的内容入口。采集的内容可以一键同步过去，省去手动复制粘贴。</div>
+        <div class="faq-answer"><strong>正好。</strong>不是替代它们，而是给它们多一个自动化的内容入口。采集的内容可以<strong>一键同步</strong>过去，省去手动复制粘贴。</div>
       </div>
       <div class="faq-item reveal">
         <div class="faq-question">
           <span class="faq-q-marker"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#1e3a8a" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="10.5" r="6.5"/><path d="M15 15l3.5 4"/></svg></span>
           断网了还能用吗？
         </div>
-        <div class="faq-answer">采集新内容和 AI 需要联网，但已经存下来的内容 — 浏览、搜索、管理 — 完全离线可用。</div>
+        <div class="faq-answer">采集新内容和 AI 需要联网，但已经存下来的内容 — 浏览、搜索、管理 — <strong>完全离线可用</strong>。</div>
       </div>
     </div>
   </div>

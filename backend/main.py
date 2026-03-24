@@ -4,8 +4,9 @@ import os
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
+from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
-from paths import MEDIA_DIR, PROJECT_ROOT, ensure_data_dirs, migrate_legacy_data
+from paths import APP_MODE, FRONTEND_DIR, MEDIA_DIR, ensure_data_dirs, migrate_legacy_data
 
 # ---------------------------------------------------------------------------
 # Bootstrap external data directory and migrate legacy data (before DB init)
@@ -76,6 +77,16 @@ app.include_router(settings.router)
 app.include_router(ai.router)
 
 
+@app.get("/healthz")
+def healthz() -> JSONResponse:
+    return JSONResponse(
+        {
+            "ok": True,
+            "mode": APP_MODE or "default",
+        }
+    )
+
+
 @app.on_event("startup")
 def startup_recover_processing_items() -> None:
     items.schedule_processing_item_parsing_recovery()
@@ -86,4 +97,4 @@ os.makedirs(MEDIA_DIR, exist_ok=True)
 app.mount("/static/media", StaticFiles(directory=str(MEDIA_DIR)), name="media")
 
 # Serve the static frontend from the same origin as the API.
-app.mount("/", StaticFiles(directory=str(PROJECT_ROOT / "frontend"), html=True), name="frontend")
+app.mount("/", StaticFiles(directory=str(FRONTEND_DIR), html=True), name="frontend")

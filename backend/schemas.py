@@ -121,6 +121,45 @@ class SettingsResponse(BaseModel):
     class Config:
         from_attributes = True
 
+
+class ComponentInstallTaskResponse(BaseModel):
+    id: str
+    component_id: str
+    status: str
+    stage: str
+    message: str
+    error: Optional[str] = None
+    progress: float = 0.0
+    latest_version: Optional[str] = None
+    installed_version: Optional[str] = None
+    requires_restart: bool = False
+    created_at: str
+    updated_at: str
+
+
+class ComponentStatusResponse(BaseModel):
+    id: str
+    title: str
+    description: str = ""
+    available: bool = False
+    bundled: bool = False
+    status: str
+    latest_version: Optional[str] = None
+    installed_version: Optional[str] = None
+    download_url: Optional[str] = None
+    download_size_bytes: Optional[int] = None
+    requires_restart: bool = False
+    unavailable_reason: Optional[str] = None
+    task: Optional[ComponentInstallTaskResponse] = None
+
+
+class ComponentsCatalogResponse(BaseModel):
+    platform: str
+    manifest_source: str
+    manifest_configured: bool = False
+    components: list[ComponentStatusResponse] = Field(default_factory=list)
+
+
 class SettingsUpdateRequest(BaseModel):
     notion_api_token: Optional[str] = None
     notion_database_id: Optional[str] = None
@@ -348,5 +387,3 @@ class BulkFolderUpdateRequest(BaseModel):
 
 class BulkFolderUpdateResponse(BaseModel):
     updated_count: int
-
-

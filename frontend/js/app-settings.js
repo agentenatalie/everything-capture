@@ -11,7 +11,13 @@
         const aiModelInput = document.getElementById('aiModel');
         const aiModelSelect = document.getElementById('aiModelSelect');
         const aiModelModeHint = document.getElementById('aiModelModeHint');
+        const componentsList = document.getElementById('componentsList');
+        const componentsStatusText = document.getElementById('componentsStatusText');
+        const componentsCatalogHint = document.getElementById('componentsCatalogHint');
         let bulkSyncInFlightTarget = null;
+        let latestComponentsCatalog = null;
+        const componentTaskStateByComponentId = new Map();
+        const componentTaskPollTimers = new Map();
 
         const AI_PROVIDER_MODEL_PRESETS = [
             {
@@ -141,6 +147,258 @@
                 syncAllObsidianBtn.textContent = bulkSyncInFlightTarget === 'obsidian'
                     ? '同步中...'
                     : '同步 Obsidian';
+            }
+        }
+
+        function formatByteSize(sizeBytes) {
+            const numericSize = Number(sizeBytes || 0);
+            if (!numericSize) return '';
+            if (numericSize < 1024 * 1024) {
+                return `${Math.max(1, Math.round(numericSize / 1024))} KB`;
+            }
+            return `${(numericSize / (1024 * 1024)).toFixed(numericSize >= 1024 * 1024 * 1024 ? 1 : 0)} MB`;
+        }
+
+        function getEffectiveComponentTask(component) {
+            const localTask = componentTaskStateByComponentId.get(component.id);
+            if (!localTask) return component.task || null;
+            if (!component.task) return localTask;
+            return String(localTask.updated_at || '') >= String(component.task.updated_at || '')
+                ? localTask
+                : component.task;
+        }
+
+        function getComponentButtonLabel(component, task) {
+            if (component.bundled) {
+                return '已内置';
+            }
+            if (task && (task.status === 'pending' || task.status === 'running')) {
+                return '安装中...';
+            }
+            if (task?.status === 'failed') {
+                return '重试安装';
+            }
+            if (component.status === 'update_available') {
+                return '更新组件';
+            }
+            if (component.status === 'installed') {
+                return '已安装';
+            }
+            if (!component.available) {
+                return '暂不可用';
+            }
+            return '安装组件';
+        }
+
+        function getComponentBadgeLabel(component, task) {
+            if (component.bundled) return '内置';
+            if (task?.status === 'pending' || task?.status === 'running') return '安装中';
+            if (task?.status === 'failed') return '安装失败';
+            if (component.status === 'update_available') return '可更新';
+            if (component.status === 'installed') return '已安装';
+            if (component.status === 'unavailable') return '未开放';
+            return '未安装';
+        }
+
+        function getComponentTaskCopy(task) {
+            if (!task) return '';
+            const progressValue = Number(task.progress || 0);
+            const progressText = progressValue > 0 && progressValue < 1
+                ? ` · ${Math.round(progressValue * 100)}%`
+                : '';
+            if (task.status === 'failed') {
+                return task.error || task.message || '组件安装失败';
+            }
+            return `${task.message || '处理中'}${progressText}`;
+        }
+
+        function setComponentsSummary(catalog) {
+            if (!componentsStatusText || !componentsCatalogHint) return;
+
+            const components = Array.isArray(catalog?.components) ? catalog.components : [];
+            const installedCount = components.filter((component) => {
+                const task = getEffectiveComponentTask(component);
+                if (task?.status === 'pending' || task?.status === 'running') return false;
+                return component.status === 'installed' || component.status === 'update_available' || component.status === 'bundled';
+            }).length;
+            const installingCount = components.filter((component) => {
+                const task = getEffectiveComponentTask(component);
+                return task?.status === 'pending' || task?.status === 'running';
+            }).length;
+            const bundledCount = components.filter((component) => component.bundled).length;
+
+            if (!components.length) {
+                componentsStatusText.textContent = '未配置';
+                componentsStatusText.style.color = '#6b7280';
+                componentsCatalogHint.textContent = '当前没有可用组件。';
+                componentsCatalogHint.style.color = '#6b7280';
+                return;
+            }
+
+            if (installingCount > 0) {
+                componentsStatusText.textContent = '安装中';
+                componentsStatusText.style.color = '#0f172a';
+            } else if (bundledCount > 0 && installedCount === bundledCount) {
+                componentsStatusText.textContent = '已内置';
+                componentsStatusText.style.color = '#1f7a4d';
+            } else if (installedCount > 0) {
+                componentsStatusText.textContent = '已安装';
+                componentsStatusText.style.color = '#1f7a4d';
+            } else {
+                componentsStatusText.textContent = '未安装';
+                componentsStatusText.style.color = '#6b7280';
+            }
+
+            if (!catalog?.manifest_configured && bundledCount === 0) {
+                componentsCatalogHint.textContent = '当前使用内置占位清单。要启用一键安装，需要配置 hosted component manifest。';
+                componentsCatalogHint.style.color = '#6b7280';
+                return;
+            }
+
+            if (bundledCount > 0) {
+                componentsCatalogHint.textContent = `已识别 ${components.length} 个组件，其中 ${bundledCount} 个已随应用内置。`;
+                componentsCatalogHint.style.color = '#6b7280';
+                return;
+            }
+
+            componentsCatalogHint.textContent = installedCount > 0
+                ? `已识别 ${components.length} 个组件，已安装 ${installedCount} 个。`
+                : `已识别 ${components.length} 个组件。`;
+            componentsCatalogHint.style.color = '#6b7280';
+        }
+
+        function renderComponentsCatalog(catalog) {
+            if (!componentsList) return;
+
+            latestComponentsCatalog = catalog;
+            setComponentsSummary(catalog);
+            const components = Array.isArray(catalog?.components) ? catalog.components : [];
+
+            if (!components.length) {
+                componentsList.innerHTML = '';
+                return;
+            }
+
+            componentsList.innerHTML = components.map((component) => {
+                const task = getEffectiveComponentTask(component);
+                const isInstalling = task?.status === 'pending' || task?.status === 'running';
+                const hasFailedTask = task?.status === 'failed';
+                const isInstalled = (component.status === 'installed' || component.status === 'bundled') && !isInstalling;
+                const buttonDisabled = component.bundled || !component.available || isInstalling || (isInstalled && !hasFailedTask);
+                const latestVersion = component.latest_version ? `最新版本 ${escapeHtml(component.latest_version)}` : '未提供版本';
+                const installedVersion = component.installed_version
+                    ? `已装 ${escapeHtml(component.installed_version)}`
+                    : '尚未安装';
+                const sizeText = component.download_size_bytes ? ` · ${escapeHtml(formatByteSize(component.download_size_bytes))}` : '';
+                const taskCopy = getComponentTaskCopy(task);
+                const bundledCopy = component.bundled
+                    ? '该组件已随桌面应用一起提供，首次打开即可直接使用。'
+                    : '';
+                const unavailableCopy = !component.available
+                    ? escapeHtml(component.unavailable_reason || '当前尚未提供下载包。')
+                    : '';
+
+                return `
+                    <div class="settings-component-card" data-component-id="${escapeAttribute(component.id)}">
+                        <div class="settings-component-head">
+                            <div>
+                                <h4 class="settings-component-title">${escapeHtml(component.title || component.id)}</h4>
+                                <div class="settings-component-meta">${latestVersion} · ${installedVersion}${sizeText}</div>
+                            </div>
+                            <div class="settings-component-status">${escapeHtml(getComponentBadgeLabel(component, task))}</div>
+                        </div>
+                        <div class="settings-component-copy">${escapeHtml(component.description || '未提供组件说明。')}</div>
+                        <div class="settings-component-actions">
+                            <button
+                                class="extract-btn ${component.available && !isInstalled && !component.bundled ? '' : 'settings-secondary'}"
+                                type="button"
+                                data-component-install="${escapeAttribute(component.id)}"
+                                ${buttonDisabled ? 'disabled' : ''}
+                            >
+                                ${escapeHtml(getComponentButtonLabel(component, task))}
+                            </button>
+                            ${component.requires_restart ? '<div class="settings-component-task">安装后需要重启应用。</div>' : ''}
+                        </div>
+                        <div class="settings-component-task">${taskCopy || bundledCopy || unavailableCopy || '安装后会自动写入组件目录并激活当前版本。'}</div>
+                    </div>
+                `;
+            }).join('');
+        }
+
+        async function loadComponentsCatalog() {
+            if (!componentsList) return null;
+            try {
+                const response = await fetch('/api/settings/components');
+                const data = await response.json();
+                if (!response.ok) {
+                    throw new Error(data.detail || '加载组件清单失败');
+                }
+                renderComponentsCatalog(data);
+                return data;
+            } catch (error) {
+                if (componentsCatalogHint) {
+                    componentsCatalogHint.textContent = `加载组件清单失败：${error.message}`;
+                    componentsCatalogHint.style.color = '#b91c1c';
+                }
+                if (componentsList) {
+                    componentsList.innerHTML = '';
+                }
+                return null;
+            }
+        }
+
+        async function pollComponentTask(taskId, componentId) {
+            const previousTimer = componentTaskPollTimers.get(componentId);
+            if (previousTimer) {
+                clearTimeout(previousTimer);
+            }
+
+            try {
+                const response = await fetch(`/api/settings/components/tasks/${encodeURIComponent(taskId)}`);
+                const task = await response.json();
+                if (!response.ok) {
+                    throw new Error(task.detail || '获取组件安装进度失败');
+                }
+
+                componentTaskStateByComponentId.set(componentId, task);
+                if (latestComponentsCatalog) {
+                    renderComponentsCatalog(latestComponentsCatalog);
+                }
+
+                if (task.status === 'pending' || task.status === 'running') {
+                    const timerId = window.setTimeout(() => {
+                        pollComponentTask(taskId, componentId);
+                    }, 1000);
+                    componentTaskPollTimers.set(componentId, timerId);
+                    return;
+                }
+
+                componentTaskPollTimers.delete(componentId);
+                const refreshedCatalog = await loadComponentsCatalog();
+                if (refreshedCatalog) {
+                    renderComponentsCatalog(refreshedCatalog);
+                }
+
+                if (task.status === 'completed') {
+                    showToast(task.requires_restart ? '组件安装完成，重启应用后会更稳。' : '组件安装完成。', 'success');
+                } else if (task.status === 'failed') {
+                    showToast(`组件安装失败: ${task.error || '未知错误'}`, 'error');
+                }
+            } catch (error) {
+                componentTaskPollTimers.delete(componentId);
+                componentTaskStateByComponentId.set(componentId, {
+                    id: taskId,
+                    component_id: componentId,
+                    status: 'failed',
+                    stage: 'failed',
+                    message: '组件安装失败',
+                    error: error.message,
+                    progress: 1,
+                });
+                if (latestComponentsCatalog) {
+                    renderComponentsCatalog(latestComponentsCatalog);
+                }
+                showToast(`组件安装失败: ${error.message}`, 'error');
             }
         }
 
@@ -315,7 +573,7 @@
         }
 
         async function loadSettings(options = {}) {
-            const { includeNotionDatabases = false } = options;
+            const { includeNotionDatabases = false, includeComponents = false } = options;
             try {
                 const res = await fetch('/api/settings');
                 if (res.ok) {
@@ -361,6 +619,9 @@
                     refreshBulkSyncButtons();
                     if (includeNotionDatabases) {
                         await loadNotionDatabases(data.notion_database_id || '');
+                    }
+                    if (includeComponents) {
+                        await loadComponentsCatalog();
                     }
                     return data;
                 }
@@ -601,6 +862,38 @@
 
         syncAllNotionBtn?.addEventListener('click', () => runBulkSync('notion'));
         syncAllObsidianBtn?.addEventListener('click', () => runBulkSync('obsidian'));
+        componentsList?.addEventListener('click', async (event) => {
+            const installButton = event.target instanceof Element
+                ? event.target.closest('[data-component-install]')
+                : null;
+            if (!installButton) return;
+
+            const componentId = String(installButton.getAttribute('data-component-install') || '').trim();
+            if (!componentId) return;
+
+            installButton.setAttribute('disabled', 'disabled');
+            try {
+                const response = await fetch(`/api/settings/components/${encodeURIComponent(componentId)}/install`, {
+                    method: 'POST',
+                });
+                const task = await response.json();
+                if (!response.ok) {
+                    throw new Error(task.detail || '启动组件安装失败');
+                }
+
+                componentTaskStateByComponentId.set(componentId, task);
+                if (latestComponentsCatalog) {
+                    renderComponentsCatalog(latestComponentsCatalog);
+                }
+                showToast('组件下载已开始。', 'info');
+                await pollComponentTask(task.id, componentId);
+            } catch (error) {
+                showToast(`启动组件安装失败: ${error.message}`, 'error');
+                if (latestComponentsCatalog) {
+                    renderComponentsCatalog(latestComponentsCatalog);
+                }
+            }
+        });
         aiBaseUrlInput?.addEventListener('input', () => {
             setAiModelFieldMode(aiBaseUrlInput.value, getAiModelValue());
         });

@@ -1,6 +1,9 @@
 import os
 import sys
+import tempfile
+import types
 import unittest
+from pathlib import Path
 from unittest.mock import patch
 
 
@@ -10,6 +13,8 @@ from models import Item, Media  # noqa: E402
 from services.content_extraction import (  # noqa: E402
     ContentExtractionError,
     _format_video_text_block,
+    _find_ffmpeg,
+    _resolve_media_extractor_command,
     _summarize_swift_failure,
     parse_item_content,
     parse_subtitle_lines,
@@ -69,7 +74,7 @@ class ContentExtractionTests(unittest.TestCase):
         self.assertEqual(result.parse_status, "completed")
         self.assertEqual(result.source_type, "mixed")
         self.assertEqual(result.detected_title, "图文解析测试")
-        self.assertIn("海报标题", result.ocr_text)
+        self.assertEqual(result.ocr_text, "")
         # Videos no longer produce frame_texts (no frame OCR)
         self.assertEqual(result.frame_texts, [])
         # Images still produce QR links; videos do not
@@ -83,7 +88,7 @@ class ContentExtractionTests(unittest.TestCase):
                 "https://image.example.com/page",
             ],
         )
-        self.assertIn("[ocr_text]", result.extracted_text)
+        self.assertNotIn("[ocr_text]", result.extracted_text)
         self.assertIn("[subtitle_text]", result.extracted_text)
         self.assertIn("这是第一句。", result.extracted_text)
         self.assertIn("接下来讲第二句。", result.extracted_text)
@@ -237,6 +242,45 @@ class VideoTextFormattingTests(unittest.TestCase):
 
         self.assertIn("第一行。", formatted)
         self.assertIn("https://example.com/demo。", formatted)
+
+
+class RuntimeBinaryResolutionTests(unittest.TestCase):
+    @patch("services.content_extraction._ocr_helper_path", None)
+    def test_media_extractor_prefers_explicit_env_path(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            helper_path = os.path.join(temp_dir, "media_text_extract")
+            with open(helper_path, "w", encoding="utf-8") as handle:
+                handle.write("#!/bin/sh\n")
+
+            with patch.dict(os.environ, {"EC_OCR_HELPER_PATH": helper_path}, clear=False):
+                self.assertEqual(_resolve_media_extractor_command(), [os.path.realpath(helper_path)])
+
+    @patch("services.content_extraction._ffmpeg_path", None)
+    def test_find_ffmpeg_prefers_explicit_env_path(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            ffmpeg_path = os.path.join(temp_dir, "ffmpeg")
+            with open(ffmpeg_path, "w", encoding="utf-8") as handle:
+                handle.write("#!/bin/sh\n")
+
+            with patch.dict(os.environ, {"EC_FFMPEG_PATH": ffmpeg_path}, clear=False):
+                self.assertEqual(_find_ffmpeg(), os.path.realpath(ffmpeg_path))
+
+    @patch("services.content_extraction.activate_component_runtime")
+    def test_transcription_attempts_to_activate_local_component(self, mock_activate_component_runtime) -> None:
+        from services.content_extraction import _transcribe_video_with_mlx_whisper
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            video_path = os.path.join(temp_dir, "sample.mp4")
+            with open(video_path, "wb") as handle:
+                handle.write(b"")
+
+            fake_mlx_whisper = types.SimpleNamespace(
+                transcribe=lambda *args, **kwargs: {"text": "", "segments": []}
+            )
+            with patch.dict(sys.modules, {"mlx_whisper": fake_mlx_whisper}, clear=False):
+                self.assertEqual(_transcribe_video_with_mlx_whisper(Path(video_path)), "")
+
+        mock_activate_component_runtime.assert_called_once()
 
 
 class SwiftFailureSummaryTests(unittest.TestCase):

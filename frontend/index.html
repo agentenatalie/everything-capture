@@ -293,10 +293,26 @@
                             </div>
                         </div>
                         <div class="settings-group">
-                            <div class="settings-section" id="settingsSectionNotion">
+                            <div class="settings-section" id="settingsSectionComponents">
                                 <div class="settings-section-head">
                                     <div class="settings-section-head-main">
                                         <span class="settings-section-mark" aria-hidden="true">02</span>
+                                        <div>
+                                            <h3>组件</h3>
+                                            <div class="settings-section-copy">可选能力由桌面端后端负责下载、校验和切换，前端只负责发起和显示进度。</div>
+                                        </div>
+                                    </div>
+                                    <div id="componentsStatusText" class="settings-status">未安装</div>
+                                </div>
+                                <div id="componentsCatalogHint" class="settings-help" style="color: #6b7280;">正在加载组件清单...</div>
+                                <div id="componentsList" class="settings-components-list" aria-live="polite"></div>
+                            </div>
+                        </div>
+                        <div class="settings-group">
+                            <div class="settings-section" id="settingsSectionNotion">
+                                <div class="settings-section-head">
+                                    <div class="settings-section-head-main">
+                                        <span class="settings-section-mark" aria-hidden="true">03</span>
                                         <div>
                                             <h3>Notion</h3>
                                             <div class="settings-section-copy">连上后直接选同步目标，减少多余配置。</div>
@@ -352,7 +368,7 @@
                             <div class="settings-section" id="settingsSectionObsidian">
                                 <div class="settings-section-head">
                                     <div class="settings-section-head-main">
-                                        <span class="settings-section-mark" aria-hidden="true">03</span>
+                                        <span class="settings-section-mark" aria-hidden="true">04</span>
                                         <div>
                                             <h3>Obsidian</h3>
                                             <div class="settings-section-copy">设好接口和写入位置，笔记就会按当前格式同步进去。</div>
@@ -388,7 +404,7 @@
                             <div class="settings-section" id="settingsSectionSync">
                                 <div class="settings-section-head">
                                     <div class="settings-section-head-main">
-                                        <span class="settings-section-mark" aria-hidden="true">04</span>
+                                        <span class="settings-section-mark" aria-hidden="true">05</span>
                                         <div>
                                             <h3>同步</h3>
                                             <div class="settings-section-copy">自动同步和一次性补同步放在一起，减少来回切换。</div>

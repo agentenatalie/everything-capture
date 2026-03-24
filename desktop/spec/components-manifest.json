@@ -1,0 +1,23 @@
+{
+  "manifest_version": 1,
+  "components": [
+    {
+      "id": "local-transcription",
+      "title": "Local Transcription",
+      "description": "为视频启用本地音频转录。正式发布时请把 download_url 和 sha256 替换成官网组件包信息。",
+      "version": "unconfigured",
+      "download_url": "",
+      "sha256": "",
+      "size_bytes": 0,
+      "requires_restart": false,
+      "entry_python_paths": [
+        "python"
+      ],
+      "entry_bin_paths": [],
+      "platforms": [
+        "macos-arm64"
+      ],
+      "unavailable_reason": "组件清单尚未配置下载地址。"
+    }
+  ]
+}

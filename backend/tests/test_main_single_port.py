@@ -96,6 +96,14 @@ class MainSinglePortTests(unittest.TestCase):
         self.assertIn("ai_model_options", payload)
         self.assertIn("ai_base_url", payload)
 
+    def test_healthz_endpoint_reports_ready(self) -> None:
+        with load_main_with_temp_data_dir() as main_module:
+            with TestClient(main_module.app) as client:
+                response = client.get("/healthz")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["ok"], True)
+
     def test_static_media_route_is_not_shadowed_by_frontend_mount(self) -> None:
         with load_main_with_temp_data_dir() as main_module:
             with TestClient(main_module.app) as client:

@@ -1,9 +1,10 @@
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from app_settings import clean_optional_string
 from database import get_db
 from models import Settings
 from security import encrypt_secret, has_secret_value
+from services.components import ComponentServiceError, get_install_task, install_component, list_components
 from services.ai_defaults import (
     AI_AGENT_DEFAULT_CAN_EXECUTE_COMMANDS,
     AI_AGENT_DEFAULT_CAN_MANAGE_FOLDERS,
@@ -16,7 +17,12 @@ from services.ai_defaults import (
     coerce_bool,
 )
 from services.knowledge_base import detect_knowledge_base_path
-from schemas import SettingsResponse, SettingsUpdateRequest
+from schemas import (
+    ComponentInstallTaskResponse,
+    ComponentsCatalogResponse,
+    SettingsResponse,
+    SettingsUpdateRequest,
+)
 from tenant import get_current_user_id
 from typing import Optional
 import re
@@ -137,6 +143,31 @@ def get_settings(db: Session = Depends(get_db)):
     user_id = get_current_user_id()
     settings_obj = db.query(Settings).filter(Settings.user_id == user_id).first()
     return _build_settings_response(settings_obj, db)
+
+
+@router.get("/components", response_model=ComponentsCatalogResponse)
+def get_components_catalog():
+    try:
+        return list_components()
+    except ComponentServiceError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
+
+
+@router.post("/components/{component_id}/install", response_model=ComponentInstallTaskResponse, status_code=202)
+def install_settings_component(component_id: str):
+    try:
+        return install_component(component_id)
+    except ComponentServiceError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
+
+
+@router.get("/components/tasks/{task_id}", response_model=ComponentInstallTaskResponse)
+def get_component_install_task(task_id: str):
+    try:
+        return get_install_task(task_id)
+    except ComponentServiceError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
+
 
 @router.post("", response_model=SettingsResponse)
 def update_settings(request: SettingsUpdateRequest, db: Session = Depends(get_db)):

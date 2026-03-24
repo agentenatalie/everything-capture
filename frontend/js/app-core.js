@@ -228,7 +228,7 @@
             if (settingsMainGrid) {
                 settingsMainGrid.scrollTop = 0;
             }
-            loadSettings({ includeNotionDatabases: true });
+            loadSettings({ includeNotionDatabases: true, includeComponents: true });
         }
 
         async function handleUrlCallbacks() {

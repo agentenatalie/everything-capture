@@ -11,11 +11,13 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-from paths import STATIC_DIR
+from paths import RUNTIME_BIN_DIR, STATIC_DIR
+from services.components import LOCAL_TRANSCRIPTION_COMPONENT_ID, activate_component_runtime
 
 logger = logging.getLogger(__name__)
 
 _ffmpeg_path: str | None = None
+_ocr_helper_path: str | None = None
 
 _TRADITIONAL_PHRASE_REPLACEMENTS: tuple[tuple[str, str], ...] = (
     ("融資融券", "融资融券"),
@@ -427,7 +429,8 @@ def _find_ffmpeg() -> str:
         return _ffmpeg_path
     import shutil
 
-    path = shutil.which("ffmpeg")
+    configured = _resolve_runtime_binary_path("EC_FFMPEG_PATH", "ffmpeg")
+    path = str(configured) if configured else shutil.which("ffmpeg")
     if not path:
         for candidate in ("/opt/homebrew/bin/ffmpeg", "/usr/local/bin/ffmpeg"):
             if Path(candidate).is_file():
@@ -435,6 +438,21 @@ def _find_ffmpeg() -> str:
                 break
     _ffmpeg_path = path or "ffmpeg"  # fall back to bare name, let subprocess raise if missing
     return _ffmpeg_path
+
+
+def _resolve_runtime_binary_path(env_name: str, binary_name: str) -> Path | None:
+    configured = (os.getenv(env_name) or "").strip()
+    if configured:
+        candidate = Path(configured).expanduser().resolve()
+        if candidate.is_file():
+            return candidate
+
+    bundled = (RUNTIME_BIN_DIR / binary_name).resolve()
+    if bundled.is_file():
+        return bundled
+
+    return None
+
 
 HTTP_URL_PATTERN = re.compile(r"https?://[^\s<>'\"`]+", re.IGNORECASE)
 SWIFT_SCRIPT_PATH = Path(__file__).with_name("media_text_extract.swift")
@@ -730,9 +748,10 @@ def _extract_embedded_subtitles(video_path: Path) -> str:
 def _transcribe_video_with_mlx_whisper(video_path: Path) -> str:
     """Transcribe video audio using mlx-whisper (Apple Silicon, free, local).
 
-    Requires: pip install mlx-whisper
-    Model is downloaded on first use (~244 MB for small).
+    Requires the optional local-transcription component to provide mlx-whisper.
+    Model weights are downloaded by mlx-whisper on first use (~244 MB for small).
     """
+    activate_component_runtime(LOCAL_TRANSCRIPTION_COMPONENT_ID)
     try:
         import mlx_whisper  # type: ignore[import]
     except ImportError:
@@ -792,7 +811,24 @@ def _resolve_media_inputs(item) -> dict[str, list[dict[str, str]]]:
 
 
 def _swift_available() -> bool:
-    return bool(SWIFT_SCRIPT_PATH.exists() and Path("/usr/bin/swift").exists())
+    return bool(_resolve_media_extractor_command())
+
+
+def _resolve_media_extractor_command() -> list[str]:
+    global _ocr_helper_path
+
+    if _ocr_helper_path is not None:
+        return [_ocr_helper_path]
+
+    helper_path = _resolve_runtime_binary_path("EC_OCR_HELPER_PATH", "media_text_extract")
+    if helper_path is not None:
+        _ocr_helper_path = str(helper_path)
+        return [_ocr_helper_path]
+
+    if SWIFT_SCRIPT_PATH.exists() and Path("/usr/bin/swift").exists():
+        return ["/usr/bin/swift", "-suppress-warnings", str(SWIFT_SCRIPT_PATH)]
+
+    return []
 
 
 def _summarize_swift_failure(stderr: str | None, stdout: str | None) -> str:
@@ -820,7 +856,8 @@ def _summarize_swift_failure(stderr: str | None, stdout: str | None) -> str:
 
 
 def _run_swift_media_extractor(*, images: list[dict[str, str]], videos: list[dict[str, str]]) -> dict[str, Any]:
-    if not _swift_available():
+    command = _resolve_media_extractor_command()
+    if not command:
         raise ContentExtractionError("No local media text extractor is available.")
 
     os.makedirs(SWIFT_MODULE_CACHE_PATH, exist_ok=True)
@@ -842,7 +879,7 @@ def _run_swift_media_extractor(*, images: list[dict[str, str]], videos: list[dic
         env["CLANG_MODULE_CACHE_PATH"] = SWIFT_CLANG_CACHE_PATH
 
         completed = subprocess.run(
-            ["/usr/bin/swift", "-suppress-warnings", str(SWIFT_SCRIPT_PATH), request_path],
+            [*command, request_path],
             capture_output=True,
             text=True,
             check=False,

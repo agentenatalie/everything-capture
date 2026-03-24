@@ -1,0 +1,92 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Everything Capture</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --bg: #f6f7f9;
+      --card: #ffffff;
+      --border: #d9dee6;
+      --text: #111827;
+      --muted: #5b6473;
+      --danger: #b42318;
+      --shadow: 0 18px 50px rgba(15, 23, 42, 0.08);
+    }
+
+    body {
+      margin: 0;
+      font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", sans-serif;
+      background: radial-gradient(circle at top, #ffffff 0%, var(--bg) 58%);
+      color: var(--text);
+    }
+
+    .shell {
+      min-height: 100vh;
+      display: grid;
+      place-items: center;
+      padding: 32px;
+      box-sizing: border-box;
+    }
+
+    .card {
+      width: min(760px, 100%);
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 24px;
+      box-shadow: var(--shadow);
+      padding: 28px;
+      box-sizing: border-box;
+    }
+
+    h1 {
+      margin: 0 0 10px;
+      font-size: 28px;
+      line-height: 1.1;
+      letter-spacing: -0.02em;
+    }
+
+    p {
+      margin: 0 0 14px;
+      line-height: 1.55;
+      color: var(--muted);
+    }
+
+    .detail {
+      color: var(--danger);
+      font-weight: 600;
+    }
+
+    .path {
+      margin-top: 22px;
+      padding: 14px 16px;
+      border-radius: 14px;
+      border: 1px solid var(--border);
+      background: #fafbfc;
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      font-size: 13px;
+      word-break: break-all;
+      color: var(--text);
+    }
+
+    .hint {
+      margin-top: 18px;
+      font-size: 13px;
+      color: var(--muted);
+    }
+  </style>
+</head>
+<body>
+  <main class="shell">
+    <section class="card">
+      <h1>Everything Capture failed to start</h1>
+      <p>The desktop shell launched, but the local backend did not become ready before the startup timeout.</p>
+      <p class="detail">__DETAIL__</p>
+      <div class="path">Logs: __LOG_PATH__</div>
+      <p class="hint">Close this window, inspect the log file above, then relaunch the app.</p>
+    </section>
+  </main>
+</body>
+</html>

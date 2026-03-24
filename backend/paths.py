@@ -9,21 +9,72 @@ logger = logging.getLogger(__name__)
 
 BACKEND_DIR = Path(__file__).resolve().parent
 PROJECT_ROOT = BACKEND_DIR.parent
+APP_MODE = (os.getenv("EC_APP_MODE") or "").strip().lower()
+IS_DESKTOP_MODE = APP_MODE == "desktop"
+APP_NAME = (os.getenv("EC_APP_NAME") or "Everything Capture").strip() or "Everything Capture"
+
+
+def _default_resources_root() -> Path:
+    configured = (os.getenv("EC_RESOURCES_DIR") or "").strip()
+    if configured:
+        return Path(configured).expanduser().resolve()
+    return PROJECT_ROOT
+
+
+def _default_data_root() -> Path:
+    configured = (os.getenv("DATA_DIR") or "").strip()
+    if configured:
+        return Path(configured).expanduser().resolve()
+
+    if IS_DESKTOP_MODE:
+        return (Path.home() / "Library" / "Application Support" / APP_NAME).resolve()
+
+    return (PROJECT_ROOT.parent / "everything-capture-data").resolve()
+
+
+RESOURCES_ROOT = _default_resources_root()
+FRONTEND_DIR = Path(
+    os.getenv("EC_FRONTEND_DIR")
+    or str(RESOURCES_ROOT / "frontend")
+).expanduser().resolve()
+RUNTIME_BIN_DIR = Path(
+    os.getenv("EC_RUNTIME_BIN_DIR")
+    or str(RESOURCES_ROOT / "desktop_runtime" / "bin")
+).expanduser().resolve()
+BUNDLED_COMPONENTS_DIR = Path(
+    os.getenv("EC_BUNDLED_COMPONENTS_DIR")
+    or str(RESOURCES_ROOT / "desktop_runtime" / "components")
+).expanduser().resolve()
 
 # ---------------------------------------------------------------------------
 # External data directory (code/data separation)
 # ---------------------------------------------------------------------------
 # Default: ../everything-capture-data  (sibling of the project directory)
 # Override via DATA_DIR environment variable.
-DATA_ROOT = Path(
-    os.getenv("DATA_DIR")
-    or str(PROJECT_ROOT.parent / "everything-capture-data")
-).resolve()
+DATA_ROOT = _default_data_root()
 
 DB_PATH = Path(os.getenv("SQLITE_PATH") or str(DATA_ROOT / "app.db"))
 MEDIA_DIR = Path(os.getenv("MEDIA_DIR") or str(DATA_ROOT / "media"))
 EXPORTS_DIR = Path(os.getenv("EXPORTS_DIR") or str(DATA_ROOT / "exports"))
-LOCAL_STATE_DIR = DATA_ROOT / ".local"
+LOCAL_STATE_DIR = Path(os.getenv("EC_LOCAL_STATE_DIR") or str(DATA_ROOT / ".local")).resolve()
+COMPONENTS_DIR = Path(os.getenv("EC_COMPONENTS_DIR") or str(DATA_ROOT / "components")).resolve()
+TEMP_DIR = Path(os.getenv("EC_TEMP_DIR") or str(DATA_ROOT / ".tmp")).resolve()
+COMPONENTS_STATE_PATH = Path(
+    os.getenv("EC_COMPONENTS_STATE_PATH")
+    or str(COMPONENTS_DIR / "installed.json")
+).expanduser().resolve()
+COMPONENTS_TEMP_DIR = Path(
+    os.getenv("EC_COMPONENTS_TEMP_DIR")
+    or str(TEMP_DIR / "components")
+).expanduser().resolve()
+COMPONENTS_MANIFEST_PATH = Path(
+    os.getenv("EC_COMPONENTS_MANIFEST_PATH")
+    or str(RESOURCES_ROOT / "desktop" / "spec" / "components-manifest.json")
+).expanduser().resolve()
+LOGS_DIR = Path(
+    os.getenv("EC_LOGS_DIR")
+    or str((Path.home() / "Library" / "Logs" / APP_NAME) if IS_DESKTOP_MODE else (DATA_ROOT / "logs"))
+).expanduser().resolve()
 
 # Backward-compatible alias: existing code does `STATIC_DIR / local_path` where
 # local_path = "media/users/{uid}/{item_id}/file.jpg".  Since DATA_ROOT contains
@@ -40,7 +91,16 @@ _OLD_LOCAL_STATE_DIR = BACKEND_DIR / ".local"
 
 def ensure_data_dirs() -> None:
     """Create the external data directory tree if it doesn't exist."""
-    for d in (DATA_ROOT, MEDIA_DIR, EXPORTS_DIR, LOCAL_STATE_DIR):
+    for d in (
+        DATA_ROOT,
+        MEDIA_DIR,
+        EXPORTS_DIR,
+        LOCAL_STATE_DIR,
+        COMPONENTS_DIR,
+        TEMP_DIR,
+        COMPONENTS_TEMP_DIR,
+        LOGS_DIR,
+    ):
         d.mkdir(parents=True, exist_ok=True)
 
 

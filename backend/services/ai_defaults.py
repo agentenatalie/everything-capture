@@ -1,4 +1,4 @@
-AI_DEFAULT_BASE_URL = "https://cloud.infini-ai.com/maas/coding/v1"
+AI_DEFAULT_BASE_URL = ""
 AI_MODEL_OPTIONS = [
     "deepseek-v3.2",
     "deepseek-v3.2-thinking",

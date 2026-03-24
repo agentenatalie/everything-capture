@@ -1139,6 +1139,19 @@
             return data;
         }
 
+        function isExtractNetworkFailure(error) {
+            const message = String(error?.message || error || '').trim();
+            return error instanceof TypeError || /Failed to fetch|Load failed|NetworkError/i.test(message);
+        }
+
+        function normalizeExtractRequestError(error) {
+            const message = String(error?.message || error || '').trim();
+            if (isExtractNetworkFailure(error)) {
+                return '无法连接到本地后端服务，请确认项目目录里的 ./run 仍在运行。';
+            }
+            return message || '未知错误';
+        }
+
         function formatExtractSuccessMessage(data) {
             const mediaInfo = data.media_count > 0 ? `，${data.media_count} 个媒体` : '';
             return `收录成功：${data.title} (${data.text_length} 字${mediaInfo}，平台：${data.platform})`;
@@ -1181,7 +1194,7 @@
                 closeCommandPalette();
                 fetchItems();
             } catch (e) {
-                showToast(`失败：${e.message}`, 'error');
+                showToast(`失败：${normalizeExtractRequestError(e)}`, 'error');
             } finally {
                 commandExtractInFlight = false;
                 extractBtn.disabled = false;

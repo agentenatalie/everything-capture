@@ -344,7 +344,7 @@
                         '已保存，留空则保留当前密钥'
                     );
                     document.getElementById('obsidianFolderPath').value = data.obsidian_folder_path || '';
-                    aiBaseUrlInput.value = data.ai_base_url || data.ai_base_url_suggestion || '';
+                    aiBaseUrlInput.value = data.ai_base_url || '';
                     aiModelInput.value = data.ai_model || (Array.isArray(data.ai_model_options) ? (data.ai_model_options[0] || '') : '');
                     setAiModelFieldMode(aiBaseUrlInput.value, aiModelInput.value);
                     applySecretInputState(
@@ -439,7 +439,8 @@
                     setNotionStatus(data);
                     setObsidianStatus(data);
                     setAiStatus(data);
-                    setAiModelFieldMode(data.ai_base_url || data.ai_base_url_suggestion || '', data.ai_model || '');
+                    aiBaseUrlInput.value = data.ai_base_url || '';
+                    setAiModelFieldMode(aiBaseUrlInput.value, data.ai_model || '');
                     applyAiAgentPermissionInputs(data);
                     refreshBulkSyncButtons();
                     await loadNotionDatabases(data.notion_database_id || '');

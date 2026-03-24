@@ -95,6 +95,33 @@ def _spawn_capture_postprocess(item_id: str, user_id: str, *, should_parse: bool
     thread.start()
 
 
+def _spawn_background_media_finalizer(
+    item_id: str,
+    media_list: list[dict],
+    content_blocks: list[dict] | None,
+    content_html: str | None,
+    referer: str,
+    user_id: str,
+) -> None:
+    thread = threading.Thread(
+        target=background_finalize_extracted_media,
+        args=(item_id, media_list, content_blocks, content_html, referer, user_id),
+        daemon=True,
+        name=f"capture-media-finalize-{item_id[:8]}",
+    )
+    thread.start()
+
+
+def _schedule_background_task(background_tasks: BackgroundTasks, func: Callable, *args, **kwargs) -> None:
+    # FastAPI's runtime BackgroundTasks fires after the response, which is too late
+    # for fragile local dev sessions. Tests and the capture worker still receive
+    # queued tasks via stubs/custom task runners.
+    if isinstance(background_tasks, BackgroundTasks):
+        func(*args, **kwargs)
+        return
+    background_tasks.add_task(func, *args, **kwargs)
+
+
 def _queue_capture_postprocess(
     background_tasks: BackgroundTasks,
     item: Item,
@@ -104,7 +131,8 @@ def _queue_capture_postprocess(
 ) -> None:
     item.parse_status = "processing"
     item.parse_error = None
-    background_tasks.add_task(
+    _schedule_background_task(
+        background_tasks,
         _spawn_capture_postprocess,
         item.id,
         user_id,
@@ -521,8 +549,9 @@ async def execute_extract_request(
         if result.media_urls:
             referer = result.final_url or resolved_url
             if await _should_background_media_processing(http_request, result.media_urls, referer):
-                background_tasks.add_task(
-                    background_finalize_extracted_media,
+                _schedule_background_task(
+                    background_tasks,
+                    _spawn_background_media_finalizer,
                     new_item.id,
                     result.media_urls,
                     result.content_blocks,

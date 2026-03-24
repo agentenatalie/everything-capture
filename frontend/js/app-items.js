@@ -1234,7 +1234,7 @@
                 grid.className = currentView === 'gallery' ? 'grid' : 'list-view';
                 grid.innerHTML = filterInput.value.trim() || platformFilter.value !== 'all' || currentFolderScope !== 'all'
                     ? `<div class="empty-state">${currentFolderScope === 'folder' && !filterInput.value.trim() && platformFilter.value === 'all' ? '这个文件夹里还没有内容。' : '没有找到匹配内容，请换个关键词或平台试试。'}</div>`
-                    : '<div class="empty-state">暂无收录内容，请从网页入口粘贴链接开始收录。</div>';
+                    : '<div class="empty-state">⌘K 开启你的收录之旅。</div>';
                 return;
             }
 

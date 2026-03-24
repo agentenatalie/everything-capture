@@ -5,6 +5,7 @@ import asyncio
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
+from fastapi import BackgroundTasks
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
@@ -13,7 +14,7 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")
 
 from database import Base  # noqa: E402
 from models import Folder, Item, User  # noqa: E402
-from routers.ingest import _resolve_extract_url, _store_shared_text_capture, execute_extract_request, ingest_page  # noqa: E402
+from routers.ingest import _queue_capture_postprocess, _resolve_extract_url, _store_shared_text_capture, execute_extract_request, ingest_page  # noqa: E402
 from routers.phone_webapp import build_phone_extract_item_finalizer  # noqa: E402
 from schemas import ClientInfo, ExtractRequest, IngestRequest, PhoneExtractRequest  # noqa: E402
 from services.extractor import ExtractResult  # noqa: E402
@@ -146,6 +147,39 @@ class ShortcutCompatibilityTests(unittest.TestCase):
             self.assertIn("<strong>bold</strong>", item.canonical_html)
             self.assertIn('href="https://example.com/ref"', item.canonical_html)
             self.assertNotIn("<script>", item.canonical_html)
+
+    def test_queue_capture_postprocess_spawns_immediately_for_fastapi_background_tasks(self) -> None:
+        background_tasks = BackgroundTasks()
+
+        with self.Session() as db:
+            item = Item(
+                id="runtime-item",
+                user_id=DEFAULT_USER_ID,
+                workspace_id="local-default-workspace",
+                title="立即启动后台解析",
+                source_url="https://example.com/runtime",
+                canonical_text="正文",
+                platform="generic",
+                status="ready",
+            )
+            db.add(item)
+            db.commit()
+            db.refresh(item)
+
+            calls: list[tuple[str, str, bool]] = []
+            with patch(
+                "routers.ingest._spawn_capture_postprocess",
+                side_effect=lambda item_id, user_id, *, should_parse: calls.append((item_id, user_id, should_parse)),
+            ):
+                _queue_capture_postprocess(
+                    background_tasks,
+                    item,
+                    DEFAULT_USER_ID,
+                    should_parse=False,
+                )
+
+        self.assertEqual(calls, [("runtime-item", DEFAULT_USER_ID, False)])
+        self.assertEqual(background_tasks.tasks, [])
 
     def test_execute_extract_request_marks_parse_processing_and_schedules_postprocess_after_media_download(self) -> None:
         background_tasks = _BackgroundTasksStub()

@@ -58,7 +58,7 @@ cleanup_port_listener() {
 
 detect_display_host() {
   local detected_host
-  detected_host="$(python3 - <<'PY'
+  detected_host="$("$VENV_PYTHON" - <<'PY'
 import socket
 
 host = "127.0.0.1"
@@ -116,7 +116,7 @@ start_frontend() {
   cleanup_port_listener "$FRONTEND_PORT" "frontend"
   echo "Starting frontend on port ${FRONTEND_PORT}"
   cd "$ROOT_DIR/frontend"
-  python3 -m http.server "$FRONTEND_PORT" --bind "0.0.0.0" &
+  "$VENV_PYTHON" -m http.server "$FRONTEND_PORT" --bind "0.0.0.0" &
   FRONTEND_PID="$!"
   cd "$ROOT_DIR"
   sleep 1

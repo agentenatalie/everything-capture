@@ -98,10 +98,15 @@ def _get_setting_secret(settings: Settings | None, field_name: str) -> str | Non
 
 def _resolve_ai_config(settings: Settings | None) -> dict[str, str]:
     api_key = _get_setting_secret(settings, "ai_api_key")
-    base_url = _clean_optional_string(settings.ai_base_url if settings else None) or AI_DEFAULT_BASE_URL
+    base_url = _clean_optional_string(settings.ai_base_url if settings else None) or _clean_optional_string(AI_DEFAULT_BASE_URL)
     model = _clean_optional_string(settings.ai_model if settings else None) or AI_DEFAULT_MODEL
+    missing_fields: list[str] = []
     if not api_key:
-        raise HTTPException(status_code=400, detail="AI settings are incomplete: ai_api_key")
+        missing_fields.append("ai_api_key")
+    if not base_url:
+        missing_fields.append("ai_base_url")
+    if missing_fields:
+        raise HTTPException(status_code=400, detail=f"AI settings are incomplete: {', '.join(missing_fields)}")
     return {
         "api_key": api_key,
         "base_url": base_url,

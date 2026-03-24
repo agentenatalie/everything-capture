@@ -39,11 +39,14 @@ def _settings_bool(value: Optional[bool], default: bool) -> bool:
 
 def _build_settings_response(settings_obj: Optional[Settings], db: Session) -> SettingsResponse:
     ai_knowledge_base_path = detect_knowledge_base_path()
+    default_ai_base_url = clean_optional_string(AI_DEFAULT_BASE_URL)
     if not settings_obj:
         return SettingsResponse(
-            ai_base_url=AI_DEFAULT_BASE_URL,
+            ai_base_url=default_ai_base_url,
             ai_model=AI_DEFAULT_MODEL,
-            ai_base_url_suggestion=AI_DEFAULT_BASE_URL,
+            ai_base_url_suggestion=default_ai_base_url,
+            ai_ready=False,
+            ai_missing_fields=["ai_api_key", "ai_base_url"],
             ai_model_options=AI_MODEL_OPTIONS,
             ai_agent_can_manage_folders=AI_AGENT_DEFAULT_CAN_MANAGE_FOLDERS,
             ai_agent_can_parse_content=AI_AGENT_DEFAULT_CAN_PARSE_CONTENT,
@@ -71,12 +74,14 @@ def _build_settings_response(settings_obj: Optional[Settings], db: Session) -> S
     if not obsidian_api_key_saved:
         obsidian_missing_fields.append("obsidian_api_key")
 
-    ai_base_url = clean_optional_string(settings_obj.ai_base_url) or AI_DEFAULT_BASE_URL
+    ai_base_url = clean_optional_string(settings_obj.ai_base_url) or default_ai_base_url
     ai_model = clean_optional_string(settings_obj.ai_model) or AI_DEFAULT_MODEL
     ai_api_key_saved = _has_configured_value(settings_obj.ai_api_key)
     ai_missing_fields = []
     if not ai_api_key_saved:
         ai_missing_fields.append("ai_api_key")
+    if not ai_base_url:
+        ai_missing_fields.append("ai_base_url")
 
     return SettingsResponse(
         notion_api_token=None,
@@ -94,7 +99,7 @@ def _build_settings_response(settings_obj: Optional[Settings], db: Session) -> S
         ai_api_key_saved=ai_api_key_saved,
         ai_base_url=ai_base_url,
         ai_model=ai_model,
-        ai_base_url_suggestion=AI_DEFAULT_BASE_URL,
+        ai_base_url_suggestion=default_ai_base_url,
         ai_model_options=AI_MODEL_OPTIONS,
         ai_agent_can_manage_folders=_settings_bool(
             settings_obj.ai_agent_can_manage_folders,

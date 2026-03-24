@@ -72,6 +72,28 @@ class SettingsSecurityTests(unittest.TestCase):
         self.assertFalse(response.obsidian_ready)
         self.assertIn("obsidian_api_key", response.obsidian_missing_fields)
 
+    def test_build_settings_response_leaves_ai_base_url_blank_by_default(self) -> None:
+        with self.Session() as db:
+            response = _build_settings_response(None, db)
+
+        self.assertIsNone(response.ai_base_url)
+        self.assertIsNone(response.ai_base_url_suggestion)
+        self.assertFalse(response.ai_ready)
+        self.assertIn("ai_base_url", response.ai_missing_fields)
+
+    def test_build_settings_response_requires_ai_base_url_when_api_key_is_saved(self) -> None:
+        settings = Settings(
+            ai_api_key=encrypt_secret("test-ai-key"),
+            ai_model="test-model",
+        )
+
+        with self.Session() as db:
+            response = _build_settings_response(settings, db)
+
+        self.assertFalse(response.ai_ready)
+        self.assertIn("ai_base_url", response.ai_missing_fields)
+        self.assertTrue(response.ai_api_key_saved)
+
     def test_obsidian_test_request_uses_saved_key_when_secret_is_omitted(self) -> None:
         request = ObsidianTestRequest(
             obsidian_rest_api_url=" https://127.0.0.1:27124 ",

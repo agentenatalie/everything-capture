@@ -214,6 +214,18 @@ class AiRouteTests(unittest.TestCase):
         self.assertEqual([message.get("role") for message in captured_messages[0]], ["system", "user"])
         self.assertIn("下面是当前文章上下文", captured_messages[0][0]["content"])
 
+    def test_resolve_ai_config_requires_base_url(self) -> None:
+        settings = Settings(
+            ai_api_key=encrypt_secret("test-ai-key"),
+            ai_model="test-model",
+        )
+
+        with self.assertRaises(ai_router.HTTPException) as ctx:
+            ai_router._resolve_ai_config(settings)
+
+        self.assertEqual(ctx.exception.status_code, 400)
+        self.assertEqual(ctx.exception.detail, "AI settings are incomplete: ai_base_url")
+
     def test_assistant_agent_includes_current_item_context(self) -> None:
         request = AiAssistantRequest(
             mode="agent",

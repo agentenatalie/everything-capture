@@ -31,14 +31,18 @@ import mimetypes
 from pathlib import Path
 from urllib.parse import urlparse, urlunparse, quote
 from datetime import UTC, datetime
-from zoneinfo import ZoneInfo
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 from bs4 import BeautifulSoup, NavigableString, Tag
 
 NOTION_VERSION = "2025-09-03"
 NOTION_RICH_TEXT_LIMIT = 2000
 NOTION_CHILDREN_LIMIT = 100
 OBSIDIAN_MEDIA_FOLDER = "EverythingCapture_Media"
-DISPLAY_TIMEZONE = ZoneInfo("America/New_York")
+try:
+    DISPLAY_TIMEZONE = ZoneInfo("America/New_York")
+except ZoneInfoNotFoundError:
+    logger.warning("IANA timezone data is unavailable; falling back to UTC display time")
+    DISPLAY_TIMEZONE = UTC
 SYNC_STATUS_CACHE_TTL_SECONDS = 300
 SYNC_STATUS_CHECK_TIMEOUT_SECONDS = 4.0
 NOTION_SYNC_PROPERTY_SPECS = {

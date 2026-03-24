@@ -19,6 +19,29 @@ BUILD_NUMBER="${EC_DESKTOP_BUILD_NUMBER:-$VERSION}"
 LOCAL_TRANSCRIPTION_BUNDLE_DIRNAME="${VERSION//./__dot__}"
 APP_ICON_PATH="$BUILD_DIR/icon.icns"
 
+find_optional_command() {
+  local command_name="$1"
+  local homebrew_path="/opt/homebrew/bin/$command_name"
+  local usr_local_path="/usr/local/bin/$command_name"
+
+  if command -v "$command_name" >/dev/null 2>&1; then
+    command -v "$command_name"
+    return 0
+  fi
+
+  if [[ -x "$homebrew_path" ]]; then
+    echo "$homebrew_path"
+    return 0
+  fi
+
+  if [[ -x "$usr_local_path" ]]; then
+    echo "$usr_local_path"
+    return 0
+  fi
+
+  return 1
+}
+
 if [[ ! -x "$PYTHON_BIN" ]]; then
   echo "Missing Python runtime at $PYTHON_BIN" >&2
   exit 1
@@ -89,12 +112,31 @@ cp -R "$APP_PATH" "$DMG_STAGING_DIR/"
 
 DMG_PATH="$BUILD_DIR/EverythingCapture-${VERSION}-arm64.dmg"
 rm -f "$DMG_PATH"
-hdiutil create \
-  -volname "Everything Capture" \
-  -srcfolder "$DMG_STAGING_DIR" \
-  -ov \
-  -format UDZO \
-  "$DMG_PATH"
+APP_BUNDLE_NAME="$(basename "$APP_PATH")"
+CREATE_DMG_BIN="${EC_CREATE_DMG_BIN:-$(find_optional_command create-dmg || true)}"
+
+if [[ -n "$CREATE_DMG_BIN" ]]; then
+  EC_CREATE_DMG_BIN="$CREATE_DMG_BIN" "$DESKTOP_DIR/scripts/run_create_dmg.sh" \
+    --volname "Everything Capture" \
+    --volicon "$APP_ICON_PATH" \
+    --window-pos 200 120 \
+    --window-size 800 400 \
+    --icon-size 160 \
+    --icon "$APP_BUNDLE_NAME" 180 210 \
+    --app-drop-link 620 210 \
+    --hide-extension "$APP_BUNDLE_NAME" \
+    --no-internet-enable \
+    "$DMG_PATH" \
+    "$DMG_STAGING_DIR"
+else
+  echo "create-dmg not found; falling back to plain hdiutil DMG layout" >&2
+  hdiutil create \
+    -volname "Everything Capture" \
+    -srcfolder "$DMG_STAGING_DIR" \
+    -ov \
+    -format UDZO \
+    "$DMG_PATH"
+fi
 
 echo "App bundle: $APP_PATH"
 echo "DMG: $DMG_PATH"

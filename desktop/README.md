@@ -20,6 +20,12 @@ Build outputs are intentionally isolated under `desktop/build/` so the directory
 
 `build_desktop.sh` now assumes the environment is already prepared. It does not install Python
 packages for you, and it verifies the built `.app` contents before creating the DMG.
+If `create-dmg` is installed, the generated DMG includes a Finder drag-to-Applications layout.
+The DMG background artwork is generated from `desktop/spec/dmg-background.svg`, which should
+follow the same visual language as the product logo.
+If Finder automation times out on the build machine, the wrapper retries with `--skip-jenkins`
+so the DMG still contains an `Applications` link instead of failing outright.
+Without `create-dmg`, the script falls back to a plain `hdiutil` DMG.
 
 ## Phase 4 release flow
 

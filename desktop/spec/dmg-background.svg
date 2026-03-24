@@ -1,0 +1,20 @@
+<svg width="1600" height="800" viewBox="0 0 1600 800" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <rect width="1600" height="800" fill="#F7F7F4"/>
+  <g transform="translate(744 96)" stroke="#1B1D24" stroke-linecap="round" fill="none">
+    <path d="M0 30 V8 Q0 0 8 0 H30" stroke-width="10"/>
+    <path d="M82 0 H104 Q112 0 112 8 V30" stroke-width="10"/>
+    <path d="M112 82 V104 Q112 112 104 112 H82" stroke-width="10"/>
+    <path d="M30 112 H8 Q0 112 0 104 V82" stroke-width="10"/>
+    <path d="M56 30 L63 47 L82 44 L69 57 L76 76 L56 66 L36 76 L43 57 L30 44 L49 47 Z" stroke-width="7"/>
+  </g>
+  <text x="800" y="250" text-anchor="middle" fill="#A0A3AD" font-family="SF Pro Display, Helvetica Neue, Arial, sans-serif" font-size="58" font-weight="400" letter-spacing="0.4">
+    Everything Capture
+  </text>
+  <g transform="translate(496 430)" stroke="#3E4456" stroke-width="12" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M0 0 H620"/>
+    <path d="M568 -34 L620 0 L568 34"/>
+  </g>
+  <text x="800" y="530" text-anchor="middle" fill="#A0A3AD" font-family="SF Pro Display, Helvetica Neue, Arial, sans-serif" font-size="54" font-weight="400" letter-spacing="0.2">
+    Drag to Applications
+  </text>
+</svg>

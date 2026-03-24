@@ -116,6 +116,18 @@ def packaging_support_entries(desktop_root: Path) -> tuple[BundleEntry, ...]:
             description="Human-readable bundle manifest",
         ),
         BundleEntry(
+            source=spec_root / "dmg-background.svg",
+            destination="desktop/spec",
+            bundle_path="desktop/spec/dmg-background.svg",
+            description="Source artwork for the DMG background image",
+        ),
+        BundleEntry(
+            source=spec_root / "create-dmg-template.applescript",
+            destination="desktop/spec",
+            bundle_path="desktop/spec/create-dmg-template.applescript",
+            description="Repo-controlled Finder layout template for create-dmg",
+        ),
+        BundleEntry(
             source=project_root / "logo" / "logo-128.svg",
             destination="logo",
             bundle_path="logo/logo-128.svg",

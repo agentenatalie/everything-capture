@@ -23,6 +23,8 @@ The build pipeline copies these staged binaries into the bundle destination `des
 - `desktop/spec/Info.plist.template`
 - `desktop/spec/entitlements.plist`
 - `desktop/spec/bundle-manifest.md`
+- `desktop/spec/dmg-background.svg` -> build-time source used to generate the DMG background image
+- `desktop/spec/create-dmg-template.applescript` -> repo-controlled Finder layout template for `create-dmg`
 - `logo/logo-128.svg` -> build-time source used to generate `desktop/build/icon.icns`
 - `desktop/spec/icon.icns` if present
 

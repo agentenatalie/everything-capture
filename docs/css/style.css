@@ -193,10 +193,9 @@ section:nth-child(even) {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  font-family: 'Pangolin', cursive;
-  font-size: 14px;
-  font-weight: 400;
-  -webkit-text-stroke: 0.7px var(--accent);
+  font-family: -apple-system, 'SF Pro Display', 'Helvetica Neue', sans-serif;
+  font-size: 12px;
+  font-weight: 650;
   letter-spacing: 0.08em;
   text-transform: uppercase;
   color: var(--accent);

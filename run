@@ -4,7 +4,6 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "$0")" && pwd)"
 APP_HOST="0.0.0.0"
 APP_PORT="8000"
-FRONTEND_PORT="${FRONTEND_PORT:-8010}"
 PYTHONPATH_VALUE="$ROOT_DIR:$ROOT_DIR/backend"
 VENV_PYTHON="$ROOT_DIR/backend/venv/bin/python"
 WORKER_PID_FILE="$ROOT_DIR/backend/.local/processing_worker.pid"
@@ -13,7 +12,6 @@ CAPTURE_SERVICE_ENV_FILE="$ROOT_DIR/backend/.local/capture_service.env"
 
 APP_PID=""
 WORKER_PID=""
-FRONTEND_PID=""
 
 ensure_runtime_python() {
   if [[ ! -x "$VENV_PYTHON" ]]; then
@@ -112,20 +110,6 @@ start_capture_worker() {
   echo "$WORKER_PID" > "$WORKER_PID_FILE"
 }
 
-start_frontend() {
-  cleanup_port_listener "$FRONTEND_PORT" "frontend"
-  echo "Starting frontend on port ${FRONTEND_PORT}"
-  cd "$ROOT_DIR/frontend"
-  "$VENV_PYTHON" -m http.server "$FRONTEND_PORT" --bind "0.0.0.0" &
-  FRONTEND_PID="$!"
-  cd "$ROOT_DIR"
-  sleep 1
-  if ! kill -0 "$FRONTEND_PID" 2>/dev/null; then
-    echo "Frontend failed to start on port ${FRONTEND_PORT}"
-    exit 1
-  fi
-}
-
 cleanup() {
   if [[ -n "$APP_PID" ]] && kill -0 "$APP_PID" 2>/dev/null; then
     kill -TERM "$APP_PID" 2>/dev/null || true
@@ -133,10 +117,6 @@ cleanup() {
 
   if [[ -n "$WORKER_PID" ]] && kill -0 "$WORKER_PID" 2>/dev/null; then
     kill -TERM "$WORKER_PID" 2>/dev/null || true
-  fi
-
-  if [[ -n "$FRONTEND_PID" ]] && kill -0 "$FRONTEND_PID" 2>/dev/null; then
-    kill -TERM "$FRONTEND_PID" 2>/dev/null || true
   fi
 
   cleanup_existing_worker
@@ -152,32 +132,28 @@ trap cleanup EXIT INT TERM
 DISPLAY_HOST="$(detect_display_host)"
 
 if [[ "${RUN_RELOAD:-1}" == "1" ]]; then
-  env PYTHONPATH="$PYTHONPATH_VALUE" FRONTEND_PORT="$FRONTEND_PORT" "$VENV_PYTHON" -m uvicorn backend.main:app \
+  env PYTHONPATH="$PYTHONPATH_VALUE" "$VENV_PYTHON" -m uvicorn backend.main:app \
     --host "$APP_HOST" \
     --port "$APP_PORT" \
     --reload \
     --reload-dir "$ROOT_DIR/backend" &
   APP_PID="$!"
   start_capture_worker
-  start_frontend
   echo ""
   echo "============================================"
-  echo "  Backend:  http://${DISPLAY_HOST}:${APP_PORT}"
-  echo "  Frontend: http://${DISPLAY_HOST}:${FRONTEND_PORT}"
+  echo "  App: http://${DISPLAY_HOST}:${APP_PORT}"
   echo "============================================"
   echo ""
   wait "$APP_PID"
   exit $?
 fi
 
-env PYTHONPATH="$PYTHONPATH_VALUE" FRONTEND_PORT="$FRONTEND_PORT" "$VENV_PYTHON" -m uvicorn backend.main:app --host "$APP_HOST" --port "$APP_PORT" &
+env PYTHONPATH="$PYTHONPATH_VALUE" "$VENV_PYTHON" -m uvicorn backend.main:app --host "$APP_HOST" --port "$APP_PORT" &
 APP_PID="$!"
 start_capture_worker
-start_frontend
 echo ""
 echo "============================================"
-echo "  Backend:  http://${DISPLAY_HOST}:${APP_PORT}"
-echo "  Frontend: http://${DISPLAY_HOST}:${FRONTEND_PORT}"
+echo "  App: http://${DISPLAY_HOST}:${APP_PORT}"
 echo "============================================"
 echo ""
 wait "$APP_PID"

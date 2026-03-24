@@ -20,8 +20,7 @@
 
 ```
 桌面浏览器 / 本地 UI
-    → frontend/ (静态文件，端口 8010)
-    → backend/ (FastAPI，端口 8000)
+    → backend/ (FastAPI 同时提供 UI 与 API，端口 8000)
     → ../everything-capture-data/app.db + media/
 
 手机 / 分享菜单 / 快捷指令
@@ -32,7 +31,7 @@
     → ../everything-capture-data/app.db + media/
 ```
 
-**一句话版本：** 只在本地用就跑 `backend/`；想让手机也能采集就再部署 `capture_service/`。
+**一句话版本：** 只在本地用就跑 `./run`；想让手机也能采集就再部署 `capture_service/`。
 
 ## 项目结构
 
@@ -77,9 +76,10 @@ backend/venv/bin/pip install -r requirements.txt
 ./run
 ```
 
-启动后：
-- 后端 API：`http://127.0.0.1:8000`
-- 前端 UI：`http://127.0.0.1:8010`
+启动后访问：
+- `http://127.0.0.1:8000`
+
+Web UI 与 `/api/*` 接口同源提供。
 
 ### 数据存储
 
@@ -135,9 +135,9 @@ API 密钥使用 Fernet 加密存储。
 | `DATA_DIR` | `../everything-capture-data/` | 数据根目录 |
 | `SQLITE_PATH` | `$DATA_DIR/app.db` | 数据库路径 |
 | `MEDIA_DIR` | `$DATA_DIR/media/` | 媒体存储路径 |
-| `FRONTEND_PORT` | `8010` | 前端服务端口 |
 | `CAPTURE_SERVICE_URL` | *（无）* | 云端采集服务地址 |
 | `RUN_RELOAD` | `1` | 启用 uvicorn 热重载 |
+| `EVERYTHING_CAPTURE_FRONTEND_ORIGIN` | *（无）* | 反向代理或 OAuth 回调场景下可选的前端公网地址覆盖 |
 
 ## 开发
 

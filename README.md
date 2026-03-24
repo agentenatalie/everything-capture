@@ -22,8 +22,7 @@ Most "read-it-later" services store your data on their servers. Everything Captu
 
 ```
 Desktop browser / local UI
-    → frontend/ (static, served on port 8010)
-    → backend/ (FastAPI on port 8000)
+    → backend/ (FastAPI serves UI + API on port 8000)
     → ../everything-capture-data/app.db + media/
 
 Phone / Share Sheet / Shortcut
@@ -34,7 +33,7 @@ Phone / Share Sheet / Shortcut
     → ../everything-capture-data/app.db + media/
 ```
 
-**TL;DR:** Run `backend/` for local-only use. Deploy `capture_service/` if you want mobile capture.
+**TL;DR:** Run `./run` for local-only use. Deploy `capture_service/` if you want mobile capture.
 
 ## Project Structure
 
@@ -79,9 +78,10 @@ backend/venv/bin/pip install -r requirements.txt
 ./run
 ```
 
-This launches:
-- Backend API at `http://127.0.0.1:8000`
-- Frontend UI at `http://127.0.0.1:8010`
+This launches the local app at:
+- `http://127.0.0.1:8000`
+
+The web UI and `/api/*` endpoints are served from the same origin.
 
 ### Data Storage
 
@@ -137,9 +137,9 @@ API keys are encrypted at rest using Fernet encryption.
 | `DATA_DIR` | `../everything-capture-data/` | Root data directory |
 | `SQLITE_PATH` | `$DATA_DIR/app.db` | Database path |
 | `MEDIA_DIR` | `$DATA_DIR/media/` | Media storage path |
-| `FRONTEND_PORT` | `8010` | Frontend server port |
 | `CAPTURE_SERVICE_URL` | *(none)* | Cloud capture service URL |
 | `RUN_RELOAD` | `1` | Enable uvicorn hot-reload |
+| `EVERYTHING_CAPTURE_FRONTEND_ORIGIN` | *(none)* | Optional public frontend origin override for OAuth callbacks / reverse proxy setups |
 
 ## Development
 

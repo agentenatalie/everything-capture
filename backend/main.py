@@ -1,12 +1,11 @@
 import logging
 import os
 
-from fastapi import FastAPI, Request
+from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
-from fastapi.responses import RedirectResponse
 from fastapi.staticfiles import StaticFiles
-from paths import MEDIA_DIR, ensure_data_dirs, migrate_legacy_data
+from paths import MEDIA_DIR, PROJECT_ROOT, ensure_data_dirs, migrate_legacy_data
 
 # ---------------------------------------------------------------------------
 # Bootstrap external data directory and migrate legacy data (before DB init)
@@ -15,8 +14,7 @@ logging.basicConfig(level=logging.INFO)
 ensure_data_dirs()
 migrate_legacy_data()
 
-from database import engine, Base, SessionLocal, ensure_runtime_schema, init_search_index
-from frontend_bridge import build_frontend_url
+from database import engine, Base, ensure_runtime_schema, init_search_index
 from routers import ai, connect, folders, ingest, items, phone_webapp, settings
 
 # Create SQLite database tables
@@ -83,11 +81,9 @@ def startup_recover_processing_items() -> None:
     items.schedule_processing_item_parsing_recovery()
 
 
-@app.api_route("/", methods=["GET", "HEAD"], include_in_schema=False)
-def root(request: Request):
-    return RedirectResponse(url=build_frontend_url(request, query_string=request.url.query))
-
-
 # Mount external media directory — keeps frontend URLs unchanged (/static/media/...)
 os.makedirs(MEDIA_DIR, exist_ok=True)
 app.mount("/static/media", StaticFiles(directory=str(MEDIA_DIR)), name="media")
+
+# Serve the static frontend from the same origin as the API.
+app.mount("/", StaticFiles(directory=str(PROJECT_ROOT / "frontend"), html=True), name="frontend")

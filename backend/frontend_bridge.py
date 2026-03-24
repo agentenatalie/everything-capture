@@ -9,8 +9,8 @@ FRONTEND_ORIGIN_ENV_VARS = (
     "EVERYTHING_CAPTURE_FRONTEND_ORIGIN",
     "FRONTEND_ORIGIN",
 )
-FRONTEND_PORT_ENV = "FRONTEND_PORT"
-DEFAULT_FRONTEND_PORT = "8010"
+DEFAULT_FRONTEND_HOST = "127.0.0.1"
+DEFAULT_FRONTEND_PORT = 8000
 
 
 def _clean_optional_string(value: str | None) -> str | None:
@@ -32,13 +32,21 @@ def _format_host(hostname: str) -> str:
     return f"[{hostname}]" if ":" in hostname else hostname
 
 
+def _format_origin(scheme: str, hostname: str, port: int | None) -> str:
+    host = _format_host(hostname)
+    if port is None:
+        return f"{scheme}://{host}"
+    return f"{scheme}://{host}:{port}"
+
+
 def resolve_frontend_origin(request: Request | None = None) -> str:
     configured = _configured_frontend_origin()
     if configured:
         return configured
 
     scheme = "http"
-    hostname = "127.0.0.1"
+    hostname = DEFAULT_FRONTEND_HOST
+    port: int | None = DEFAULT_FRONTEND_PORT
     if request is not None:
         forwarded_proto = _clean_optional_string(request.headers.get("x-forwarded-proto"))
         if forwarded_proto:
@@ -53,11 +61,12 @@ def resolve_frontend_origin(request: Request | None = None) -> str:
             parsed = urlsplit(f"{scheme}://{host_header.split(',', 1)[0].strip()}")
             if parsed.hostname:
                 hostname = parsed.hostname
+                port = parsed.port
         elif getattr(request.url, "hostname", None):
             hostname = request.url.hostname
+            port = getattr(request.url, "port", None)
 
-    frontend_port = _clean_optional_string(os.getenv(FRONTEND_PORT_ENV)) or DEFAULT_FRONTEND_PORT
-    return f"{scheme}://{_format_host(hostname)}:{frontend_port}"
+    return _format_origin(scheme, hostname, port)
 
 
 def build_frontend_url(

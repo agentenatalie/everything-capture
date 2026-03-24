@@ -89,6 +89,7 @@ def staged_runtime_binary_entries(desktop_root: Path) -> tuple[BundleEntry, ...]
 
 def packaging_support_entries(desktop_root: Path) -> tuple[BundleEntry, ...]:
     spec_root = desktop_root / "spec"
+    project_root = desktop_root.parent
     return (
         BundleEntry(
             source=spec_root / "EverythingCapture.spec",
@@ -113,6 +114,12 @@ def packaging_support_entries(desktop_root: Path) -> tuple[BundleEntry, ...]:
             destination="desktop/spec",
             bundle_path="desktop/spec/bundle-manifest.md",
             description="Human-readable bundle manifest",
+        ),
+        BundleEntry(
+            source=project_root / "logo" / "logo-128.svg",
+            destination="logo",
+            bundle_path="logo/logo-128.svg",
+            description="App icon source SVG used to generate the macOS .icns asset",
         ),
         BundleEntry(
             source=spec_root / "icon.icns",

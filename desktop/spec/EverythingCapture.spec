@@ -1,4 +1,5 @@
 # -*- mode: python ; coding: utf-8 -*-
+import os
 from pathlib import Path
 import sys
 
@@ -7,7 +8,7 @@ from PyInstaller.utils.hooks import collect_submodules
 SPEC_DIR = Path(SPECPATH).resolve()
 DESKTOP_ROOT = SPEC_DIR.parent
 PROJECT_ROOT = DESKTOP_ROOT.parent
-ICON_PATH = DESKTOP_ROOT / "spec" / "icon.icns"
+ICON_PATH = Path(os.environ.get("EC_APP_ICON_PATH") or (DESKTOP_ROOT / "spec" / "icon.icns")).resolve()
 SPEC_ROOT = DESKTOP_ROOT / "spec"
 
 if str(SPEC_ROOT) not in sys.path:

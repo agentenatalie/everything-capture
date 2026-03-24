@@ -17,6 +17,7 @@ PYTHON_BIN="${DESKTOP_PYTHON_BIN:-$ROOT_DIR/backend/venv/bin/python}"
 VERSION="${EC_DESKTOP_VERSION:-0.1.0}"
 BUILD_NUMBER="${EC_DESKTOP_BUILD_NUMBER:-$VERSION}"
 LOCAL_TRANSCRIPTION_BUNDLE_DIRNAME="${VERSION//./__dot__}"
+APP_ICON_PATH="$BUILD_DIR/icon.icns"
 
 if [[ ! -x "$PYTHON_BIN" ]]; then
   echo "Missing Python runtime at $PYTHON_BIN" >&2
@@ -28,6 +29,7 @@ fi
 rm -rf "$RUNTIME_DIR" "$DIST_DIR" "$WORK_DIR" "$DMG_STAGING_DIR"
 mkdir -p "$RUNTIME_BIN_DIR" "$DIST_DIR" "$WORK_DIR" "$DMG_STAGING_DIR"
 
+"$DESKTOP_DIR/scripts/generate_app_icon.sh" "$APP_ICON_PATH" >/dev/null
 "$DESKTOP_DIR/scripts/build_ocr_helper.sh" >/dev/null
 
 FFMPEG_SOURCE="${EC_FFMPEG_SOURCE:-$(command -v ffmpeg || true)}"
@@ -50,7 +52,7 @@ find "$RUNTIME_COMPONENTS_DIR" -type f \( -name '*.pyc' -o -name '*.pyo' \) -del
   --component-root "$RUNTIME_COMPONENTS_DIR/local-transcription/$LOCAL_TRANSCRIPTION_BUNDLE_DIRNAME" \
   --entry-python-path "python" >/dev/null
 
-"$PYTHON_BIN" -m PyInstaller \
+EC_APP_ICON_PATH="$APP_ICON_PATH" "$PYTHON_BIN" -m PyInstaller \
   --noconfirm \
   --distpath "$DIST_DIR" \
   --workpath "$WORK_DIR" \

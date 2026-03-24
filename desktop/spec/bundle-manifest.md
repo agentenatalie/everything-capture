@@ -23,6 +23,7 @@ The build pipeline copies these staged binaries into the bundle destination `des
 - `desktop/spec/Info.plist.template`
 - `desktop/spec/entitlements.plist`
 - `desktop/spec/bundle-manifest.md`
+- `logo/logo-128.svg` -> build-time source used to generate `desktop/build/icon.icns`
 - `desktop/spec/icon.icns` if present
 
 If you add another helper binary, model asset, or static runtime file, add it to

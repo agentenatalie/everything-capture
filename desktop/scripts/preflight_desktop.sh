@@ -28,6 +28,8 @@ fi
 
 require_command xcrun
 require_command hdiutil
+require_command sips
+require_command iconutil
 
 if ! xcrun --find swiftc >/dev/null 2>&1; then
   fail "swiftc not found via xcrun"
@@ -47,6 +49,10 @@ fi
 
 if [[ ! -f "$DESKTOP_DIR/spec/bundle_manifest.py" ]]; then
   fail "missing machine-readable bundle manifest"
+fi
+
+if [[ ! -f "${EC_APP_ICON_SOURCE:-$ROOT_DIR/logo/logo-128.svg}" ]]; then
+  fail "missing app icon source; set EC_APP_ICON_SOURCE or add logo/logo-128.svg"
 fi
 
 "$PYTHON_BIN" -c "import PyInstaller, webview" >/dev/null 2>&1 || \

@@ -8,6 +8,8 @@
   <string>EverythingCapture</string>
   <key>CFBundleIdentifier</key>
   <string>com.everythingcapture.desktop</string>
+  <key>CFBundleIconFile</key>
+  <string>icon.icns</string>
   <key>CFBundleName</key>
   <string>Everything Capture</string>
   <key>CFBundlePackageType</key>

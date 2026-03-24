@@ -10,18 +10,13 @@
         }
 
         function setStatsSummary(total, visible, returned, hasFilter) {
-            const statsCountLabel = `已收录&nbsp;&nbsp;<strong>${total}</strong>&nbsp;&nbsp;篇内容`;
             stats.classList.remove('is-plain');
-            if (hasFilter) {
-                if (visible > returned) {
-                    stats.innerHTML = `<span class="stats-primary">${statsCountLabel}</span><span class="stats-secondary">匹配 ${visible} 篇，显示最新 ${returned} 篇</span>`;
-                    return;
-                }
-                stats.innerHTML = `<span class="stats-primary">${statsCountLabel}</span><span class="stats-secondary">当前显示 ${visible} 篇</span>`;
-                return;
-            }
-            if (total > returned) {
-                stats.innerHTML = `<span class="stats-primary">${statsCountLabel}</span><span class="stats-secondary">当前显示最新 ${returned} 篇</span>`;
+            const isInFolder = currentFolderScope === 'folder' || currentFolderScope === 'unfiled';
+            const statsCountLabel = isInFolder
+                ? `文件夹收录&nbsp;&nbsp;<strong>${visible}</strong>&nbsp;&nbsp;篇内容`
+                : `已收录&nbsp;&nbsp;<strong>${total}</strong>&nbsp;&nbsp;篇内容`;
+            if (hasFilter && visible > returned) {
+                stats.innerHTML = `<span class="stats-primary">${statsCountLabel}</span><span class="stats-secondary">匹配 ${visible} 篇，显示最新 ${returned} 篇</span>`;
                 return;
             }
             stats.innerHTML = `<span class="stats-primary">${statsCountLabel}</span>`;

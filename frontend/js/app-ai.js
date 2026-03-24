@@ -1214,9 +1214,6 @@
             if (entry.knowledgeBasePath) {
                 metaBits.push(`知识库：${escapeHtml(entry.knowledgeBasePath)}`);
             }
-            if (Number.isFinite(Number(entry.noteCount)) && Number(entry.noteCount) > 0) {
-                metaBits.push(`已读取 ${Number(entry.noteCount)} 篇笔记`);
-            }
             return metaBits.length
                 ? `<div class="ai-answer-meta">${metaBits.join(' · ')}</div>`
                 : '';
@@ -1379,6 +1376,16 @@
                 markdownHtml = _linkifyCitationRefs(markdownHtml, displayContent, entry.citations);
             }
 
+            const copyBtnMarkup = (!entry.isError && displayContent.trim())
+                ? `<button class="ai-msg-copy-btn" type="button" data-ai-copy-msg aria-label="复制" title="复制">${AI_CODE_COPY_ICON}</button>`
+                : '';
+
+            const toolbarMarkup = (copyBtnMarkup || actionsMarkup) ? `
+                            <div class="ai-msg-toolbar">
+                                ${actionsMarkup}
+                                ${copyBtnMarkup}
+                            </div>` : '';
+
             return `
                 <div class="ai-msg${compact ? ' is-compact' : ''}">
                     <div class="ai-msg-inner">
@@ -1386,8 +1393,8 @@
                             ${thinkingMarkup}
                             <div class="ai-markdown${entry.isError ? ' is-error' : ''}">${markdownHtml}</div>
                             ${metaMarkup}
-                            ${actionsMarkup}
                             ${toolEventsMarkup}
+                            ${toolbarMarkup}
                         </div>
                     </div>
                 </div>
@@ -1476,6 +1483,71 @@
                 .slice(-10);
         }
 
+        function updateAiNavTrack() {
+            const track = document.getElementById('aiNavTrack');
+            if (!track || !askAiResult) { if (track) track.classList.remove('is-visible'); return; }
+            const userMsgs = askAiResult.querySelectorAll('.ai-msg.is-user');
+            if (userMsgs.length < 2) { track.classList.remove('is-visible'); track.innerHTML = ''; return; }
+
+            const scrollH = askAiResult.scrollHeight;
+            const clientH = askAiResult.clientHeight;
+            if (scrollH <= clientH) { track.classList.remove('is-visible'); track.innerHTML = ''; return; }
+
+            track.innerHTML = '';
+            userMsgs.forEach((msg) => {
+                const item = document.createElement('div');
+                item.className = 'ai-nav-item';
+
+                const mark = document.createElement('div');
+                mark.className = 'ai-nav-mark';
+
+                const label = document.createElement('div');
+                label.className = 'ai-nav-label';
+                const text = (msg.querySelector('.ai-msg-content')?.textContent || '').trim();
+                label.textContent = text.length > 10 ? text.slice(0, 10) + '…' : text;
+
+                item.appendChild(label);
+                item.appendChild(mark);
+                item.addEventListener('click', () => {
+                    msg.scrollIntoView({ behavior: 'instant', block: 'start' });
+                });
+                track.appendChild(item);
+            });
+            track.classList.add('is-visible');
+            _updateAiNavActive();
+        }
+
+        function _updateAiNavActive() {
+            const track = document.getElementById('aiNavTrack');
+            if (!track || !askAiResult) return;
+            const items = track.querySelectorAll('.ai-nav-item');
+            const userMsgs = askAiResult.querySelectorAll('.ai-msg.is-user');
+            if (!items.length || items.length !== userMsgs.length) return;
+
+            const scrollTop = askAiResult.scrollTop;
+            const clientH = askAiResult.clientHeight;
+            let activeIdx = 0;
+            userMsgs.forEach((msg, i) => {
+                if (msg.offsetTop <= scrollTop + clientH * 0.3) activeIdx = i;
+            });
+            items.forEach((item, i) => {
+                const mark = item.querySelector('.ai-nav-mark');
+                if (mark) mark.classList.toggle('is-active', i === activeIdx);
+            });
+        }
+
+        // Throttled scroll listener for nav track
+        let _aiNavScrollRaf = 0;
+        if (document.getElementById('askAiResult')) {
+            document.getElementById('askAiResult').addEventListener('scroll', () => {
+                if (_aiNavScrollRaf) return;
+                _aiNavScrollRaf = window.requestAnimationFrame(() => {
+                    _aiNavScrollRaf = 0;
+                    _updateAiNavActive();
+                });
+            });
+        }
+
         function renderAiConversation() {
             if (!askAiResult) return;
             const currentItem = getCurrentAiContextItem();
@@ -1491,11 +1563,13 @@
                             <p class="ai-welcome-subtitle">在设置里填好模型、Base URL 和密钥后，这里就能开始连续对话。</p>
                         </div>
                     `;
+                    updateAiNavTrack();
                     return;
                 }
 
                 askAiResult.innerHTML = renderAiHome(currentItem);
                 renderAiWelcome();
+                updateAiNavTrack();
                 return;
             }
 
@@ -1529,6 +1603,7 @@
 
             window.requestAnimationFrame(() => {
                 askAiResult.scrollTop = askAiResult.scrollHeight;
+                updateAiNavTrack();
             });
         }
 
@@ -2153,12 +2228,12 @@
 
             return `
                 <div class="reader-ai-sidebar-shell">
-                    <div class="reader-ai-messages" id="readerAiMessages">${contextMarkup}${quickActionsSectionMarkup}${messagesMarkup}${loadingMarkup}</div>
+                    <div class="reader-ai-messages" id="readerAiMessages">${conversation.length ? '' : contextMarkup + quickActionsSectionMarkup}${messagesMarkup}${loadingMarkup}</div>
                     <div class="reader-ai-composer${isBusy ? ' is-loading' : ''}">
                         <textarea id="readerAiInput" class="reader-ai-input" placeholder="问这条笔记、问关联内容，或让 AI 帮你整理下一步..." ${isBusy ? 'disabled' : ''}>${escapeHtml(draft)}</textarea>
                         <div class="reader-ai-composer-actions">
                             <button id="readerAiClearBtn" class="reader-ai-secondary-btn" type="button" ${conversation.length ? '' : 'disabled'}>清空</button>
-                            <button id="readerAiSubmitBtn" class="reader-ai-submit${isBusy ? ' is-loading' : ''}" type="button" ${isBusy ? 'disabled' : ''}>${isBusy ? '思考中...' : '发送'}</button>
+                            <button id="readerAiSubmitBtn" class="reader-ai-submit${isBusy ? ' is-loading' : ''}" type="button" ${isBusy ? 'disabled' : ''}>${isBusy ? '<span class="reader-ai-spinner"></span>' : '发送'}</button>
                         </div>
                     </div>
                 </div>
@@ -2405,6 +2480,32 @@
                 if (citationId) {
                     await openAiCitation(citationId);
                 }
+                return;
+            }
+
+            const msgCopyBtn = event.target instanceof Element
+                ? event.target.closest('[data-ai-copy-msg]')
+                : null;
+            if (msgCopyBtn) {
+                const msgEl = msgCopyBtn.closest('.ai-msg');
+                const markdown = msgEl?.querySelector('.ai-markdown');
+                const text = markdown?.innerText || '';
+                if (!text) return;
+                const copied = await copyTextToClipboard(text);
+                if (!copied) {
+                    showToast('复制失败', 'error');
+                    return;
+                }
+                msgCopyBtn.innerHTML = AI_CODE_COPIED_ICON;
+                msgCopyBtn.setAttribute('aria-label', '已复制');
+                msgCopyBtn.setAttribute('title', '已复制');
+                msgCopyBtn.classList.add('is-copied');
+                window.setTimeout(() => {
+                    msgCopyBtn.innerHTML = AI_CODE_COPY_ICON;
+                    msgCopyBtn.setAttribute('aria-label', '复制');
+                    msgCopyBtn.setAttribute('title', '复制');
+                    msgCopyBtn.classList.remove('is-copied');
+                }, 1400);
                 return;
             }
 

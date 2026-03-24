@@ -5,6 +5,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Everything Capture - 收录看板</title>
+    <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 128 128' fill='none'%3E%3Cpath d='M64 20 L73 50 L105 45 L82 66 L94 96 L64 78 L34 96 L46 66 L23 45 L55 50 Z' stroke='%23111' stroke-width='6' stroke-linejoin='round' stroke-linecap='round' fill='none'/%3E%3C/svg%3E">
     <link
         href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&family=Manrope:wght@500;600;700&family=Noto+Sans+SC:wght@400;500;600;700&display=swap"
         rel="stylesheet">
@@ -528,13 +529,16 @@
                 </header>
 
                 <!-- 消息区域 -->
-                <div class="ai-content" id="askAiResult">
-                    <div class="ai-welcome">
-                        <div class="ai-welcome-badge">基于知识库连续对话</div>
-                        <h1 class="ai-welcome-title">有什么可以帮忙的？</h1>
-                        <p class="ai-welcome-subtitle">可以直接提问、总结内容、串联相关笔记，或切到 Agent 执行动作。</p>
-                        <div class="ai-welcome-grid" id="aiWelcomeGrid"></div>
+                <div class="ai-content-wrap">
+                    <div class="ai-content" id="askAiResult">
+                        <div class="ai-welcome">
+                            <div class="ai-welcome-badge">基于知识库连续对话</div>
+                            <h1 class="ai-welcome-title">有什么可以帮忙的？</h1>
+                            <p class="ai-welcome-subtitle">可以直接提问、总结内容、串联相关笔记，或切到 Agent 执行动作。</p>
+                            <div class="ai-welcome-grid" id="aiWelcomeGrid"></div>
+                        </div>
                     </div>
+                    <div class="ai-nav-track" id="aiNavTrack"></div>
                 </div>
 
                 <!-- 输入区域 -->

@@ -1,0 +1,231 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Everything Capture</title>
+  <meta name="description" content="个人内容收藏与知识管理工具。采集任意网页内容，AI 智能分析，同步到 Notion 和 Obsidian。">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Noto+Serif+SC:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="css/style.css">
+  <!-- Inline logo SVG as favicon -->
+  <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 128 128' fill='none'%3E%3Cpath d='M64 20 L73 50 L105 45 L82 66 L94 96 L64 78 L34 96 L46 66 L23 45 L55 50 Z' stroke='%23111' stroke-width='6' stroke-linejoin='round' stroke-linecap='round' fill='none'/%3E%3C/svg%3E">
+</head>
+<body>
+
+<!-- ===== Nav ===== -->
+<nav class="nav">
+  <div class="container">
+    <a href="#" class="nav-brand">
+      <svg width="30" height="30" viewBox="0 0 128 128" fill="none">
+        <path d="M36 50 L36 38 Q36 36, 38 36 L50 36" stroke="#111" stroke-width="6" stroke-linecap="round" fill="none"/>
+        <path d="M78 36 L90 36 Q92 36, 92 38 L92 50" stroke="#111" stroke-width="6" stroke-linecap="round" fill="none"/>
+        <path d="M92 78 L92 90 Q92 92, 90 92 L78 92" stroke="#111" stroke-width="6" stroke-linecap="round" fill="none"/>
+        <path d="M50 92 L38 92 Q36 92, 36 90 L36 78" stroke="#111" stroke-width="6" stroke-linecap="round" fill="none"/>
+        <path d="M64 50 L68 59 L79 57 L71 65 L76 76 L64 71 L52 76 L57 65 L49 57 L60 59 Z" stroke="#111" stroke-width="4" stroke-linejoin="round" stroke-linecap="round" fill="none"/>
+      </svg>
+      Everything Capture
+    </a>
+    <ul class="nav-links">
+      <li><a href="#features"><span class="nav-link-text">我能做什么？</span></a></li>
+      <li><a href="#how-it-works"><span class="nav-link-text">我厉害在哪？</span></a></li>
+      <li><a href="#faq"><span class="nav-link-text">关于你的问题</span></a></li>
+    </ul>
+    <a href="https://github.com/agentenatalie/everything-capture" class="nav-github"><svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0 0 24 12c0-6.63-5.37-12-12-12z"/></svg></a>
+  </div>
+</nav>
+
+<!-- ===== Hero ===== -->
+<section class="hero">
+  <div class="container">
+    <div class="reveal">
+      <div class="hero-badge">open source</div>
+    </div>
+    <h1 class="reveal">
+      看到好内容，<span class="highlight">先收了再说</span>
+    </h1>
+    <p class="hero-sub reveal">
+      收藏夹里 200 条链接，半年后一条都找不到？<br>
+      我可以帮你把网页内容<strong>真正用起来</strong>，不再只是存个链接。
+    </p>
+    <div class="hero-actions reveal">
+      <a href="https://github.com/agentenatalie/everything-capture/releases/latest/download/EverythingCapture-0.1.0-arm64.dmg" class="btn btn-primary">
+        <svg class="btn-apple" width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><path d="M18.71 19.5c-.83 1.24-1.71 2.45-3.05 2.47-1.34.03-1.77-.79-3.29-.79-1.53 0-2 .77-3.27.82-1.31.05-2.3-1.32-3.14-2.53C4.25 17 2.94 12.45 4.7 9.39c.87-1.52 2.43-2.48 4.12-2.51 1.28-.02 2.5.87 3.29.87.78 0 2.26-1.07 3.8-.91.65.03 2.47.26 3.64 1.98-.09.06-2.17 1.28-2.15 3.81.03 3.02 2.65 4.03 2.68 4.04-.03.07-.42 1.44-1.38 2.83M13 3.5c.73-.83 1.94-1.46 2.94-1.5.13 1.17-.34 2.35-1.04 3.19-.69.85-1.83 1.51-2.95 1.42-.15-1.15.41-2.35 1.05-3.11z"/></svg>
+        <span class="btn-text">下载 macOS 版本</span>
+      </a>
+      <a href="https://github.com/agentenatalie/everything-capture" class="hero-github">
+        <svg width="28" height="28" viewBox="0 0 24 24" fill="currentColor"><path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0 0 24 12c0-6.63-5.37-12-12-12z"/></svg>
+      </a>
+    </div>
+    <p class="hero-meta reveal">需要 macOS 13.0+ &middot; Apple Silicon &middot; v0.1.0</p>
+
+    <!-- Hero video -->
+    <div class="hero-video-wrap reveal">
+      <video class="hero-video" autoplay loop muted playsinline>
+        <source src="images/hero.mp4" type="video/mp4">
+        <source src="images/hero.mov" type="video/quicktime">
+      </video>
+    </div>
+
+    <!-- Platforms marquee -->
+    <div class="platforms">
+      <div class="marquee-track">
+        <span class="marquee-item">Twitter / X</span><span class="marquee-sep"></span>
+        <span class="marquee-item">小红书</span><span class="marquee-sep"></span>
+        <span class="marquee-item">抖音</span><span class="marquee-sep"></span>
+        <span class="marquee-item">微信公众号</span><span class="marquee-sep"></span>
+        <span class="marquee-item">YouTube</span><span class="marquee-sep"></span>
+        <span class="marquee-item">Bilibili</span><span class="marquee-sep"></span>
+        <span class="marquee-item">知乎</span><span class="marquee-sep"></span>
+        <span class="marquee-item">GitHub</span><span class="marquee-sep"></span>
+        <span class="marquee-item">Medium</span><span class="marquee-sep"></span>
+        <span class="marquee-item">Substack</span><span class="marquee-sep"></span>
+        <span class="marquee-item">Any Website</span><span class="marquee-sep"></span>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ===== Features ===== -->
+<section id="features">
+  <div class="container">
+    <div class="features-header reveal">
+      <div class="section-label">功能</div>
+      <h2 class="section-title">不只是「收藏」，是真的「存下来」</h2>
+      <p class="section-desc">收藏夹存的是链接，链接会失效。这里存的是内容本身。</p>
+    </div>
+    <div class="features-grid stagger">
+      <div class="feature-card reveal">
+        <div class="feature-icon capture">
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#1e3a8a" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>
+        </div>
+        <h3>看到就收，零摩擦</h3>
+        <p>刷到一条小红书想留着？扔到网站里解析一下。手机上看到？分享给快捷指令。连 ⌘K 粘个链接都行。</p>
+      </div>
+      <div class="feature-card reveal">
+        <div class="feature-icon extract">
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#1e3a8a" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8Z"/><path d="M14 2v6h6"/><path d="M16 13H8M16 17H8M10 9H8"/></svg>
+        </div>
+        <h3>图片里的字也能搜到</h3>
+        <p>小红书的图文笔记？OCR 自动识别文字。抖音的教程视频？Whisper 转录成文稿。全在你的 Mac 上本地完成。</p>
+      </div>
+      <div class="feature-card reveal">
+        <div class="feature-icon ai">
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#1e3a8a" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M9.5 2A2.5 2.5 0 0 1 12 4.5v15a2.5 2.5 0 0 1-4.96.44A2.5 2.5 0 0 1 4.5 17.5a2.5 2.5 0 0 1 0-5A2.5 2.5 0 0 1 7 9.5a2.5 2.5 0 0 1 2.5-2.5V2Z"/><path d="M14.5 2A2.5 2.5 0 0 0 12 4.5v15a2.5 2.5 0 0 0 4.96.44A2.5 2.5 0 0 0 19.5 17.5a2.5 2.5 0 0 0 0-5A2.5 2.5 0 0 0 17 9.5a2.5 2.5 0 0 0-2.5-2.5V2Z"/></svg>
+        </div>
+        <h3>问 AI「帮我找找这个」</h3>
+        <p>「给我洛克王国的全攻略」— AI 从你的收藏库里找到所有对应的收藏，摘要并总结给你，还带 reference 。用你自己的 API key，数据不出本地。</p>
+      </div>
+      <div class="feature-card reveal">
+        <div class="feature-icon sync">
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#1e3a8a" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 0 0-9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/><path d="M3 12a9 9 0 0 0 9 9 9.75 9.75 0 0 0 6.74-2.74L21 16"/><path d="M16 16h5v5"/></svg>
+        </div>
+        <h3>自动流入你的笔记体系</h3>
+        <p>已经在用 Notion 或 Obsidian 管知识？一键同步过去，增量更新不重复。不需要换工具，只是多了一个入口。</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ===== How it works ===== -->
+<section id="how-it-works">
+  <div class="container">
+    <div class="steps-header reveal">
+      <div class="section-label">和收藏夹有什么不同</div>
+      <h2 class="section-title">收藏夹只存链接，我们存内容</h2>
+    </div>
+    <div class="comparison stagger">
+      <div class="comparison-col comparison-before reveal">
+        <div class="comparison-label">浏览器收藏夹</div>
+        <ul class="comparison-list">
+          <li>存了 300 条链接，记不清哪条是哪条</li>
+          <li>半年后链接 404，内容消失</li>
+          <li>想找那篇文章？只能一条条翻</li>
+          <li>图片里的文字、视频里的内容？搜不到</li>
+        </ul>
+      </div>
+      <div class="comparison-col comparison-after reveal">
+        <div class="comparison-label">Everything Capture</div>
+        <ul class="comparison-list">
+          <li>正文、图片、视频全部保存到本地</li>
+          <li>原网页挂了也没关系，内容都在</li>
+          <li>全文搜索 + AI 问答，想找什么直接问</li>
+          <li>OCR 识别图片文字，Whisper 转录视频语音</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ===== FAQ ===== -->
+<section id="faq">
+  <div class="container">
+    <div class="faq-header reveal">
+      <div class="section-label">常见问题</div>
+      <h2 class="section-title">你可能想知道的</h2>
+    </div>
+    <div class="faq-grid">
+      <div class="faq-item reveal">
+        <div class="faq-question">
+          <span class="faq-q-marker">Q</span>
+          我的数据会不会被上传到你们的服务器？
+        </div>
+        <div class="faq-answer">不会。所有内容存在你 Mac 本地的 SQLite 数据库里，媒体文件也在本地。AI 功能用的是你自己的 API key，我们没有服务器。</div>
+      </div>
+      <div class="faq-item reveal">
+        <div class="faq-question">
+          <span class="faq-q-marker">Q</span>
+          要花钱吗？
+        </div>
+        <div class="faq-answer">软件免费开源。AI 功能需要你自备 API key（DeepSeek、OpenAI 等都行，几块钱能用很久）。不用 AI 也完全能用。</div>
+      </div>
+      <div class="faq-item reveal">
+        <div class="faq-question">
+          <span class="faq-q-marker">Q</span>
+          小红书/抖音这种平台的内容也能存？
+        </div>
+        <div class="faq-answer">能。小红书图文、抖音视频、Twitter、公众号文章都有专门的解析器，图片和视频都会下载到本地。其他网页走通用提取。</div>
+      </div>
+      <div class="faq-item reveal">
+        <div class="faq-question">
+          <span class="faq-q-marker">Q</span>
+          已经在用 Notion / Obsidian 了，还需要这个吗？
+        </div>
+        <div class="faq-answer">正好。这个工具不是要替代它们，而是给它们多一个自动化的内容入口。采集的内容可以一键同步过去，省去手动复制粘贴。</div>
+      </div>
+      <div class="faq-item reveal">
+        <div class="faq-question">
+          <span class="faq-q-marker">Q</span>
+          断网了还能用吗？
+        </div>
+        <div class="faq-answer">采集新内容和 AI 需要联网，但已经存下来的内容 — 浏览、搜索、管理 — 完全离线可用。</div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ===== Footer ===== -->
+<footer class="footer">
+  <div class="container">
+    <div class="footer-brand">
+      <svg width="22" height="22" viewBox="0 0 128 128" fill="none">
+        <path d="M36 50 L36 38 Q36 36, 38 36 L50 36" stroke="#111" stroke-width="6" stroke-linecap="round" fill="none"/>
+        <path d="M78 36 L90 36 Q92 36, 92 38 L92 50" stroke="#111" stroke-width="6" stroke-linecap="round" fill="none"/>
+        <path d="M92 78 L92 90 Q92 92, 90 92 L78 92" stroke="#111" stroke-width="6" stroke-linecap="round" fill="none"/>
+        <path d="M50 92 L38 92 Q36 92, 36 90 L36 78" stroke="#111" stroke-width="6" stroke-linecap="round" fill="none"/>
+        <path d="M64 50 L68 59 L79 57 L71 65 L76 76 L64 71 L52 76 L57 65 L49 57 L60 59 Z" stroke="#111" stroke-width="4" stroke-linejoin="round" stroke-linecap="round" fill="none"/>
+      </svg>
+      Everything Capture &middot; v0.1.0
+    </div>
+    <ul class="footer-links">
+      <li><a href="https://github.com/agentenatalie/everything-capture">GitHub</a></li>
+      <li><a href="https://github.com/agentenatalie/everything-capture/releases">Releases</a></li>
+      <li><a href="https://github.com/agentenatalie/everything-capture/blob/main/LICENSE">MIT License</a></li>
+    </ul>
+  </div>
+</footer>
+
+<script src="js/main.js"></script>
+</body>
+</html>

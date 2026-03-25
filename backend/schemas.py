@@ -1,5 +1,5 @@
 from pydantic import BaseModel, Field
-from typing import Optional
+from typing import Literal, Optional
 from datetime import datetime
 
 
@@ -108,6 +108,7 @@ class SettingsResponse(BaseModel):
     ai_agent_can_sync_obsidian: bool = False
     ai_agent_can_sync_notion: bool = False
     ai_agent_can_execute_commands: bool = False
+    ai_agent_can_web_search: bool = True
     auto_sync_target: str = "none"
     notion_ready: bool = False
     notion_missing_fields: list[str] = Field(default_factory=list)
@@ -177,6 +178,7 @@ class SettingsUpdateRequest(BaseModel):
     ai_agent_can_sync_obsidian: Optional[bool] = None
     ai_agent_can_sync_notion: Optional[bool] = None
     ai_agent_can_execute_commands: Optional[bool] = None
+    ai_agent_can_web_search: Optional[bool] = None
     auto_sync_target: Optional[str] = None
 
 
@@ -332,6 +334,50 @@ class ItemPageNoteCreateRequest(BaseModel):
 class ItemPageNoteUpdateRequest(BaseModel):
     title: Optional[str] = None
     content: Optional[str] = None
+
+
+class HighlightResponse(BaseModel):
+    id: str
+    item_id: str
+    color: str
+    text: str
+    selector_path: str
+    start_text_node_index: int
+    start_offset: int
+    end_selector_path: str
+    end_text_node_index: int
+    end_offset: int
+    context_before: str = ""
+    context_after: str = ""
+    page_note_id: Optional[str] = None
+    created_at: datetime
+    updated_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+class HighlightListResponse(BaseModel):
+    highlights: list[HighlightResponse] = Field(default_factory=list)
+
+
+class HighlightCreateRequest(BaseModel):
+    color: Literal["yellow", "green", "blue", "red"] = "yellow"
+    text: str
+    selector_path: str
+    start_text_node_index: int = 0
+    start_offset: int
+    end_selector_path: str
+    end_text_node_index: int = 0
+    end_offset: int
+    context_before: str = ""
+    context_after: str = ""
+    page_note_id: Optional[str] = None
+
+
+class HighlightUpdateRequest(BaseModel):
+    color: Optional[Literal["yellow", "green", "blue", "red"]] = None
+    page_note_id: Optional[str] = None
 
 
 class FolderResponse(BaseModel):

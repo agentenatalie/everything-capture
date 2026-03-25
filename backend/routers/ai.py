@@ -38,12 +38,15 @@ from services.ai_client import (
     extract_tool_calls,
     stream_chat_completion,
 )
+import logging
+
 from services.ai_defaults import (
     AI_AGENT_DEFAULT_CAN_EXECUTE_COMMANDS,
     AI_AGENT_DEFAULT_CAN_MANAGE_FOLDERS,
     AI_AGENT_DEFAULT_CAN_PARSE_CONTENT,
     AI_AGENT_DEFAULT_CAN_SYNC_NOTION,
     AI_AGENT_DEFAULT_CAN_SYNC_OBSIDIAN,
+    AI_AGENT_DEFAULT_CAN_WEB_SEARCH,
     AI_DEFAULT_BASE_URL,
     AI_DEFAULT_MODEL,
     coerce_bool,
@@ -442,6 +445,7 @@ def _assistant_agent_system_prompt(agent_permissions: list[str], memories: list[
         "sync_obsidian": "触发同步到 Obsidian",
         "sync_notion": "触发同步到 Notion",
         "execute_commands": "执行沙箱命令（克隆仓库、下载文件、打包等）",
+        "web_search": "联网搜索外部信息",
     }
     readable_permissions = "、".join(permission_lines[key] for key in agent_permissions if key in permission_lines)
     if not readable_permissions:
@@ -473,6 +477,7 @@ def _assistant_agent_system_prompt(agent_permissions: list[str], memories: list[
         "你拥有多个原子工具，可以自由组合来完成用户的各种请求：\n"
         "- 查看内容：search_library_items / list_recent_notes（支持 scope='unfiled' 筛选未归档）/ get_item_details\n"
         "- 管理文件夹：list_folders / create_folder / assign_item_folders / batch_assign_item_folders\n"
+        "- 联网搜索：web_search — 当需要查询收藏库以外的外部信息（事实校验、最新资讯、百科知识等）时使用\n"
         "- 遇到复杂任务时，先用查询工具了解现状，再决定执行什么操作。\n"
         "- 批量操作优先用 batch_assign_item_folders，不要逐条调用 assign_item_folders。\n"
         "- 需要新文件夹时先用 create_folder 创建，再用 batch_assign_item_folders 归档。\n"
@@ -1248,6 +1253,10 @@ def _agent_permission_flags(settings: Settings | None) -> dict[str, bool]:
             getattr(settings, "ai_agent_can_execute_commands", None),
             AI_AGENT_DEFAULT_CAN_EXECUTE_COMMANDS,
         ),
+        "web_search": coerce_bool(
+            getattr(settings, "ai_agent_can_web_search", None),
+            AI_AGENT_DEFAULT_CAN_WEB_SEARCH,
+        ),
     }
 
 
@@ -1274,6 +1283,8 @@ def _agent_permissions(settings: Settings | None) -> list[str]:
         permissions.append("sync_notion")
     if flags["execute_commands"]:
         permissions.append("execute_commands")
+    if flags["web_search"]:
+        permissions.append("web_search")
     return permissions
 
 
@@ -1627,6 +1638,38 @@ def _build_agent_tools(agent_permissions: list[str]) -> list[dict[str, Any]]:
                 },
             }
         )
+    if "web_search" in agent_permissions:
+        tools.append(
+            {
+                "type": "function",
+                "function": {
+                    "name": "web_search",
+                    "description": (
+                        "Search the internet for real-time information using DuckDuckGo. "
+                        "Use this when the user asks about external facts, current events, "
+                        "or anything that requires information beyond the saved library. "
+                        "Returns a list of search results with titles, URLs, and snippets."
+                    ),
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "query": {
+                                "type": "string",
+                                "description": "Search query in any language.",
+                            },
+                            "max_results": {
+                                "type": "integer",
+                                "minimum": 1,
+                                "maximum": 10,
+                                "description": "Number of results to return (default 5).",
+                            },
+                        },
+                        "required": ["query"],
+                        "additionalProperties": False,
+                    },
+                },
+            }
+        )
     return tools
 
 
@@ -1670,6 +1713,122 @@ def _resolve_tool_target_folders(
             seen_ids.add(folder.id)
 
     return ordered, missing_names
+
+
+_web_search_logger = logging.getLogger("web_search")
+
+
+_WEB_SEARCH_FETCH_LIMIT = 3  # 最多抓取前 N 个结果的正文
+_WEB_SEARCH_CONTENT_CHARS = 2000  # 每个页面抓取的最大字符数
+
+
+async def _fetch_page_text(url: str, timeout: float = 10) -> str:
+    """Fetch a URL and extract readable text content (best-effort)."""
+    import httpx
+
+    try:
+        async with httpx.AsyncClient(timeout=timeout, follow_redirects=True) as client:
+            resp = await client.get(
+                url,
+                headers={
+                    "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+                },
+            )
+            resp.raise_for_status()
+            html_text = resp.text
+    except Exception:
+        return ""
+
+    # Try trafilatura first (best quality)
+    try:
+        import trafilatura  # type: ignore
+
+        extracted = trafilatura.extract(html_text, include_comments=False, include_tables=True)
+        if extracted:
+            return extracted[:_WEB_SEARCH_CONTENT_CHARS]
+    except Exception:
+        pass
+
+    # Fallback: strip HTML tags
+    import re as _re
+
+    text = _re.sub(r"<script[^>]*>.*?</script>", "", html_text, flags=_re.DOTALL | _re.IGNORECASE)
+    text = _re.sub(r"<style[^>]*>.*?</style>", "", text, flags=_re.DOTALL | _re.IGNORECASE)
+    text = _re.sub(r"<[^>]+>", " ", text)
+    text = _re.sub(r"\s+", " ", text).strip()
+    from html import unescape
+
+    text = unescape(text)
+    return text[:_WEB_SEARCH_CONTENT_CHARS]
+
+
+async def _web_search_duckduckgo(query: str, max_results: int = 5) -> list[dict[str, str]]:
+    """Search DuckDuckGo and return results with title, url, snippet, and page content."""
+    import httpx
+    from html import unescape
+    import asyncio
+
+    results: list[dict[str, str]] = []
+    try:
+        async with httpx.AsyncClient(timeout=15, follow_redirects=True) as client:
+            resp = await client.get(
+                "https://html.duckduckgo.com/html/",
+                params={"q": query},
+                headers={
+                    "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+                },
+            )
+            resp.raise_for_status()
+            html_text = resp.text
+
+        # Parse results from DuckDuckGo HTML lite page
+        import re as _re
+
+        link_pattern = _re.compile(
+            r'<a\s+[^>]*class="result__a"[^>]*href="([^"]*)"[^>]*>(.*?)</a>',
+            _re.DOTALL,
+        )
+        snippet_pattern = _re.compile(
+            r'<a\s+[^>]*class="result__snippet"[^>]*>(.*?)</a>',
+            _re.DOTALL,
+        )
+
+        links = link_pattern.findall(html_text)
+        snippets = snippet_pattern.findall(html_text)
+
+        tag_re = _re.compile(r"<[^>]+>")
+        for i, (raw_url, raw_title) in enumerate(links[:max_results]):
+            title = unescape(tag_re.sub("", raw_title)).strip()
+            snippet = ""
+            if i < len(snippets):
+                snippet = unescape(tag_re.sub("", snippets[i])).strip()
+
+            # DuckDuckGo redirects through //duckduckgo.com/l/?uddg=...
+            url = raw_url
+            if "uddg=" in url:
+                from urllib.parse import unquote, urlparse, parse_qs
+
+                parsed = urlparse(url)
+                qs = parse_qs(parsed.query)
+                if "uddg" in qs:
+                    url = unquote(qs["uddg"][0])
+
+            if title and url:
+                results.append({"title": title, "url": url, "snippet": snippet})
+
+        # Fetch page content for top results to give AI more context
+        fetch_count = min(len(results), _WEB_SEARCH_FETCH_LIMIT)
+        if fetch_count > 0:
+            tasks = [_fetch_page_text(results[i]["url"]) for i in range(fetch_count)]
+            page_texts = await asyncio.gather(*tasks, return_exceptions=True)
+            for i, text in enumerate(page_texts):
+                if isinstance(text, str) and text.strip():
+                    results[i]["content"] = text
+
+    except Exception as exc:
+        _web_search_logger.warning("DuckDuckGo 搜索失败: %s", exc)
+
+    return results
 
 
 async def _execute_agent_tool(
@@ -2245,6 +2404,27 @@ async def _execute_agent_tool(
             result = {"status": "error", "message": str(exc)}
             return result, AiToolEventResponse(name=tool_name, status="failed", summary=f"命令执行异常：{exc}"), [], []
 
+    if tool_name == "web_search":
+        if "web_search" not in agent_permissions:
+            result = {"status": "error", "message": "Permission denied"}
+            return result, AiToolEventResponse(name=tool_name, status="failed", summary="没有开放联网搜索权限"), [], []
+        query = _clean_optional_string(arguments.get("query"))
+        if not query:
+            result = {"status": "error", "message": "query is required"}
+            return result, AiToolEventResponse(name=tool_name, status="failed", summary="搜索失败：缺少 query"), [], []
+        max_results = max(1, min(int(arguments.get("max_results") or 5), 10))
+        search_results = await _web_search_duckduckgo(query, max_results)
+        if not search_results:
+            result = {"status": "ok", "query": query, "results": [], "message": "未找到搜索结果"}
+            return result, AiToolEventResponse(name=tool_name, summary=f"联网搜索「{_truncate_text(query, 30)}」：无结果"), [], []
+        result = {
+            "status": "ok",
+            "query": query,
+            "results": search_results,
+        }
+        summary = f"联网搜索「{_truncate_text(query, 30)}」：找到 {len(search_results)} 条结果"
+        return result, AiToolEventResponse(name=tool_name, summary=summary), [], []
+
     result = {"status": "error", "message": f"Unknown tool: {tool_name}"}
     return result, AiToolEventResponse(name=tool_name, status="failed", summary=f"未知工具：{tool_name}"), [], []
 
@@ -2562,6 +2742,8 @@ async def _run_agent_loop(
     if current_item_note is not None:
         collected_notes.append((current_item_note, 1.0))
     updated_items: list[dict[str, Any]] = []
+    _tool_call_counts: dict[str, int] = {}  # 每个工具的调用计数
+    _WEB_SEARCH_MAX_CALLS = 3  # web_search 最多调用次数
 
     for _ in range(_AGENT_TOOL_STEP_LIMIT):
         try:
@@ -2612,6 +2794,28 @@ async def _run_agent_loop(
             function_payload = tool_call.get("function") or {}
             tool_name = _clean_optional_string(function_payload.get("name")) or "unknown_tool"
             raw_arguments = function_payload.get("arguments") or "{}"
+
+            # 限制 web_search 调用次数，防止死循环
+            _tool_call_counts[tool_name] = _tool_call_counts.get(tool_name, 0) + 1
+            if tool_name == "web_search" and _tool_call_counts[tool_name] > _WEB_SEARCH_MAX_CALLS:
+                result = {
+                    "status": "error",
+                    "message": "已达到联网搜索次数上限，请基于已有搜索结果回答。",
+                }
+                event = AiToolEventResponse(name=tool_name, status="failed", summary="联网搜索次数已达上限")
+                ranked_notes: list[tuple[KnowledgeBaseNote, float]] = []
+                changed_items: list[dict[str, Any]] = []
+                tool_events.append(event)
+                model_messages.append(
+                    {
+                        "role": "tool",
+                        "tool_call_id": tool_id,
+                        "name": tool_name,
+                        "content": json.dumps(result, ensure_ascii=False),
+                    }
+                )
+                continue
+
             try:
                 arguments = json.loads(raw_arguments) if isinstance(raw_arguments, str) else {}
             except json.JSONDecodeError:

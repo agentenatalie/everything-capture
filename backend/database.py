@@ -318,6 +318,10 @@ def ensure_runtime_schema():
             connection.exec_driver_sql(
                 "ALTER TABLE settings ADD COLUMN ai_agent_can_execute_commands BOOLEAN NOT NULL DEFAULT 0"
             )
+        if "ai_agent_can_web_search" not in settings_columns:
+            connection.exec_driver_sql(
+                "ALTER TABLE settings ADD COLUMN ai_agent_can_web_search BOOLEAN NOT NULL DEFAULT 1"
+            )
         connection.exec_driver_sql(
             "UPDATE settings SET user_id = ? WHERE user_id IS NULL OR trim(user_id) = ''",
             (DEFAULT_USER_ID,),
@@ -340,6 +344,9 @@ def ensure_runtime_schema():
         )
         connection.exec_driver_sql(
             "UPDATE settings SET ai_agent_can_execute_commands = 0 WHERE ai_agent_can_execute_commands IS NULL"
+        )
+        connection.exec_driver_sql(
+            "UPDATE settings SET ai_agent_can_web_search = 1 WHERE ai_agent_can_web_search IS NULL"
         )
         connection.exec_driver_sql("DROP INDEX IF EXISTS idx_settings_workspace_id")
         connection.exec_driver_sql("CREATE UNIQUE INDEX IF NOT EXISTS idx_settings_user_id ON settings(user_id)")
@@ -448,6 +455,33 @@ def ensure_runtime_schema():
         connection.exec_driver_sql(
             "CREATE INDEX IF NOT EXISTS idx_item_page_notes_ai_conversation_id ON item_page_notes(ai_conversation_id)"
         )
+
+        # --- highlights ---
+        connection.exec_driver_sql(
+            """
+            CREATE TABLE IF NOT EXISTS highlights (
+                id VARCHAR PRIMARY KEY,
+                item_id VARCHAR NOT NULL REFERENCES items(id),
+                user_id VARCHAR NOT NULL REFERENCES users(id),
+                workspace_id VARCHAR NOT NULL REFERENCES workspaces(id),
+                color VARCHAR(16) NOT NULL DEFAULT 'yellow',
+                text TEXT NOT NULL,
+                selector_path VARCHAR NOT NULL,
+                start_text_node_index INTEGER NOT NULL DEFAULT 0,
+                start_offset INTEGER NOT NULL,
+                end_selector_path VARCHAR NOT NULL,
+                end_text_node_index INTEGER NOT NULL DEFAULT 0,
+                end_offset INTEGER NOT NULL,
+                context_before TEXT NOT NULL DEFAULT '',
+                context_after TEXT NOT NULL DEFAULT '',
+                page_note_id VARCHAR REFERENCES item_page_notes(id) ON DELETE SET NULL,
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+            )
+            """
+        )
+        connection.exec_driver_sql("CREATE INDEX IF NOT EXISTS idx_highlights_item_id ON highlights(item_id)")
+        connection.exec_driver_sql("CREATE INDEX IF NOT EXISTS idx_highlights_user_id ON highlights(user_id)")
 
         # --- ai_memories ---
         connection.exec_driver_sql(

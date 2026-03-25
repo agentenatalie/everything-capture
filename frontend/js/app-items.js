@@ -2232,6 +2232,623 @@
         window.toggleReaderFullscreen = toggleReaderFullscreen;
         window.openReaderSidebarPanel = openReaderSidebarPanel;
         window.closeReaderSidebarPanel = closeReaderSidebarPanel;
+        // ── Highlights ──────────────────────────────────────────────────────────
+
+        const highlightsByItem = new Map();
+        const highlightsLoadStateByItem = new Map();
+        let highlightToolbarEl = null;
+        let highlightPopoverEl = null;
+
+        function getHighlightsForItem(itemId) {
+            return highlightsByItem.get(itemId) || [];
+        }
+
+        // ── CSS selector path helpers ──────────────────────────────────────────
+
+        function _selectorPathForElement(el, root) {
+            if (!el || el === root) return '';
+            const parts = [];
+            let cur = el;
+            while (cur && cur !== root && cur.parentElement) {
+                if (cur.id) {
+                    parts.unshift('#' + cur.id);
+                    break;
+                }
+                const parent = cur.parentElement;
+                const siblings = Array.from(parent.children);
+                const idx = siblings.indexOf(cur) + 1;
+                const tag = cur.tagName.toLowerCase();
+                parts.unshift(`${tag}:nth-child(${idx})`);
+                cur = parent;
+            }
+            return parts.join(' > ');
+        }
+
+        function _textNodeIndex(textNode) {
+            const parent = textNode.parentNode;
+            if (!parent) return 0;
+            const children = parent.childNodes;
+            for (let i = 0; i < children.length; i++) {
+                if (children[i] === textNode) return i;
+            }
+            return 0;
+        }
+
+        function _resolveTextNode(root, selectorPath, textNodeIndex) {
+            if (!selectorPath) return null;
+            let el;
+            try {
+                el = root.querySelector(selectorPath);
+            } catch { return null; }
+            if (!el) return null;
+            const node = el.childNodes[textNodeIndex];
+            return (node && node.nodeType === Node.TEXT_NODE) ? node : null;
+        }
+
+        function _getContext(text, offset, length) {
+            const start = Math.max(0, offset - length);
+            const end = Math.min(text.length, offset + length);
+            return { before: text.slice(start, offset), after: text.slice(offset, end) };
+        }
+
+        // ── Build highlight data from selection text ──────────────────────────
+
+        function _buildHighlightData() {
+            const root = modalContent;
+            if (!root) return null;
+
+            const text = _pendingSelectionText;
+            if (!text || !text.trim()) return null;
+
+            const fullText = root.textContent || '';
+            const idx = fullText.indexOf(text);
+            const ctx = idx >= 0
+                ? { before: fullText.slice(Math.max(0, idx - 100), idx), after: fullText.slice(idx + text.length, idx + text.length + 100) }
+                : { before: '', after: '' };
+
+            return {
+                text,
+                // Use simple placeholders — we rely on text search for both applying and restoring
+                selector_path: '',
+                start_text_node_index: 0,
+                start_offset: 0,
+                end_selector_path: '',
+                end_text_node_index: 0,
+                end_offset: 0,
+                context_before: ctx.before,
+                context_after: ctx.after,
+            };
+        }
+
+        // ── Apply highlight by text search ─────────────────────────────────────
+
+        function _applyHighlightMark(highlightId, text, color, contextBefore, contextAfter) {
+            if (!modalContent || !text) return;
+            // Skip if already applied
+            if (modalContent.querySelector(`mark[data-highlight-id="${highlightId}"]`)) return;
+
+            const fullText = modalContent.textContent || '';
+
+            // Try with context first for precision
+            let textStart = -1;
+            if (contextBefore || contextAfter) {
+                const searchStr = (contextBefore || '') + text + (contextAfter || '');
+                const idx = fullText.indexOf(searchStr);
+                if (idx >= 0) textStart = idx + (contextBefore || '').length;
+            }
+            // Fallback: direct text search
+            if (textStart < 0) {
+                textStart = fullText.indexOf(text);
+            }
+            if (textStart < 0) return;
+
+            // Walk text nodes to find the DOM range
+            const walker = document.createTreeWalker(modalContent, NodeFilter.SHOW_TEXT);
+            let charCount = 0;
+            let startNode = null, startOff = 0, endNode = null, endOff = 0;
+            let node;
+            while ((node = walker.nextNode())) {
+                const nodeLen = node.length;
+                if (!startNode && charCount + nodeLen > textStart) {
+                    startNode = node;
+                    startOff = textStart - charCount;
+                }
+                if (startNode && charCount + nodeLen >= textStart + text.length) {
+                    endNode = node;
+                    endOff = textStart + text.length - charCount;
+                    break;
+                }
+                charCount += nodeLen;
+            }
+            if (!startNode || !endNode) return;
+
+            try {
+                const range = document.createRange();
+                range.setStart(startNode, startOff);
+                range.setEnd(endNode, endOff);
+
+                const mark = document.createElement('mark');
+                mark.className = `highlight-${color}`;
+                mark.dataset.highlightId = highlightId;
+                mark.appendChild(range.extractContents());
+                range.insertNode(mark);
+            } catch (e) {
+                console.warn('[HL] apply mark failed', e);
+            }
+        }
+
+        function _unwrapHighlightMarks(highlightId) {
+            if (!modalContent) return;
+            const marks = modalContent.querySelectorAll(`mark[data-highlight-id="${highlightId}"]`);
+            marks.forEach(mark => {
+                const parent = mark.parentNode;
+                while (mark.firstChild) parent.insertBefore(mark.firstChild, mark);
+                parent.removeChild(mark);
+                parent.normalize();
+            });
+        }
+
+        // ── Restore highlights on article open ─────────────────────────────────
+
+        function _restoreHighlights(itemId) {
+            const highlights = getHighlightsForItem(itemId);
+            if (!highlights.length || !modalContent) return;
+
+            for (const h of highlights) {
+                _applyHighlightMark(h.id, h.text, h.color, h.context_before, h.context_after);
+            }
+        }
+
+        // ── Load highlights from API ───────────────────────────────────────────
+
+        async function loadItemHighlights(itemId) {
+            if (!itemId) return [];
+            const state = highlightsLoadStateByItem.get(itemId);
+            if (state === 'loading' || state === 'loaded') return getHighlightsForItem(itemId);
+
+            highlightsLoadStateByItem.set(itemId, 'loading');
+            try {
+                const res = await fetch(`/api/items/${itemId}/highlights`);
+                if (!res.ok) throw new Error('Failed to load highlights');
+                const data = await res.json();
+                const highlights = data.highlights || [];
+                highlightsByItem.set(itemId, highlights);
+                highlightsLoadStateByItem.set(itemId, 'loaded');
+                return highlights;
+            } catch {
+                highlightsLoadStateByItem.set(itemId, 'idle');
+                return [];
+            }
+        }
+
+        async function createHighlight(itemId, highlightData) {
+            try {
+                console.log('[HL] creating highlight', { itemId, color: highlightData.color, text: highlightData.text?.slice(0, 50) });
+                const res = await fetch(`/api/items/${itemId}/highlights`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(highlightData),
+                });
+                if (!res.ok) {
+                    const errData = await res.json().catch(() => ({}));
+                    console.error('[HL] create failed', res.status, errData);
+                    throw new Error(errData.detail || 'Failed to create highlight');
+                }
+                const h = await res.json();
+                console.log('[HL] created', h.id);
+                const existing = getHighlightsForItem(itemId);
+                highlightsByItem.set(itemId, [...existing, h]);
+                return h;
+            } catch (err) {
+                showToast('高亮创建失败: ' + err.message, 'error');
+                return null;
+            }
+        }
+
+        async function updateHighlight(itemId, highlightId, updates) {
+            try {
+                const res = await fetch(`/api/items/${itemId}/highlights/${highlightId}`, {
+                    method: 'PATCH',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(updates),
+                });
+                if (!res.ok) throw new Error('Failed to update highlight');
+                const h = await res.json();
+                const existing = getHighlightsForItem(itemId);
+                highlightsByItem.set(itemId, existing.map(x => x.id === h.id ? h : x));
+                return h;
+            } catch {
+                showToast('高亮更新失败', 'error');
+                return null;
+            }
+        }
+
+        async function deleteHighlight(itemId, highlightId) {
+            try {
+                const res = await fetch(`/api/items/${itemId}/highlights/${highlightId}`, { method: 'DELETE' });
+                if (!res.ok) throw new Error('Failed to delete highlight');
+                const existing = getHighlightsForItem(itemId);
+                highlightsByItem.set(itemId, existing.filter(x => x.id !== highlightId));
+                _unwrapHighlightMarks(highlightId);
+            } catch {
+                showToast('高亮删除失败', 'error');
+            }
+        }
+
+        // ── Floating toolbar / popover ─────────────────────────────────────────
+
+        const HIGHLIGHT_COLORS = ['yellow', 'green', 'blue', 'red'];
+        const HIGHLIGHT_COLOR_VALUES = {
+            yellow: 'rgba(255, 212, 0, 0.45)',
+            green: 'rgba(72, 199, 142, 0.45)',
+            blue: 'rgba(66, 153, 225, 0.45)',
+            red: 'rgba(245, 101, 101, 0.45)',
+        };
+
+        function _dismissHighlightToolbar() {
+            if (highlightToolbarEl) {
+                highlightToolbarEl.remove();
+                highlightToolbarEl = null;
+            }
+            _pendingSelection = null;
+            _pendingSelectionText = null;
+        }
+
+        function _dismissHighlightPopover() {
+            if (highlightPopoverEl) {
+                highlightPopoverEl.remove();
+                highlightPopoverEl = null;
+            }
+        }
+
+        function _positionFloatingEl(el, selectionRect) {
+            const scrollParent = modalContent?.closest('.reader-main-column') || document.body;
+            const containerRect = scrollParent.getBoundingClientRect();
+
+            // Convert viewport coords to container-relative coords (accounting for scroll)
+            let top = selectionRect.top - containerRect.top + scrollParent.scrollTop - el.offsetHeight - 8;
+            let left = selectionRect.left - containerRect.left + scrollParent.scrollLeft + (selectionRect.width / 2) - (el.offsetWidth / 2);
+
+            // Keep within bounds
+            left = Math.max(4, Math.min(left, containerRect.width - el.offsetWidth - 4));
+            if (top < scrollParent.scrollTop + 4) {
+                // Show below selection if no room above
+                top = selectionRect.bottom - containerRect.top + scrollParent.scrollTop + 8;
+            }
+
+            el.style.top = top + 'px';
+            el.style.left = left + 'px';
+        }
+
+        function _showHighlightToolbar(range) {
+            _dismissHighlightToolbar();
+            _dismissHighlightPopover();
+
+            const itemId = currentOpenItemId;
+            if (!itemId || contentViewMode === 'edit') return;
+
+            const rect = range.getBoundingClientRect();
+            if (!rect.width && !rect.height) return;
+
+            // Save the selected text — we use text search to apply marks, not Range manipulation
+            _pendingSelectionText = range.toString();
+
+            const toolbar = document.createElement('div');
+            toolbar.className = 'highlight-toolbar';
+
+            // Prevent toolbar clicks from clearing selection
+            toolbar.addEventListener('mousedown', (e) => e.preventDefault());
+
+            // Color dots
+            for (const color of HIGHLIGHT_COLORS) {
+                const dot = document.createElement('button');
+                dot.className = 'hl-color-dot';
+                dot.dataset.color = color;
+                dot.style.background = HIGHLIGHT_COLOR_VALUES[color];
+                dot.title = color;
+                dot.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    _handleHighlightCreate(itemId, color);
+                });
+                toolbar.appendChild(dot);
+            }
+
+            // Quote to note button
+            const quoteBtn = document.createElement('button');
+            quoteBtn.className = 'hl-quote-btn';
+            quoteBtn.title = '引用到笔记';
+            quoteBtn.innerHTML = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>';
+            quoteBtn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                _handleQuoteToNote(itemId, 'yellow');
+            });
+            toolbar.appendChild(quoteBtn);
+
+            const scrollParent = modalContent?.closest('.reader-main-column') || document.body;
+            scrollParent.style.position = 'relative';
+            scrollParent.appendChild(toolbar);
+            highlightToolbarEl = toolbar;
+
+            _positionFloatingEl(toolbar, rect);
+        }
+
+        function _showHighlightPopover(markEl) {
+            _dismissHighlightToolbar();
+            _dismissHighlightPopover();
+
+            const highlightId = markEl.dataset.highlightId;
+            const itemId = currentOpenItemId;
+            if (!highlightId || !itemId) return;
+
+            const existing = getHighlightsForItem(itemId).find(h => h.id === highlightId);
+            const currentColor = existing?.color || 'yellow';
+
+            const popover = document.createElement('div');
+            popover.className = 'highlight-toolbar highlight-popover';
+
+            // Color dots
+            for (const color of HIGHLIGHT_COLORS) {
+                const dot = document.createElement('button');
+                dot.className = 'hl-color-dot' + (color === currentColor ? ' is-active' : '');
+                dot.dataset.color = color;
+                dot.style.background = HIGHLIGHT_COLOR_VALUES[color];
+                dot.title = color;
+                dot.addEventListener('click', async (e) => {
+                    e.stopPropagation();
+                    if (color === currentColor) return;
+                    await updateHighlight(itemId, highlightId, { color });
+                    // Update mark classes
+                    const marks = modalContent.querySelectorAll(`mark[data-highlight-id="${highlightId}"]`);
+                    marks.forEach(m => {
+                        m.className = `highlight-${color}`;
+                    });
+                    _dismissHighlightPopover();
+                });
+                popover.appendChild(dot);
+            }
+
+            // Quote to note
+            const quoteBtn = document.createElement('button');
+            quoteBtn.className = 'hl-quote-btn';
+            quoteBtn.title = '引用到笔记';
+            quoteBtn.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>';
+            quoteBtn.addEventListener('click', async (e) => {
+                e.stopPropagation();
+                const text = existing?.text || markEl.textContent || '';
+                await _quoteTextToNote(itemId, text, highlightId);
+                _dismissHighlightPopover();
+            });
+            popover.appendChild(quoteBtn);
+
+            // Delete button
+            const delBtn = document.createElement('button');
+            delBtn.className = 'hl-delete-btn';
+            delBtn.title = '删除高亮';
+            delBtn.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/></svg>';
+            delBtn.addEventListener('click', async (e) => {
+                e.stopPropagation();
+                await deleteHighlight(itemId, highlightId);
+                _dismissHighlightPopover();
+            });
+            popover.appendChild(delBtn);
+
+            const scrollParent = modalContent?.closest('.reader-main-column') || document.body;
+            scrollParent.style.position = 'relative';
+            scrollParent.appendChild(popover);
+            highlightPopoverEl = popover;
+
+            const rect = markEl.getBoundingClientRect();
+            _positionFloatingEl(popover, rect);
+        }
+
+        // ── Highlight create + quote to note ───────────────────────────────────
+
+        let _pendingSelection = null;
+        let _pendingSelectionText = null;
+
+        async function _handleHighlightCreate(itemId, color) {
+            console.log('[HL] _handleHighlightCreate', { itemId, color, text: _pendingSelectionText?.slice(0, 50) });
+            const data = _buildHighlightData();
+            if (!data) {
+                console.warn('[HL] no data from selection');
+                _dismissHighlightToolbar();
+                return;
+            }
+
+            data.color = color;
+            window.getSelection()?.removeAllRanges();
+            _dismissHighlightToolbar();
+
+            const h = await createHighlight(itemId, data);
+            if (h) {
+                _applyHighlightMark(h.id, h.text, h.color, h.context_before, h.context_after);
+            }
+        }
+
+        async function _handleQuoteToNote(itemId, color) {
+            const data = _buildHighlightData();
+            if (!data) {
+                _dismissHighlightToolbar();
+                return;
+            }
+
+            const text = data.text;
+            data.color = color;
+
+            // Determine target note
+            let targetNoteId = null;
+            if (activePageNoteId && pageNoteViewMode === 'source' && readerSidebarTab === 'pageNotes') {
+                targetNoteId = activePageNoteId;
+            }
+
+            if (!targetNoteId) {
+                // Create new note with quoted text
+                const noteTitle = text.length > 30 ? text.slice(0, 30) + '...' : text;
+                const note = await createReaderPageNote(itemId, {
+                    title: noteTitle,
+                    content: `> ${text}\n\n`,
+                    successMessage: '已引用到新笔记',
+                });
+                if (note) {
+                    targetNoteId = note.id;
+                    data.page_note_id = note.id;
+                    activePageNoteId = note.id;
+                    pageNoteViewMode = 'source';
+                    openReaderSidebarPanel('pageNotes');
+                }
+            } else {
+                // Append to existing note
+                data.page_note_id = targetNoteId;
+                const contentInput = document.getElementById('pnEditorContent');
+                if (contentInput) {
+                    const current = contentInput.value || '';
+                    const separator = current.endsWith('\n\n') ? '' : (current.endsWith('\n') ? '\n' : '\n\n');
+                    contentInput.value = current + separator + `> ${text}\n\n`;
+                    // Trigger auto-save
+                    triggerPageNoteAutoSave(itemId, targetNoteId);
+                    // Scroll textarea to bottom
+                    contentInput.scrollTop = contentInput.scrollHeight;
+                }
+                showToast('已引用到当前笔记', 'success');
+            }
+
+            // Create the highlight
+            window.getSelection()?.removeAllRanges();
+            _dismissHighlightToolbar();
+
+            const h = await createHighlight(itemId, data);
+            if (h) {
+                _applyHighlightMark(h.id, h.text, h.color, h.context_before, h.context_after);
+            }
+        }
+
+        async function _quoteTextToNote(itemId, text, highlightId) {
+            if (!text) return;
+
+            let targetNoteId = null;
+            if (activePageNoteId && pageNoteViewMode === 'source' && readerSidebarTab === 'pageNotes') {
+                targetNoteId = activePageNoteId;
+            }
+
+            if (!targetNoteId) {
+                const noteTitle = text.length > 30 ? text.slice(0, 30) + '...' : text;
+                const note = await createReaderPageNote(itemId, {
+                    title: noteTitle,
+                    content: `> ${text}\n\n`,
+                    successMessage: '已引用到新笔记',
+                });
+                if (note) {
+                    targetNoteId = note.id;
+                    activePageNoteId = note.id;
+                    pageNoteViewMode = 'source';
+                    openReaderSidebarPanel('pageNotes');
+                }
+            } else {
+                const contentInput = document.getElementById('pnEditorContent');
+                if (contentInput) {
+                    const current = contentInput.value || '';
+                    const separator = current.endsWith('\n\n') ? '' : (current.endsWith('\n') ? '\n' : '\n\n');
+                    contentInput.value = current + separator + `> ${text}\n\n`;
+                    triggerPageNoteAutoSave(itemId, targetNoteId);
+                    contentInput.scrollTop = contentInput.scrollHeight;
+                }
+                showToast('已引用到当前笔记', 'success');
+            }
+
+            // Link highlight to note
+            if (highlightId && targetNoteId) {
+                await updateHighlight(itemId, highlightId, { page_note_id: targetNoteId });
+            }
+        }
+
+        // ── Event listeners ────────────────────────────────────────────────────
+
+        // Selection toolbar on mouseup in modal content
+        modalContent?.addEventListener('mouseup', (e) => {
+            if (contentViewMode === 'edit') return;
+
+            // Check if clicked on an existing highlight mark
+            const markEl = e.target.closest('mark[data-highlight-id]');
+            if (markEl) {
+                _showHighlightPopover(markEl);
+                return;
+            }
+
+            // Short delay to let selection finalize
+            setTimeout(() => {
+                const sel = window.getSelection();
+                if (!sel || sel.isCollapsed || !sel.rangeCount) {
+                    _dismissHighlightToolbar();
+                    return;
+                }
+
+                const range = sel.getRangeAt(0);
+                const text = range.toString().trim();
+                if (!text) {
+                    _dismissHighlightToolbar();
+                    return;
+                }
+
+                // Verify selection is within modalContent
+                if (!modalContent.contains(range.startContainer) || !modalContent.contains(range.endContainer)) {
+                    return;
+                }
+
+                _showHighlightToolbar(range);
+            }, 10);
+        });
+
+        // Dismiss on mousedown (new selection start)
+        modalContent?.addEventListener('mousedown', (e) => {
+            if (!e.target.closest('.highlight-toolbar') && !e.target.closest('.highlight-popover')) {
+                _dismissHighlightToolbar();
+                _dismissHighlightPopover();
+            }
+        });
+
+        // Dismiss on Escape
+        document.addEventListener('keydown', (e) => {
+            if (e.key === 'Escape') {
+                _dismissHighlightToolbar();
+                _dismissHighlightPopover();
+            }
+        });
+
+        // Dismiss when clicking outside modal content
+        modalOverlay?.addEventListener('click', (e) => {
+            if (!e.target.closest('.modal-body') && !e.target.closest('.highlight-toolbar') && !e.target.closest('.highlight-popover')) {
+                _dismissHighlightToolbar();
+                _dismissHighlightPopover();
+            }
+        });
+
+        // ── Hook into openModalByItem to restore highlights ────────────────────
+
+        const _originalOpenModalByItem = openModalByItem;
+
+        // We need to monkey-patch because openModalByItem is a local function
+        // Instead, we'll hook into the end of it via the animation callback
+        // We override the existing function and call the original
+        // Actually, let's use a simpler approach: listen for modal open and restore
+
+        // Use a MutationObserver to detect when modal content changes
+        if (modalContent) {
+            const _hlRestoreObserver = new MutationObserver(() => {
+                const itemId = currentOpenItemId;
+                if (!itemId) return;
+                // Debounce: wait a tick for content to settle
+                clearTimeout(_hlRestoreObserver._timer);
+                _hlRestoreObserver._timer = setTimeout(async () => {
+                    // Only restore if we have loaded highlights or need to load them
+                    if (highlightsLoadStateByItem.get(itemId) !== 'loaded') {
+                        await loadItemHighlights(itemId);
+                    }
+                    _restoreHighlights(itemId);
+                }, 100);
+            });
+            _hlRestoreObserver.observe(modalContent, { childList: true, subtree: false });
+        }
+
         window.renderSidebarAiContent = renderSidebarAiContent;
         window.setReaderChromeHidden = setReaderChromeHidden;
         window.createReaderPageNote = createReaderPageNote;

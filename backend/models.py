@@ -24,6 +24,7 @@ class Workspace(Base):
     settings = relationship("Settings", back_populates="workspace")
     ai_conversations = relationship("AiConversation", back_populates="workspace")
     page_notes = relationship("ItemPageNote", back_populates="workspace")
+    highlights = relationship("Highlight", back_populates="workspace")
 
 
 class User(Base):
@@ -42,6 +43,7 @@ class User(Base):
     settings = relationship("Settings", back_populates="user")
     ai_conversations = relationship("AiConversation", back_populates="user")
     page_notes = relationship("ItemPageNote", back_populates="user")
+    highlights = relationship("Highlight", back_populates="user")
 
 
 class Item(Base):
@@ -83,6 +85,7 @@ class Item(Base):
     folder_links = relationship("ItemFolderLink", back_populates="item", cascade="all, delete-orphan", lazy="selectin")
     ai_conversations = relationship("AiConversation", back_populates="current_item")
     page_notes = relationship("ItemPageNote", back_populates="item", cascade="all, delete-orphan")
+    highlights = relationship("Highlight", back_populates="item", cascade="all, delete-orphan")
 
 
 class Media(Base):
@@ -154,6 +157,7 @@ class Settings(Base):
     ai_agent_can_sync_obsidian = Column(Boolean, nullable=False, default=False)
     ai_agent_can_sync_notion = Column(Boolean, nullable=False, default=False)
     ai_agent_can_execute_commands = Column(Boolean, nullable=False, default=False)
+    ai_agent_can_web_search = Column(Boolean, nullable=False, default=True)
     auto_sync_target = Column(String, default="none") # "none", "notion", "obsidian", "both"
 
     user = relationship("User", back_populates="settings", lazy="joined")
@@ -199,6 +203,33 @@ class ItemPageNote(Base):
     user = relationship("User", back_populates="page_notes", lazy="joined")
     workspace = relationship("Workspace", back_populates="page_notes", lazy="joined")
     ai_conversation = relationship("AiConversation", back_populates="page_notes", lazy="joined")
+
+
+class Highlight(Base):
+    __tablename__ = "highlights"
+
+    id = Column(String, primary_key=True, index=True, default=generate_uuid)
+    item_id = Column(String, ForeignKey("items.id"), nullable=False, index=True)
+    user_id = Column(String, ForeignKey("users.id"), nullable=False, index=True, default=DEFAULT_USER_ID)
+    workspace_id = Column(String, ForeignKey("workspaces.id"), nullable=False, index=True, default=DEFAULT_WORKSPACE_ID)
+    color = Column(String(16), nullable=False, default="yellow")
+    text = Column(Text, nullable=False)
+    selector_path = Column(String, nullable=False)
+    start_text_node_index = Column(Integer, nullable=False, default=0)
+    start_offset = Column(Integer, nullable=False)
+    end_selector_path = Column(String, nullable=False)
+    end_text_node_index = Column(Integer, nullable=False, default=0)
+    end_offset = Column(Integer, nullable=False)
+    context_before = Column(Text, nullable=False, default="")
+    context_after = Column(Text, nullable=False, default="")
+    page_note_id = Column(String, ForeignKey("item_page_notes.id", ondelete="SET NULL"), nullable=True)
+    created_at = Column(DateTime, default=datetime.datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.datetime.utcnow)
+
+    item = relationship("Item", back_populates="highlights", lazy="joined")
+    user = relationship("User", back_populates="highlights", lazy="joined")
+    workspace = relationship("Workspace", back_populates="highlights", lazy="joined")
+    page_note = relationship("ItemPageNote", lazy="joined")
 
 
 class AiMemory(Base):

@@ -12,10 +12,14 @@ from fastapi import APIRouter, Depends, HTTPException, Response
 from sqlalchemy import func, or_, text
 from sqlalchemy.orm import Session
 from database import SessionLocal, get_db
-from models import AiConversation, Folder, Item, ItemFolderLink, ItemPageNote
+from models import AiConversation, Folder, Highlight, Item, ItemFolderLink, ItemPageNote
 from schemas import (
     BulkFolderUpdateRequest,
     BulkFolderUpdateResponse,
+    HighlightCreateRequest,
+    HighlightListResponse,
+    HighlightResponse,
+    HighlightUpdateRequest,
     ItemContentUpdateRequest,
     ItemFolderUpdateRequest,
     ItemNoteUpdateRequest,
@@ -1228,6 +1232,151 @@ def delete_item_page_note(item_id: str, note_id: str, db: Session = Depends(get_
     db.delete(note)
     db.commit()
     return None
+
+# ── Highlights ──────────────────────────────────────────────────────────
+
+
+def _serialize_highlight(h: Highlight) -> HighlightResponse:
+    return HighlightResponse(
+        id=h.id,
+        item_id=h.item_id,
+        color=h.color or "yellow",
+        text=h.text or "",
+        selector_path=h.selector_path or "",
+        start_text_node_index=h.start_text_node_index or 0,
+        start_offset=h.start_offset or 0,
+        end_selector_path=h.end_selector_path or "",
+        end_text_node_index=h.end_text_node_index or 0,
+        end_offset=h.end_offset or 0,
+        context_before=h.context_before or "",
+        context_after=h.context_after or "",
+        page_note_id=h.page_note_id,
+        created_at=h.created_at,
+        updated_at=h.updated_at,
+    )
+
+
+@router.get("/items/{item_id}/highlights", response_model=HighlightListResponse)
+def list_item_highlights(item_id: str, db: Session = Depends(get_db)):
+    user_id = get_current_user_id()
+    item = db.query(Item).filter(Item.id == item_id, Item.user_id == user_id).first()
+    if not item:
+        raise HTTPException(status_code=404, detail="Item not found")
+
+    highlights = (
+        db.query(Highlight)
+        .filter(Highlight.item_id == item_id, Highlight.user_id == user_id)
+        .order_by(Highlight.created_at.asc())
+        .all()
+    )
+    return HighlightListResponse(highlights=[_serialize_highlight(h) for h in highlights])
+
+
+@router.post("/items/{item_id}/highlights", response_model=HighlightResponse)
+def create_item_highlight(
+    item_id: str,
+    request: HighlightCreateRequest,
+    db: Session = Depends(get_db),
+):
+    user_id = get_current_user_id()
+    item = db.query(Item).filter(Item.id == item_id, Item.user_id == user_id).first()
+    if not item:
+        raise HTTPException(status_code=404, detail="Item not found")
+
+    page_note_id = (request.page_note_id or "").strip() or None
+    if page_note_id:
+        note = (
+            db.query(ItemPageNote)
+            .filter(ItemPageNote.id == page_note_id, ItemPageNote.user_id == user_id)
+            .first()
+        )
+        if not note:
+            raise HTTPException(status_code=404, detail="Page note not found")
+
+    now = datetime.utcnow()
+    highlight = Highlight(
+        item_id=item.id,
+        user_id=user_id,
+        workspace_id=item.workspace_id,
+        color=request.color,
+        text=request.text,
+        selector_path=request.selector_path,
+        start_text_node_index=request.start_text_node_index,
+        start_offset=request.start_offset,
+        end_selector_path=request.end_selector_path,
+        end_text_node_index=request.end_text_node_index,
+        end_offset=request.end_offset,
+        context_before=request.context_before[:200] if request.context_before else "",
+        context_after=request.context_after[:200] if request.context_after else "",
+        page_note_id=page_note_id,
+        created_at=now,
+        updated_at=now,
+    )
+    db.add(highlight)
+    db.commit()
+    db.refresh(highlight)
+    return _serialize_highlight(highlight)
+
+
+@router.patch("/items/{item_id}/highlights/{highlight_id}", response_model=HighlightResponse)
+def update_item_highlight(
+    item_id: str,
+    highlight_id: str,
+    request: HighlightUpdateRequest,
+    db: Session = Depends(get_db),
+):
+    user_id = get_current_user_id()
+    highlight = (
+        db.query(Highlight)
+        .filter(
+            Highlight.id == highlight_id,
+            Highlight.item_id == item_id,
+            Highlight.user_id == user_id,
+        )
+        .first()
+    )
+    if not highlight:
+        raise HTTPException(status_code=404, detail="Highlight not found")
+
+    if request.color is not None:
+        highlight.color = request.color
+    if request.page_note_id is not None:
+        page_note_id = request.page_note_id.strip() or None
+        if page_note_id:
+            note = (
+                db.query(ItemPageNote)
+                .filter(ItemPageNote.id == page_note_id, ItemPageNote.user_id == user_id)
+                .first()
+            )
+            if not note:
+                raise HTTPException(status_code=404, detail="Page note not found")
+        highlight.page_note_id = page_note_id
+    highlight.updated_at = datetime.utcnow()
+
+    db.commit()
+    db.refresh(highlight)
+    return _serialize_highlight(highlight)
+
+
+@router.delete("/items/{item_id}/highlights/{highlight_id}", status_code=204)
+def delete_item_highlight(item_id: str, highlight_id: str, db: Session = Depends(get_db)):
+    user_id = get_current_user_id()
+    highlight = (
+        db.query(Highlight)
+        .filter(
+            Highlight.id == highlight_id,
+            Highlight.item_id == item_id,
+            Highlight.user_id == user_id,
+        )
+        .first()
+    )
+    if not highlight:
+        raise HTTPException(status_code=404, detail="Highlight not found")
+
+    db.delete(highlight)
+    db.commit()
+    return None
+
 
 @router.delete("/items/{item_id}", status_code=204)
 def delete_item(item_id: str, db: Session = Depends(get_db)):

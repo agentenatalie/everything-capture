@@ -34,6 +34,7 @@
             batch_assign_item_folders: '批量归档',
             save_memory: '记住偏好',
             delete_memory: '删除记忆',
+            web_search: '联网搜索',
         };
         const AI_MUTATING_TOOLS = new Set([
             'assign_item_folders',

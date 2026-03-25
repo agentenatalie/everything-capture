@@ -3234,7 +3234,7 @@
         .folder-sidebar-toggle {
             position: absolute;
             right: -12px;
-            top: 34px;
+            top: 38px;
             transform: translateY(-50%);
             padding: 0;
             display: inline-flex;
@@ -3530,7 +3530,7 @@
             display: grid;
             grid-template-columns: auto minmax(320px, 540px) auto;
             align-items: center;
-            min-height: 68px;
+            min-height: 76px;
             margin: 0;
             padding: 0 24px;
             background: #ffffff;
@@ -3616,12 +3616,21 @@
         }
 
         .view-btn {
-            padding: 4px 14px;
+            padding: 6px 10px;
             border-radius: 999px;
             color: #71767a;
             font-size: 13px;
             font-weight: 500;
             box-shadow: none;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .view-btn svg {
+            width: 16px;
+            height: 16px;
+            stroke: currentColor;
         }
 
         .view-btn:hover {
@@ -3673,7 +3682,7 @@
             box-shadow: none;
             color: #2a2c2e;
             font-size: 14px;
-            padding: 10px 16px;
+            padding: 12px 16px;
         }
 
         .filter-input:focus {

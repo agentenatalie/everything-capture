@@ -2006,6 +2006,15 @@
 
         function closeAskAiDialog() {
             if (!askAiOverlay || askAiOverlay.classList.contains('is-closing')) return;
+            if (history.state?.ai) {
+                history.back();
+                return;
+            }
+            _performAskAiClose();
+        }
+
+        function _performAskAiClose() {
+            if (!askAiOverlay || askAiOverlay.classList.contains('is-closing')) return;
             askAiOverlay.classList.remove('is-behind-reader');
             askAiOverlay.classList.add('is-closing');
             window.setTimeout(() => {
@@ -2416,6 +2425,7 @@
             openItemAiAssistant(event, currentOpenItemId);
         }
 
+        window.closeAskAiOverlay = _performAskAiClose;
         window.isAiConfigured = isAiConfigured;
         window.openAiCitation = openAiCitation;
         window.openAskAiModal = openAskAiModal;
@@ -2430,7 +2440,10 @@
         window.saveReaderAiMessageToPageNote = saveReaderAiMessageToPageNote;
         window.renderMarkdownContent = renderMarkdown;
 
-        askAiBtn?.addEventListener('click', () => openAskAiModal({ itemId: null, resetConversation: true }));
+        askAiBtn?.addEventListener('click', () => {
+            history.pushState({ ai: true }, '', '/ask-ai');
+            openAskAiModal({ itemId: null, resetConversation: true });
+        });
         openReaderAiBtn?.addEventListener('click', openCurrentItemAiAssistant);
         openReaderAiBtn?.addEventListener('keydown', (event) => {
             if (event.key === 'Enter' || event.key === ' ') {
@@ -2563,6 +2576,7 @@
                     askAiInput?.focus();
                     return;
                 }
+                history.pushState({ ai: true }, '', '/ask-ai');
                 openAskAiModal({ itemId: null, resetConversation: true });
                 return;
             }

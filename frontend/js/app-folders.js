@@ -40,6 +40,7 @@
         }
 
         function handleItemPrimaryAction(itemId) {
+            history.pushState({ reader: itemId }, '', '/reader/' + encodeURIComponent(itemId));
             openModalById(itemId);
         }
 

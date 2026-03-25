@@ -96,5 +96,14 @@ def startup_recover_processing_items() -> None:
 os.makedirs(MEDIA_DIR, exist_ok=True)
 app.mount("/static/media", StaticFiles(directory=str(MEDIA_DIR)), name="media")
 
+# SPA fallback: serve index.html for client-side routes
+from fastapi.responses import FileResponse as _FileResponse
+_index_html = str(FRONTEND_DIR / "index.html")
+
+@app.get("/reader/{item_id:path}")
+@app.get("/ask-ai")
+async def spa_fallback():
+    return _FileResponse(_index_html)
+
 # Serve the static frontend from the same origin as the API.
 app.mount("/", StaticFiles(directory=str(FRONTEND_DIR), html=True), name="frontend")

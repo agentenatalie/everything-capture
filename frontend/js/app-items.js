@@ -2100,7 +2100,11 @@
         }
 
         closeModal?.addEventListener('click', () => {
-            closeModalDialog();
+            if (history.state?.reader) {
+                history.back();
+            } else {
+                closeModalDialog();
+            }
         });
 
         closeModal?.addEventListener('keydown', (e) => {
@@ -2186,7 +2190,11 @@
                 return true;
             }
             if (modalOverlay.classList.contains('active')) {
-                closeModalDialog();
+                if (history.state?.reader) {
+                    history.back();
+                } else {
+                    closeModalDialog();
+                }
                 return true;
             }
             return false;
@@ -2858,5 +2866,16 @@
         window.getItemById = getItemById;
         window.openModalById = openModalById;
         window.openModalByItem = openModalByItem;
+
+        // Browser back/forward: close reader or AI overlay when navigating away
+        window.addEventListener('popstate', function () {
+            if (modalOverlay.classList.contains('active') && !modalOverlay.classList.contains('is-closing')) {
+                closeModalDialog();
+            }
+            var askAiOverlay = document.getElementById('askAiOverlay');
+            if (askAiOverlay?.classList.contains('active') && !askAiOverlay.classList.contains('is-closing')) {
+                if (typeof window.closeAskAiOverlay === 'function') window.closeAskAiOverlay();
+            }
+        });
 
         bootstrapApp();

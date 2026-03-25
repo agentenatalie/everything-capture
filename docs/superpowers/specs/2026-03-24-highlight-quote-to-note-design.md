@@ -16,18 +16,27 @@ Add persistent text highlighting to the article reader, with the ability to quot
 | `workspace_id` | FK → workspaces | Workspace |
 | `color` | String(16) | Color key: `yellow` / `green` / `blue` / `red`. Default `yellow` |
 | `text` | Text | Selected plain text (for display and fallback matching) |
-| `selector_path` | String | CSS selector path from `modalContent` to the start text node |
+| `selector_path` | String | CSS selector path from `modalContent` to the start text node's parent element |
+| `start_text_node_index` | Integer | Index of the start text node among its parent's childNodes |
 | `start_offset` | Integer | Character offset within start text node |
-| `end_selector_path` | String | CSS selector path to end text node (may differ for cross-node selections) |
+| `end_selector_path` | String | CSS selector path to end text node's parent element (may differ for cross-node selections) |
+| `end_text_node_index` | Integer | Index of the end text node among its parent's childNodes |
 | `end_offset` | Integer | Character offset within end text node |
-| `context_before` | String(50) | ~50 chars before the selection (for fallback text matching) |
-| `context_after` | String(50) | ~50 chars after the selection (for fallback text matching) |
-| `page_note_id` | FK → item_page_notes, nullable | Linked note (if quoted to a note) |
+| `context_before` | Text | ~100 chars before the selection (for fallback text matching) |
+| `context_after` | Text | ~100 chars after the selection (for fallback text matching) |
+| `page_note_id` | FK → item_page_notes, nullable, ON DELETE SET NULL | Linked note (if quoted to a note) |
 | `created_at` | DateTime | Creation timestamp |
+| `updated_at` | DateTime | Last modification timestamp |
 
-**ORM model** added to `backend/models.py` as `Highlight` class with relationship to `Item` (cascade delete).
+**ORM model** added to `backend/models.py` as `Highlight` class:
+- `Item.highlights = relationship("Highlight", back_populates="item", cascade="all, delete-orphan")`
+- Add `highlights` relationship to `User` and `Workspace` models (following `ItemPageNote` pattern)
+- `page_note_id` FK uses `ondelete="SET NULL"` — deleting a note clears the link, does not delete the highlight
+- `workspace_id` defaults to `DEFAULT_WORKSPACE_ID` (matching existing pattern)
 
-**Schema migration** in `database.py` `ensure_runtime_schema()`: CREATE TABLE IF NOT EXISTS + column checks.
+**Schema migration** in `database.py` `ensure_runtime_schema()`:
+- `CREATE TABLE IF NOT EXISTS highlights (...)` with all columns
+- Create indexes: `idx_highlights_item_id` on `item_id`, `idx_highlights_user_id` on `user_id`
 
 ## API Endpoints
 
@@ -44,11 +53,13 @@ Added to `backend/routers/items.py`:
 
 **HighlightCreateRequest:**
 ```
-color: str = "yellow"
+color: Literal["yellow", "green", "blue", "red"] = "yellow"
 text: str
 selector_path: str
+start_text_node_index: int
 start_offset: int
 end_selector_path: str
+end_text_node_index: int
 end_offset: int
 context_before: str = ""
 context_after: str = ""
@@ -57,12 +68,30 @@ page_note_id: Optional[str] = None
 
 **HighlightUpdateRequest:**
 ```
-color: Optional[str] = None
+color: Optional[Literal["yellow", "green", "blue", "red"]] = None
 page_note_id: Optional[str] = None
 ```
 
 **HighlightResponse:**
-All fields from the model, including `id`, `created_at`.
+```
+id: str
+item_id: str
+color: str
+text: str
+selector_path: str
+start_text_node_index: int
+start_offset: int
+end_selector_path: str
+end_text_node_index: int
+end_offset: int
+context_before: str
+context_after: str
+page_note_id: Optional[str]
+created_at: datetime
+updated_at: datetime
+```
+
+GET endpoint returns highlights sorted by `created_at ASC` (document order approximation).
 
 ## Frontend Interaction
 
@@ -95,12 +124,12 @@ For selections spanning multiple DOM nodes:
 ### Quote to Note
 
 1. Click "quote to note" button.
-2. Create highlight (yellow by default) via POST.
-3. Then:
-   - If sidebar has an active note in edit mode (`activePageNoteId` is set and `pageNoteViewMode === 'source'`): append `\n\n> {quoted text}\n\n` to the note content textarea, then trigger auto-save.
-   - Otherwise: POST create a new page note with content `> {quoted text}\n\n` and title derived from the quoted text (first ~30 chars + "..."). Set `activePageNoteId` to the new note, switch sidebar to pageNotes tab in source mode.
-4. PATCH the highlight to set `page_note_id` linking it to the note.
-5. Open sidebar on the pageNotes tab if not already visible.
+2. Determine target note:
+   - If sidebar has an active note in edit mode (`activePageNoteId` is set and `pageNoteViewMode === 'source'`): use that note's ID.
+   - Otherwise: POST create a new page note with content `> {quoted text}\n\n` and title derived from the quoted text (first ~30 chars + "..."). Use the new note's ID.
+3. POST create highlight (yellow by default) with `page_note_id` set to the target note ID (single request, no separate PATCH needed).
+4. If appending to existing note: append `\n\n> {quoted text}\n\n` to the textarea and trigger auto-save.
+5. Open sidebar on the pageNotes tab if not already visible. Set `activePageNoteId` and switch to source mode if a new note was created.
 
 ### Click on Existing Highlight
 
@@ -133,7 +162,8 @@ From a text node, walk up to `modalContent`:
 - If an ancestor has an `id`, start from `#id`.
 - Otherwise, build `tagName:nth-child(n)` at each level.
 - Final path example: `#modalContent > div:nth-child(2) > p:nth-child(3)`.
-- Store the child index within the text node's parent to locate the exact text node.
+- The selector path points to the **parent element** of the text node.
+- `start_text_node_index` / `end_text_node_index` identify which childNode is the text node (e.g., `<p>Hello <em>world</em> foo</p>` has childNodes: [text"Hello ", em, text" foo"] — index 0 or 2 for the text nodes).
 
 ### Frontend Cache
 
@@ -143,6 +173,12 @@ const highlightsLoadStateByItem = new Map(); // itemId → 'idle'|'loading'|'loa
 ```
 
 Cache cleared when article is re-extracted or content changes.
+
+### Edge Cases
+
+- **Content re-extraction**: If article HTML changes (e.g., user triggers re-parse), stored selector paths may become invalid. Highlights are preserved in DB; restoration falls back to text matching. If both fail, highlights are silently skipped (not deleted — the text field still holds the quoted content).
+- **Overlapping highlights**: If a user highlights text that overlaps an existing highlight, both `<mark>` elements are nested. This is visually acceptable (colors blend). No deduplication needed.
+- **Empty selection / toolbar inside mark**: Clicking inside an existing `<mark>` opens the highlight popover, not the new-highlight toolbar. The `mouseup` handler checks `event.target.closest('mark[data-highlight-id]')` first.
 
 ## CSS Styles (in `frontend/css/index.css`)
 
@@ -154,7 +190,7 @@ mark.highlight-green  { background: rgba(72, 199, 142, 0.3); cursor: pointer; bo
 mark.highlight-blue   { background: rgba(66, 153, 225, 0.3); cursor: pointer; border-radius: 2px; }
 mark.highlight-red    { background: rgba(245, 101, 101, 0.3); cursor: pointer; border-radius: 2px; }
 
-mark[class^="highlight-"]:hover {
+mark[class*="highlight-"]:hover {
   filter: brightness(0.92);
 }
 ```

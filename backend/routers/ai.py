@@ -2661,8 +2661,11 @@ async def _run_plan_and_execute(
     results_text = json.dumps(execution_results, ensure_ascii=False, default=str)
     download_hint = ""
     if download_urls:
-        links = "\n".join(f"- {url}" for url in download_urls)
-        download_hint = f"\n\n以下文件已生成，请在回答中告知用户可以点击下载：\n{links}"
+        links = "\n".join(f"- [{url.split('/')[-1]}]({url})" for url in download_urls)
+        download_hint = (
+            f"\n\n以下文件已生成，请在回答末尾用 Markdown 链接格式提供下载链接，"
+            f"格式必须为 📥 下载链接：[文件名](URL)，不要省略括号和URL：\n{links}"
+        )
 
     agent_system = _compose_system_message(
         _assistant_agent_system_prompt(agent_permissions, memories=memories),

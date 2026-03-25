@@ -167,6 +167,7 @@ async def stream_chat_completion(
                     raise AiClientError(detail or "AI streaming request failed")
 
                 buffer = ""
+                in_think = False
                 async for chunk in response.aiter_text():
                     buffer += chunk
                     while "\n" in buffer:
@@ -175,6 +176,8 @@ async def stream_chat_completion(
                         if not line or line.startswith(":"):
                             continue
                         if line == "data: [DONE]":
+                            if in_think:
+                                yield "</think>"
                             return
                         if line.startswith("data: "):
                             try:
@@ -185,8 +188,17 @@ async def stream_chat_completion(
                             if not choices:
                                 continue
                             delta = choices[0].get("delta") or {}
+                            reasoning = delta.get("reasoning_content") or delta.get("reasoning")
                             content = delta.get("content")
+                            if reasoning:
+                                if not in_think:
+                                    yield "<think>"
+                                    in_think = True
+                                yield reasoning
                             if content:
+                                if in_think:
+                                    yield "</think>"
+                                    in_think = False
                                 yield content
     except httpx.HTTPError as exc:
         raise AiClientError(f"AI streaming request failed: {exc}") from exc

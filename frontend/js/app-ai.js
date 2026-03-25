@@ -713,10 +713,9 @@
             if (!thinking) return '';
             const thinkingHtml = renderMarkdown(thinking);
             const openAttr = inProgress ? ' open' : '';
-            const statusLabel = inProgress ? ' <span class="ai-thinking-status">思考中…</span>' : '';
             return `
                 <details class="ai-thinking-toggle"${openAttr}>
-                    <summary class="ai-thinking-summary">思考过程${statusLabel}</summary>
+                    <summary class="ai-thinking-summary">思考过程</summary>
                     <div class="ai-thinking-content ai-markdown">${thinkingHtml}</div>
                 </details>
             `;
@@ -736,6 +735,9 @@
             if (/^(https?:|mailto:)/i.test(raw)) {
                 return raw;
             }
+            if (raw.startsWith('/api/')) {
+                return raw;
+            }
             return '';
         }
 
@@ -753,7 +755,9 @@
                 const safeUrl = sanitizeAiUrl(url);
                 if (!safeUrl) return escapeHtml(label);
                 const token = `\x00AICODE${placeholders.length}\x00`;
-                placeholders.push(`<a href="${escapeAttribute(safeUrl)}" target="_blank" rel="noopener noreferrer">${escapeHtml(label)}</a>`);
+                const isDownload = safeUrl.startsWith('/api/ai/exports/');
+                const attrs = isDownload ? `href="${escapeAttribute(safeUrl)}" download style="color:#3b83f6"` : `href="${escapeAttribute(safeUrl)}" target="_blank" rel="noopener noreferrer"`;
+                placeholders.push(`<a ${attrs}>${escapeHtml(label)}</a>`);
                 return token;
             });
 
@@ -1203,7 +1207,7 @@
                     ${toolEvents.map((event) => `
                         <div class="ai-tool-event${event.status === 'failed' ? ' is-failed' : ''}">
                             <div class="ai-tool-event-name">${escapeHtml(AI_TOOL_LABELS[event.name] || event.name || 'Agent')}</div>
-                            <div class="ai-tool-event-summary">${escapeHtml(event.summary || '')}${event.download_url ? ` <a href="${escapeHtml(event.download_url)}" download style="color:#3b82f6;text-decoration:underline;margin-left:6px;">下载文件</a>` : ''}</div>
+                            <div class="ai-tool-event-summary">${escapeHtml(event.summary || '')}</div>
                         </div>
                     `).join('')}
                 </div>
@@ -1752,16 +1756,6 @@
                     const thinkContent = thinkingEl.querySelector('.ai-thinking-content');
                     if (thinkContent) {
                         thinkContent.innerHTML = renderMarkdown(thinking);
-                    }
-                    // Update status label
-                    const statusSpan = thinkingEl.querySelector('.ai-thinking-status');
-                    if (_thinkingInProgress && !statusSpan) {
-                        const summary = thinkingEl.querySelector('.ai-thinking-summary');
-                        if (summary) {
-                            summary.innerHTML = '思考过程 <span class="ai-thinking-status">思考中…</span>';
-                        }
-                    } else if (!_thinkingInProgress && statusSpan) {
-                        statusSpan.remove();
                     }
                 }
             }

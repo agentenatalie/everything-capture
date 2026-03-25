@@ -5556,7 +5556,7 @@
         }
 
         .ai-citation-ref:hover {
-            color: #1d4ed8;
+            color: #3b83f6;
             text-decoration: underline;
         }
 
@@ -6671,7 +6671,7 @@
             border-radius: 999px;
             border: 1px solid rgba(191, 219, 254, 0.96);
             background: rgba(239, 246, 255, 0.88);
-            color: #1d4ed8;
+            color: #3b83f6;
             font-size: 0.82rem;
             text-decoration: none;
             transition: background 0.16s ease, border-color 0.16s ease, color 0.16s ease, transform 0.16s ease;
@@ -6987,7 +6987,7 @@
         }
 
         .ai-markdown a {
-            color: #1d4ed8;
+            color: #3b83f6;
             text-decoration: underline;
             text-underline-offset: 0.15em;
         }

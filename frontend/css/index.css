@@ -2149,6 +2149,16 @@
             contain: content;
         }
 
+        .modal-body hr,
+        .article-html hr {
+            border: none !important;
+            border-top: 1px solid rgba(226, 232, 240, 0.8) !important;
+            margin: 1.2em 0;
+            background: none !important;
+            color: transparent !important;
+            height: 0 !important;
+        }
+
         .modal-footer {
             position: sticky;
             bottom: 0;

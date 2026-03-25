@@ -25,7 +25,7 @@
             get_related_notes: '相关笔记',
             list_folders: '读取文件夹',
             assign_item_folders: '调整文件夹',
-            parse_item_content: '内容解析',
+            parse_item_content: '识别内容',
             sync_item_to_obsidian: '同步到 Obsidian',
             sync_item_to_notion: '同步到 Notion',
             execute_sandbox_command: '沙箱命令执行',
@@ -1132,7 +1132,7 @@
                     { title: '整理最近保存的内容', description: '自动分类和整理最近的笔记', prompt: '请帮我整理最近保存的所有内容。按主题或领域自动分类，对没有归入文件夹的内容建议合适的文件夹，对已有标签的内容检查标签是否准确，并将分类结果执行到位。' },
                     { title: '导出为 Markdown', description: '按主题打包内容为 MD 文件', prompt: '请搜索我收藏库中的所有内容，按主题分类整理后导出为一个合并的 Markdown 文件。每条内容保留完整正文、来源链接和保存时间，用清晰的标题层级组织。' },
                     { title: '生成主题摘要报告', description: '围绕某个主题汇总并输出结构化文档', prompt: '请在我的收藏库中搜索与以下主题相关的所有内容，生成一份结构化的摘要报告，包括核心观点、关键数据、不同来源的观点对比，最后导出为 Markdown 文件。主题是：' },
-                    { title: '触发内容解析', description: '对未解析的内容执行 OCR 和转录', prompt: '请检查我的知识库，找出所有尚未解析（parse_status 不是 done）的内容，逐一触发内容解析。完成后汇报一共解析了多少条、有哪些解析失败需要注意。' },
+                    { title: '识别全部内容', description: '识别图片文字和视频语音', prompt: '请检查我的知识库，找出所有尚未解析（parse_status 不是 done）的内容，逐一触发内容解析。完成后汇报一共解析了多少条、有哪些解析失败需要注意。' },
                 ]
                 : [
                     { title: '总结最近保存内容', description: '从知识库里挑出最近最值得继续看的内容', prompt: '请从我的知识库中找出最近保存的内容，按主题归类总结。对每条内容用一两句话概括核心观点，并标注哪些值得深入阅读、哪些可以归档。最后给出一个整体的知识积累趋势观察。' },

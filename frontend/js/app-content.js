@@ -386,10 +386,10 @@
             detected_title: '检测标题',
             urls: '原始链接',
             qr_links: '二维码链接',
-            ocr_text: 'OCR 识别',
+            ocr_text: '图片文字',
             subtitle_text: '视频字幕',
-            transcript_text: '语音转写',
-            body: '解析内容',
+            transcript_text: '语音文字',
+            body: '正文内容',
         };
         const extractedSectionCache = new Map();
 
@@ -697,7 +697,7 @@
                 ? parsed.contentSections.filter((s) => s.key !== 'ocr_text')
                 : parsed.contentSections;
             if (!sections.length) return '';
-            const displayKicker = kicker || (asPrimary ? '解析内容' : '补充解析');
+            const displayKicker = kicker || (asPrimary ? '识别内容' : '补充内容');
 
             return `
                 <section class="reader-extracted-panel${asPrimary ? ' is-primary' : ''}">

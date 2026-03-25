@@ -255,7 +255,7 @@
                 : '';
             const emptyCopy = item?.parse_status === 'processing'
                 ? '正在整理这条内容的分析结果...'
-                : '还没有内容分析，点底部“解析内容”生成。';
+                : '还没有内容分析，点底部”识别内容”生成。';
             const contentMarkup = analysisMarkup || fallbackMarkup || `<div class="content-empty-state">${escapeHtml(emptyCopy)}</div>`;
 
             readerSidebarContent.innerHTML = `
@@ -1529,8 +1529,8 @@
                 <div class="reader-note-shell">
                     <div class="reader-note-header">
                         <div class="reader-note-title-group">
-                            <div class="reader-note-kicker">${detectedTitle ? '检测标题' : '解析笔记'}</div>
-                            <div class="reader-note-title">${escapeHtml(detectedTitle || '原始提取文本')}</div>
+                            <div class="reader-note-kicker">${detectedTitle ? '检测标题' : '识别笔记'}</div>
+                            <div class="reader-note-title">${escapeHtml(detectedTitle || '提取文本')}</div>
                         </div>
                         <div class="reader-note-meta${item?.parse_status === 'processing' ? ' is-processing' : ''}">${escapeHtml(summary)}</div>
                     </div>
@@ -1567,7 +1567,7 @@
 
             modalFooter.innerHTML = `
                 <div class="modal-footer-actions modal-footer-icons">
-                    <button onclick="parseItemContent('${item.id}')" class="extract-btn modal-icon-btn parse-action-btn${isParseLoading ? ' is-loading' : ''}" title="${isParseLoading ? '解析中...' : '解析内容'}" ${isParseLoading ? 'disabled' : ''}>${parseIcon}</button>
+                    <button onclick="parseItemContent('${item.id}')" class="extract-btn modal-icon-btn parse-action-btn${isParseLoading ? ' is-loading' : ''}" title="${isParseLoading ? '识别中...' : '识别内容'}" ${isParseLoading ? 'disabled' : ''}>${parseIcon}</button>
                     <button onclick="syncItem('${item.id}', 'notion')" class="extract-btn modal-icon-btn${isNotionLoading ? ' is-loading' : ''}" title="${notionTitle}" ${isNotionLoading ? 'disabled' : ''}>${notionIcon}</button>
                     <button onclick="syncItem('${item.id}', 'obsidian')" class="extract-btn modal-icon-btn${isObsidianLoading ? ' is-loading' : ''}" title="${obsidianTitle}" ${isObsidianLoading ? 'disabled' : ''}>${obsidianIcon}</button>
                     <button class="extract-btn modal-icon-btn content-mode-toggle" title="${contentModeTitle}">${contentModeIcon}</button>
@@ -1609,7 +1609,7 @@
             if (toggleNoteBtn) {
                 const parsedContentReady = hasParsedContent(item);
                 toggleNoteBtn.classList.toggle('is-available', parsedContentReady);
-                toggleNoteBtn.setAttribute('title', parsedContentReady ? '查看解析笔记（已解析）' : '查看解析笔记');
+                toggleNoteBtn.setAttribute('title', parsedContentReady ? '查看识别结果' : '识别内容');
             }
             renderNotePanel(item);
             renderModalFooter(item);
@@ -1648,7 +1648,7 @@
                 if (currentOpenItemId === itemId) {
                     refreshOpenModalChrome(data, { preserveSidebarTab: true });
                 }
-                showToast('内容解析完成', 'success');
+                showToast('内容识别完成', 'success');
                 organizeItemAnalysis(itemId);
                 return;
             } catch (error) {
@@ -1875,7 +1875,7 @@
             if (toggleNoteBtn) {
                 const parsedContentReady = hasParsedContent(item);
                 toggleNoteBtn.classList.toggle('is-available', parsedContentReady);
-                toggleNoteBtn.setAttribute('title', parsedContentReady ? '查看解析笔记（已解析）' : '查看解析笔记');
+                toggleNoteBtn.setAttribute('title', parsedContentReady ? '查看识别结果' : '识别内容');
             }
             renderNotePanel(item);
             const platform = normalizePlatform(item.platform || '');

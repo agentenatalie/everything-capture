@@ -929,7 +929,11 @@ def _build_full_items_index(db: Session, user_id: str) -> tuple[str, list[Knowle
         # Skip the summary if it's just repeating the title
         if summary and summary.strip().lower() == title.strip().lower():
             summary = ""
-        parts = [f"[{idx}] {title}"]
+        date_str = note.created_at.strftime("%Y-%m-%d") if note.created_at else ""
+        parts = [f"[{idx}]"]
+        if date_str:
+            parts.append(f"({date_str})")
+        parts.append(title)
         if summary:
             parts.append(f"— {summary}")
         lines.append(" ".join(parts))
@@ -3165,7 +3169,7 @@ async def assistant_stream(request: AiAssistantRequest, db: Session = Depends(ge
         yield _sse({
             "type": "status",
             "status": "found",
-            "message": f"已加载 {len(indexed_notes)} 条收藏内容，正在生成回答…",
+            "message": f"已加载 {len(indexed_notes)} 条收藏内容，正在生成回答",
         })
 
         if not indexed_notes:

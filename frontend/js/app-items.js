@@ -793,7 +793,7 @@
             }
             currentItemsRequestController = controller;
             try {
-                const response = await fetch(`/api/items?${getActiveSearchParams(200).toString()}`, {
+                const response = await fetch(`/api/items?${getActiveSearchParams(10000).toString()}`, {
                     signal: controller.signal,
                 });
                 if (!response.ok) throw new Error('API Error');

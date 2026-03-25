@@ -8748,6 +8748,30 @@
             margin-left: auto;
         }
 
+        .ai-streaming-status {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            color: var(--color-text-secondary);
+            font-size: 0.85em;
+            margin-bottom: 0.5em;
+        }
+
+        .ai-streaming-status::before {
+            content: '';
+            width: 6px;
+            height: 6px;
+            border-radius: 50%;
+            background: #1a1a1a;
+            flex-shrink: 0;
+            animation: ai-status-pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+        }
+
+        @keyframes ai-status-pulse {
+            0%, 100% { opacity: 0.15; transform: scale(0.8); }
+            50% { opacity: 0.9; transform: scale(1.1); }
+        }
+
         .ai-msg--loading .ai-msg-content,
         .reader-ai-messages .ai-msg--loading .ai-msg-content {
             width: 100%;

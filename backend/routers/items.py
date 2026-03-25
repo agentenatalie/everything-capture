@@ -882,7 +882,7 @@ def get_items(
     db: Session = Depends(get_db),
 ):
     user_id = get_current_user_id()
-    safe_limit = max(1, min(limit, 200))
+    safe_limit = max(1, min(limit, 10000))
     total_count = db.query(func.count(Item.id)).filter(Item.user_id == user_id).scalar() or 0
 
     raw_query = (q or "").strip()

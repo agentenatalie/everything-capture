@@ -31,20 +31,30 @@ def extract_assistant_message(payload: dict[str, Any]) -> dict[str, Any]:
 
 
 def extract_message_text(message: dict[str, Any], *, allow_empty: bool = False) -> str:
+    # Capture reasoning_content (used by some models for thinking process)
+    reasoning = message.get("reasoning_content") or message.get("reasoning") or ""
+    if isinstance(reasoning, str):
+        reasoning = reasoning.strip()
+
     content = message.get("content")
+    text = ""
     if isinstance(content, str):
         text = content.strip()
-        if text or allow_empty:
-            return text
-    if isinstance(content, list):
+    elif isinstance(content, list):
         parts: list[str] = []
         for block in content:
             if isinstance(block, dict) and block.get("type") == "text":
-                text = str(block.get("text") or "").strip()
-                if text:
-                    parts.append(text)
-        if parts or allow_empty:
-            return "\n".join(parts).strip()
+                t = str(block.get("text") or "").strip()
+                if t:
+                    parts.append(t)
+        text = "\n".join(parts).strip()
+
+    # Wrap reasoning in <think> tags so frontend can render it
+    if reasoning:
+        result = f"<think>\n{reasoning}\n</think>\n{text}"
+        return result
+    if text or allow_empty:
+        return text
     if allow_empty:
         return ""
     raise AiClientError("AI response did not include readable content")

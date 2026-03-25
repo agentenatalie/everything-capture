@@ -1891,7 +1891,7 @@
                     <div class="ai-msg ai-msg--streaming">
                         <div class="ai-msg-inner">
                             <div class="ai-msg-content">
-                                <div class="ai-streaming-status" style="color: var(--color-text-secondary); font-size: 0.85em; margin-bottom: 0.5em;">正在检索知识库…</div>
+                                <div class="ai-streaming-status">正在检索知识库…</div>
                                 <div class="ai-markdown"></div>
                             </div>
                         </div>

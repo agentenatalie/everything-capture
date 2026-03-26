@@ -938,7 +938,15 @@
 
                 if (!trimmed) {
                     flushParagraph();
-                    flushList();
+                    // Don't break a list if the next non-empty line continues the same list type
+                    if (listItems.length) {
+                        const nextNonEmpty = lines.slice(index + 1).find((l) => l.trim());
+                        const continuesList = nextNonEmpty && (
+                            (listType === 'ol' && /^\s*\d+\.\s+/.test(nextNonEmpty)) ||
+                            (listType === 'ul' && /^\s*[-*+]\s+/.test(nextNonEmpty))
+                        );
+                        if (!continuesList) flushList();
+                    }
                     flushQuote();
                     continue;
                 }

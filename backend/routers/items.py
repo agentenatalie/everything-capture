@@ -1,14 +1,18 @@
+import io
 import os
 import json
 import re
 import threading
 import logging
+import zipfile
 from collections import OrderedDict
 from dataclasses import dataclass
 from datetime import datetime
+from pathlib import Path
 from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Response
+from fastapi.responses import StreamingResponse
 from sqlalchemy import func, or_, text
 from sqlalchemy.orm import Session
 from database import SessionLocal, get_db
@@ -1394,3 +1398,104 @@ def delete_item(item_id: str, db: Session = Depends(get_db)):
 
 # NOTE: /items/search-suggestions route is defined above /items/{item_id}
 # to prevent FastAPI from capturing "search-suggestions" as an item_id path param.
+
+
+def _sanitize_filename(name: str) -> str:
+    """Remove or replace characters unsafe for filenames."""
+    name = re.sub(r'[\\/:*?"<>|\r\n]', '_', name)
+    name = name.strip('. ')
+    return name[:100] or 'export'
+
+
+def _strip_html(html: str) -> str:
+    """Crude HTML tag removal for plain-text fallback."""
+    text = re.sub(r'<br\s*/?>|</p>|</div>|</li>', '\n', html)
+    text = re.sub(r'<[^>]+>', '', text)
+    return text.strip()
+
+
+@router.get("/items/{item_id}/export-zip")
+def export_item_zip(item_id: str, db: Session = Depends(get_db)):
+    user_id = get_current_user_id()
+    item = db.query(Item).filter(Item.id == item_id, Item.user_id == user_id).first()
+    if not item:
+        raise HTTPException(status_code=404, detail="Item not found")
+
+    # --- Build content.md ---
+    lines: list[str] = []
+    title = item.title or '无标题'
+    lines.append(f"# {title}\n")
+
+    meta: list[str] = []
+    if item.source_url:
+        meta.append(f"- 来源: {item.source_url}")
+    if item.platform:
+        meta.append(f"- 平台: {item.platform}")
+    if item.created_at:
+        meta.append(f"- 收藏时间: {item.created_at.strftime('%Y-%m-%d %H:%M')}")
+    if meta:
+        lines.append('\n'.join(meta) + '\n')
+
+    body = item.canonical_text or ''
+    if not body and item.content_html:
+        body = _strip_html(item.content_html)
+    if body:
+        lines.append('## 正文\n')
+        lines.append(body + '\n')
+
+    if item.extracted_text:
+        lines.append('## 识别内容\n')
+        lines.append(item.extracted_text + '\n')
+
+    if item.ocr_text:
+        lines.append('## OCR 文字\n')
+        lines.append(item.ocr_text + '\n')
+
+    # Page notes
+    notes = (
+        db.query(ItemPageNote)
+        .filter(ItemPageNote.item_id == item_id)
+        .order_by(ItemPageNote.created_at)
+        .all()
+    )
+    if notes:
+        lines.append('## 笔记\n')
+        for n in notes:
+            lines.append(f"- {n.content}\n")
+
+    content_md = '\n'.join(lines)
+
+    # --- Build zip ---
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, 'w', zipfile.ZIP_DEFLATED) as zf:
+        zf.writestr('content.md', content_md)
+
+        media_idx = 0
+        for m in sorted(item.media, key=lambda x: x.display_order):
+            if not m.local_path:
+                continue
+            abs_path = STATIC_DIR / m.local_path
+            if not abs_path.exists():
+                continue
+            ext = abs_path.suffix or '.bin'
+            arc_name = f"media/{m.type}_{media_idx:03d}{ext}"
+            zf.write(str(abs_path), arc_name)
+            media_idx += 1
+
+    buf.seek(0)
+    safe_title = _sanitize_filename(title)
+    filename = f"{safe_title}.zip"
+
+    return StreamingResponse(
+        buf,
+        media_type="application/zip",
+        headers={
+            "Content-Disposition": f"attachment; filename*=UTF-8''{__url_encode(filename)}"
+        },
+    )
+
+
+def __url_encode(s: str) -> str:
+    """RFC 5987 percent-encode for Content-Disposition filename*."""
+    from urllib.parse import quote
+    return quote(s, safe='')

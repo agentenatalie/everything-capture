@@ -747,7 +747,14 @@
 
             html = html.replace(/`([^`]+)`/g, (_, code) => {
                 const token = `\x00AICODE${placeholders.length}\x00`;
-                placeholders.push(`<code>${escapeHtml(code)}</code>`);
+                // If the backtick content is an export download path, render as download link instead of code
+                if (code.trim().startsWith('/api/ai/exports/')) {
+                    const path = code.trim();
+                    const fileName = decodeURIComponent(path.split('/').pop());
+                    placeholders.push(`<a href="${escapeAttribute(path)}" download style="color:#3b83f6">${escapeHtml(fileName)}</a>`);
+                } else {
+                    placeholders.push(`<code>${escapeHtml(code)}</code>`);
+                }
                 return token;
             });
 
@@ -758,6 +765,14 @@
                 const isDownload = safeUrl.startsWith('/api/ai/exports/');
                 const attrs = isDownload ? `href="${escapeAttribute(safeUrl)}" download style="color:#3b83f6"` : `href="${escapeAttribute(safeUrl)}" target="_blank" rel="noopener noreferrer"`;
                 placeholders.push(`<a ${attrs}>${escapeHtml(label)}</a>`);
+                return token;
+            });
+
+            // Auto-link bare /api/ai/exports/ paths as download links
+            html = html.replace(/(\/api\/ai\/exports\/[^\s<>)"',;，。、！？》）\]]+)/gi, (match) => {
+                const token = `\x00AICODE${placeholders.length}\x00`;
+                const fileName = decodeURIComponent(match.split('/').pop());
+                placeholders.push(`<a href="${escapeAttribute(match)}" download style="color:#3b83f6">${escapeHtml(fileName)}</a>`);
                 return token;
             });
 
@@ -1202,14 +1217,19 @@
 
         function buildAiToolEventsMarkup(toolEvents = []) {
             if (!Array.isArray(toolEvents) || !toolEvents.length) return '';
+            // Filter out export_items_to_zip events — download link is already in the message text
+            const filtered = toolEvents.filter((e) => e.name !== 'export_items_to_zip');
+            if (!filtered.length) return '';
             return `
                 <div class="ai-tool-events">
-                    ${toolEvents.map((event) => `
+                    ${filtered.map((event) => {
+                        return `
                         <div class="ai-tool-event${event.status === 'failed' ? ' is-failed' : ''}">
                             <div class="ai-tool-event-name">${escapeHtml(AI_TOOL_LABELS[event.name] || event.name || 'Agent')}</div>
-                            <div class="ai-tool-event-summary">${escapeHtml(event.summary || '')}</div>
+                            <div class="ai-tool-event-summary">${renderInlineMarkdown(event.summary || '')}</div>
                         </div>
-                    `).join('')}
+                        `;
+                    }).join('')}
                 </div>
             `;
         }
@@ -1993,6 +2013,7 @@
 
             askAiOverlay.classList.remove('is-closing');
             askAiOverlay.classList.add('active');
+            document.title = 'Ask AI - Everything Capture';
             await ensureAiSettingsLoaded();
             await loadAiConversationHistory();
             refreshAiAssistantUi();
@@ -2015,6 +2036,7 @@
 
         function _performAskAiClose() {
             if (!askAiOverlay || askAiOverlay.classList.contains('is-closing')) return;
+            document.title = 'Everything Capture - 收录看板';
             askAiOverlay.classList.remove('is-behind-reader');
             askAiOverlay.classList.add('is-closing');
             window.setTimeout(() => {

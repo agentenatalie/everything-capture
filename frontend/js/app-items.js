@@ -1865,6 +1865,7 @@
                 isNotePanelOpen = false;
             }
             modalTitle.innerText = getDisplayItemTitle(item);
+            document.title = (item.title || '阅读') + ' - Everything Capture';
             // Clean up previous edit listeners
             if (contentTitleAC) { contentTitleAC.abort(); contentTitleAC = null; }
             if (contentBodyAC) { contentBodyAC.abort(); contentBodyAC = null; }
@@ -2058,6 +2059,8 @@
             contentWasEdited = false;
             clearTimeout(contentAutoSaveTimer);
             _disableContentEditing();
+
+            document.title = 'Everything Capture - 收录看板';
 
             // Start close animation
             modalOverlay.classList.add('is-closing');
@@ -2878,4 +2881,25 @@
             }
         });
 
-        bootstrapApp();
+        bootstrapApp().then(function () {
+            // After app is ready: restore view based on URL path
+            var path = location.pathname;
+            var readerMatch = path.match(/^\/reader\/(.+)/);
+            if (readerMatch) {
+                var itemId = decodeURIComponent(readerMatch[1]);
+                history.replaceState({ reader: itemId }, '');
+                (async function () {
+                    try {
+                        var res = await fetch('/api/items/' + encodeURIComponent(itemId));
+                        if (!res.ok) return;
+                        var item = await res.json();
+                        cacheItemById(item);
+                        document.title = (item.title || '阅读') + ' - Everything Capture';
+                        openModalByItem(item);
+                    } catch (e) {}
+                })();
+            } else if (path === '/ask-ai') {
+                history.replaceState({ ai: true }, '');
+                if (window.openAskAiModal) window.openAskAiModal({ itemId: null, resetConversation: true });
+            }
+        });

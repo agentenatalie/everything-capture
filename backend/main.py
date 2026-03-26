@@ -97,13 +97,23 @@ os.makedirs(MEDIA_DIR, exist_ok=True)
 app.mount("/static/media", StaticFiles(directory=str(MEDIA_DIR)), name="media")
 
 # SPA fallback: serve index.html for client-side routes
-from fastapi.responses import FileResponse as _FileResponse
-_index_html = str(FRONTEND_DIR / "index.html")
+from fastapi.responses import HTMLResponse as _HTMLResponse
+_index_html_path = FRONTEND_DIR / "index.html"
+
+def _serve_index_html():
+    content = _index_html_path.read_text(encoding="utf-8")
+    return _HTMLResponse(
+        content=content,
+        headers={"Cache-Control": "no-cache, no-store, must-revalidate", "Pragma": "no-cache"},
+    )
 
 @app.get("/reader/{item_id:path}")
+async def spa_reader():
+    return _serve_index_html()
+
 @app.get("/ask-ai")
-async def spa_fallback():
-    return _FileResponse(_index_html)
+async def spa_ask_ai():
+    return _serve_index_html()
 
 # Serve the static frontend from the same origin as the API.
 app.mount("/", StaticFiles(directory=str(FRONTEND_DIR), html=True), name="frontend")

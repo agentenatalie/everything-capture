@@ -868,6 +868,8 @@
             let paragraph = [];
             let listType = '';
             let listItems = [];
+            let olStartNumber = 1;
+            let olRunningCount = 0;
             let quoteLines = [];
             let inCodeBlock = false;
             let codeLang = '';
@@ -881,7 +883,13 @@
 
             const flushList = () => {
                 if (!listItems.length) return;
-                html.push(`<${listType}>${listItems.map((item) => `<li>${renderInlineMarkdown(item).replace(/\n/g, '<br>')}</li>`).join('')}</${listType}>`);
+                const startAttr = (listType === 'ol' && olStartNumber > 1) ? ` start="${olStartNumber}"` : '';
+                html.push(`<${listType}${startAttr}>${listItems.map((item) => `<li>${renderInlineMarkdown(item).replace(/\n/g, '<br>')}</li>`).join('')}</${listType}>`);
+                if (listType === 'ol') {
+                    olRunningCount += listItems.length;
+                } else {
+                    // non-ol list doesn't reset the running count — ol can resume after it
+                }
                 listType = '';
                 listItems = [];
             };
@@ -941,11 +949,21 @@
                     // Don't break a list if the next non-empty line continues the same list type
                     if (listItems.length) {
                         const nextNonEmpty = lines.slice(index + 1).find((l) => l.trim());
-                        const continuesList = nextNonEmpty && (
-                            (listType === 'ol' && /^\s*\d+\.\s+/.test(nextNonEmpty)) ||
-                            (listType === 'ul' && /^\s*[-*+]\s+/.test(nextNonEmpty))
-                        );
-                        if (!continuesList) flushList();
+                        let continuesList = false;
+                        if (nextNonEmpty) {
+                            if (listType === 'ul' && /^\s*[-*+]\s+/.test(nextNonEmpty)) {
+                                continuesList = true;
+                            } else if (listType === 'ol') {
+                                const olNext = nextNonEmpty.match(/^\s*(\d+)\.\s+/);
+                                // Continue only if next number > 1 (i.e. not a fresh list)
+                                continuesList = olNext && parseInt(olNext[1], 10) > 1;
+                            }
+                        }
+                        if (!continuesList) {
+                            flushList();
+                            olRunningCount = 0;
+                            olStartNumber = 1;
+                        }
                     }
                     flushQuote();
                     continue;
@@ -999,15 +1017,23 @@
                 }
 
                 const unorderedMatch = line.match(/^\s*[-*+]\s+(.*)$/);
-                const orderedMatch = line.match(/^\s*\d+\.\s+(.*)$/);
+                const orderedMatch = line.match(/^\s*(\d+)\.\s+(.*)$/);
                 if (unorderedMatch || orderedMatch) {
                     flushParagraph();
                     const nextType = unorderedMatch ? 'ul' : 'ol';
                     if (listType && listType !== nextType) {
                         flushList();
                     }
+                    if (nextType === 'ol' && !listItems.length) {
+                        // Starting a new ol segment — use the source number or continue from previous
+                        const srcNum = orderedMatch ? parseInt(orderedMatch[1], 10) : 1;
+                        olStartNumber = (olRunningCount > 0 && srcNum > 1) ? srcNum : (olRunningCount > 0 ? olRunningCount + 1 : srcNum);
+                    }
+                    if (nextType === 'ul') {
+                        // ul doesn't reset ol running count
+                    }
                     listType = nextType;
-                    listItems.push((unorderedMatch || orderedMatch)[1]);
+                    listItems.push(unorderedMatch ? unorderedMatch[1] : orderedMatch[2]);
                     continue;
                 }
 
@@ -1015,6 +1041,9 @@
                     flushList();
                 }
 
+                // Non-list content resets ol continuation
+                olRunningCount = 0;
+                olStartNumber = 1;
                 paragraph.push(line);
             }
 

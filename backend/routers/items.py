@@ -205,6 +205,7 @@ EXACT_QUERY_WEIGHTS = {
 INTENT_MATCH_BONUS = 2.4
 MIN_SEARCH_SCORE = 2.5
 PROCESSING_PARSE_RECOVERY_LIMIT = 32
+PARSE_MAX_RETRY_COUNT = 3
 
 logger = logging.getLogger(__name__)
 
@@ -499,6 +500,7 @@ def background_parse_item_content(item_id: str, user_id: str) -> None:
 
         try:
             parse_item_content_for_item(item)
+            item.parse_retry_count = 0  # 成功后重置重试计数
             db.commit()
         except Exception as exc:
             db.rollback()
@@ -530,6 +532,24 @@ def recover_processing_item_parsing(*, limit: int = PROCESSING_PARSE_RECOVERY_LI
     logger.info("恢复后台内容解析任务 %d 个", len(jobs))
     recovered = 0
     for item_id, user_id in jobs:
+        # 检查重试次数，超过上限直接标记失败，防止崩溃循环
+        with SessionLocal() as db:
+            item = db.query(Item).filter(Item.id == item_id).first()
+            if not item:
+                continue
+            retry_count = item.parse_retry_count or 0
+            if retry_count >= PARSE_MAX_RETRY_COUNT:
+                logger.warning(
+                    "内容解析重试次数超限 (%d/%d)，标记为失败: %s",
+                    retry_count, PARSE_MAX_RETRY_COUNT, item_id,
+                )
+                item.parse_status = "failed"
+                item.parse_error = f"解析多次崩溃（重试 {retry_count} 次），已放弃。请检查日志或手动重试。"
+                db.commit()
+                continue
+            # 递增重试计数
+            item.parse_retry_count = retry_count + 1
+            db.commit()
         try:
             background_parse_item_content(item_id, user_id)
             recovered += 1
@@ -1040,6 +1060,7 @@ def parse_item_content_endpoint(item_id: str, db: Session = Depends(get_db)):
 
     item.parse_status = "processing"
     item.parse_error = None
+    item.parse_retry_count = 0  # 用户手动重试，重置计数
     db.commit()
     db.refresh(item)
 

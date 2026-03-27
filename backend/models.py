@@ -77,6 +77,7 @@ class Item(Base):
     parse_status = Column(String, nullable=False, default="idle")
     parse_error = Column(String, nullable=True)
     parsed_at = Column(DateTime, nullable=True)
+    parse_retry_count = Column(Integer, nullable=False, default=0)
 
     user = relationship("User", back_populates="items", lazy="joined")
     workspace = relationship("Workspace", back_populates="items", lazy="joined")

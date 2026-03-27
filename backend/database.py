@@ -171,6 +171,8 @@ def ensure_runtime_schema():
             "UPDATE items SET workspace_id = ? WHERE workspace_id IS NULL OR trim(workspace_id) = ''",
             (DEFAULT_WORKSPACE_ID,),
         )
+        if "parse_retry_count" not in item_columns:
+            connection.exec_driver_sql("ALTER TABLE items ADD COLUMN parse_retry_count INTEGER NOT NULL DEFAULT 0")
         connection.exec_driver_sql(
             "UPDATE items SET parse_status = 'idle' WHERE parse_status IS NULL OR trim(parse_status) = ''"
         )

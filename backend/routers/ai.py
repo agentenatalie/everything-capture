@@ -1,7 +1,10 @@
 from __future__ import annotations
 
+import asyncio
 import json
+import os
 import re
+import uuid
 from datetime import datetime
 from typing import Any, Optional
 
@@ -15,6 +18,8 @@ from models import AiConversation, AiMemory, Folder, Item, ItemFolderLink, ItemP
 from schemas import (
     AiAskRequest,
     AiAskResponse,
+    AiApprovalRequest,
+    AiApprovalResponse,
     AiAssistantRequest,
     AiAssistantResponse,
     AiCitationResponse,
@@ -24,6 +29,7 @@ from schemas import (
     AiConversationStoredMessage,
     AiConversationSummaryResponse,
     AiItemAnalysisResponse,
+    AiPendingApprovalResponse,
     AiRelatedNotesResponse,
     AiToolEventResponse,
     ItemResponse,
@@ -44,6 +50,7 @@ from services.ai_defaults import (
     AI_AGENT_DEFAULT_CAN_EXECUTE_COMMANDS,
     AI_AGENT_DEFAULT_CAN_MANAGE_FOLDERS,
     AI_AGENT_DEFAULT_CAN_PARSE_CONTENT,
+    AI_AGENT_DEFAULT_CAN_RUN_COMPUTER_COMMANDS,
     AI_AGENT_DEFAULT_CAN_SYNC_NOTION,
     AI_AGENT_DEFAULT_CAN_SYNC_OBSIDIAN,
     AI_AGENT_DEFAULT_CAN_WEB_SEARCH,
@@ -69,6 +76,17 @@ _CITATION_INDEX_PATTERN = re.compile(r"\[(\d{1,3})\]")
 _CHAT_HISTORY_LIMIT = 10
 _SAVED_CHAT_HISTORY_LIMIT = 120
 _AGENT_TOOL_STEP_LIMIT = 10
+
+# ── Computer command approval system ──────────────────────────────────
+_pending_approvals: dict[str, dict[str, Any]] = {}
+_APPROVAL_EXPIRY_SECONDS = 600  # 10 minutes
+_COMPUTER_CMD_TIMEOUT = 120
+_COMPUTER_CMD_MAX_OUTPUT = 65536
+_COMPUTER_CMD_BANNED_PATTERNS = [
+    "rm -rf /", "rm -rf ~", "rm -rf /*",
+    "sudo rm", "mkfs", "dd if=", "> /dev/",
+    ":(){ :|:& };:",  # fork bomb
+]
 
 
 def _clean_optional_string(value: object | None) -> str | None:
@@ -1262,6 +1280,10 @@ def _agent_permission_flags(settings: Settings | None) -> dict[str, bool]:
             getattr(settings, "ai_agent_can_web_search", None),
             AI_AGENT_DEFAULT_CAN_WEB_SEARCH,
         ),
+        "run_computer_commands": coerce_bool(
+            getattr(settings, "ai_agent_can_run_computer_commands", None),
+            AI_AGENT_DEFAULT_CAN_RUN_COMPUTER_COMMANDS,
+        ),
     }
 
 
@@ -1290,6 +1312,8 @@ def _agent_permissions(settings: Settings | None) -> list[str]:
         permissions.append("execute_commands")
     if flags["web_search"]:
         permissions.append("web_search")
+    if flags["run_computer_commands"]:
+        permissions.append("run_computer_commands")
     return permissions
 
 
@@ -1611,7 +1635,11 @@ def _build_agent_tools(agent_permissions: list[str]) -> list[dict[str, Any]]:
                         "move_file, delete_file, run_command (whitelisted: git,curl,zip,python3,ls,find,etc), "
                         "batch (run multiple operations in one call). "
                         "IMPORTANT: Use 'batch' action with 'operations' array to run multiple commands at once "
-                        "instead of calling this tool multiple times — this is MUCH faster."
+                        "instead of calling this tool multiple times — this is MUCH faster. "
+                        "NOTE: This sandbox is restricted to the exports/ directory. "
+                        "If the run_computer_command tool is available, prefer it for git clone, software installation, "
+                        "project setup, and any task where the user wants files in a specific location on their computer "
+                        "(e.g. home directory, ~/Projects, etc). Only use this sandbox for temporary/disposable operations."
                     ),
                     "parameters": {
                         "type": "object",
@@ -1638,6 +1666,43 @@ def _build_agent_tools(agent_permissions: list[str]) -> list[dict[str, Any]]:
                             "output_filename": {"type": "string", "description": "Output filename for zip/download/move"},
                         },
                         "required": ["action"],
+                        "additionalProperties": False,
+                    },
+                },
+            }
+        )
+    if "run_computer_commands" in agent_permissions:
+        tools.append(
+            {
+                "type": "function",
+                "function": {
+                    "name": "run_computer_command",
+                    "description": (
+                        "Run a command on the user's computer. This requires explicit user approval before execution. "
+                        "PREFERRED over execute_sandbox_command for: git clone, software installation (brew/pip/npm), "
+                        "project setup, running scripts, and any task where files should be in a real location "
+                        "on the user's computer (not the sandbox exports/ directory). "
+                        "The user will see the exact command and must click 'Allow' before it runs. "
+                        "Always provide a clear description of what the command does and why. "
+                        "Default working directory is the user's home directory (~)."
+                    ),
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "command": {
+                                "type": "string",
+                                "description": "The shell command to execute.",
+                            },
+                            "description": {
+                                "type": "string",
+                                "description": "Clear explanation of what this command does, shown to user for approval.",
+                            },
+                            "working_directory": {
+                                "type": "string",
+                                "description": "Optional working directory. Defaults to user's home directory.",
+                            },
+                        },
+                        "required": ["command", "description"],
                         "additionalProperties": False,
                     },
                 },
@@ -2409,6 +2474,50 @@ async def _execute_agent_tool(
             result = {"status": "error", "message": str(exc)}
             return result, AiToolEventResponse(name=tool_name, status="failed", summary=f"命令执行异常：{exc}"), [], []
 
+    if tool_name == "run_computer_command":
+        if "run_computer_commands" not in agent_permissions:
+            result = {"status": "error", "message": "Permission denied"}
+            return result, AiToolEventResponse(name=tool_name, status="failed", summary="没有开放系统命令权限"), [], []
+
+        command = _clean_optional_string(arguments.get("command")) or ""
+        description = _clean_optional_string(arguments.get("description")) or command
+        working_directory = _clean_optional_string(arguments.get("working_directory"))
+
+        if not command:
+            result = {"status": "error", "message": "command is required"}
+            return result, AiToolEventResponse(name=tool_name, status="failed", summary="缺少命令"), [], []
+
+        # Check for extremely dangerous patterns
+        cmd_lower = command.lower()
+        for banned in _COMPUTER_CMD_BANNED_PATTERNS:
+            if banned.lower() in cmd_lower:
+                result = {"status": "error", "message": f"Command contains banned pattern: {banned}"}
+                return result, AiToolEventResponse(name=tool_name, status="failed", summary=f"命令被禁止：{banned}"), [], []
+
+        # Create pending approval — do NOT execute yet
+        approval_id = str(uuid.uuid4())
+        _pending_approvals[approval_id] = {
+            "command": command,
+            "description": description,
+            "working_directory": working_directory,
+            "created_at": datetime.utcnow(),
+        }
+        # Clean up expired approvals
+        now = datetime.utcnow()
+        expired = [k for k, v in _pending_approvals.items()
+                   if (now - v["created_at"]).total_seconds() > _APPROVAL_EXPIRY_SECONDS]
+        for k in expired:
+            _pending_approvals.pop(k, None)
+
+        result = {
+            "status": "pending_approval",
+            "approval_id": approval_id,
+            "command": command,
+            "description": description,
+        }
+        event = AiToolEventResponse(name=tool_name, status="pending", summary=f"等待用户批准：{_truncate_text(command, 60)}")
+        return result, event, [], []
+
     if tool_name == "web_search":
         if "web_search" not in agent_permissions:
             result = {"status": "error", "message": "Permission denied"}
@@ -2522,6 +2631,7 @@ async def _run_agent_assistant(
     use_plan_mode = (
         _is_action_request(last_user_msg)
         and "execute_commands" in agent_permissions
+        and "run_computer_commands" not in agent_permissions
     )
 
     if use_plan_mode:
@@ -2661,6 +2771,26 @@ async def _run_plan_and_execute(
 
         if event.download_url:
             download_urls.append(event.download_url)
+
+        # If a tool needs user approval, pause and return immediately
+        if isinstance(result, dict) and result.get("status") == "pending_approval":
+            return AiAssistantResponse(
+                mode="agent",
+                message=result.get("description", "需要你的批准才能执行此命令。"),
+                citations=[],
+                tool_events=tool_events,
+                knowledge_base_path=None,
+                note_count=snapshot.note_count,
+                insufficient_context=False,
+                agent_permissions=agent_permissions,
+                updated_items=updated_items,
+                pending_approval=AiPendingApprovalResponse(
+                    approval_id=result["approval_id"],
+                    command=result["command"],
+                    description=result["description"],
+                    working_directory=result.get("working_directory"),
+                ),
+            )
 
     # --- Phase 3: Summarize with download links ---
     results_text = json.dumps(execution_results, ensure_ascii=False, default=str)
@@ -2853,6 +2983,26 @@ async def _run_agent_loop(
                     "content": json.dumps(result, ensure_ascii=False, default=str),
                 }
             )
+
+            # If a tool needs user approval, pause the loop and return
+            if isinstance(result, dict) and result.get("status") == "pending_approval":
+                return AiAssistantResponse(
+                    mode="agent",
+                    message=result.get("description", "需要你的批准才能执行此命令。"),
+                    citations=[],
+                    tool_events=tool_events,
+                    knowledge_base_path=None,
+                    note_count=snapshot.note_count,
+                    insufficient_context=False,
+                    agent_permissions=agent_permissions,
+                    updated_items=updated_items,
+                    pending_approval=AiPendingApprovalResponse(
+                        approval_id=result["approval_id"],
+                        command=result["command"],
+                        description=result["description"],
+                        working_directory=result.get("working_directory"),
+                    ),
+                )
 
     model_messages.append(
         {
@@ -3139,6 +3289,53 @@ async def assistant(request: AiAssistantRequest, db: Session = Depends(get_db)):
         agent_permissions=_agent_permissions(settings),
         updated_items=[],
     )
+
+
+@router.post("/assistant/approve", response_model=AiApprovalResponse)
+async def approve_computer_command(request: AiApprovalRequest):
+    """Execute or deny a pending computer command that required user approval."""
+    approval = _pending_approvals.pop(request.approval_id, None)
+    if not approval:
+        raise HTTPException(status_code=404, detail="Approval request not found or expired")
+
+    if not request.approved:
+        return AiApprovalResponse(status="denied", output="用户拒绝了此命令。", exit_code=-1)
+
+    command = approval["command"]
+    working_directory = approval.get("working_directory") or os.path.expanduser("~")
+
+    try:
+        proc = await asyncio.create_subprocess_shell(
+            command,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.STDOUT,
+            cwd=working_directory,
+            env={**os.environ},
+        )
+        stdout_bytes, _ = await asyncio.wait_for(
+            proc.communicate(),
+            timeout=_COMPUTER_CMD_TIMEOUT,
+        )
+        output = (stdout_bytes or b"").decode("utf-8", errors="replace")
+        if len(output) > _COMPUTER_CMD_MAX_OUTPUT:
+            output = output[:_COMPUTER_CMD_MAX_OUTPUT] + "\n... (output truncated)"
+        return AiApprovalResponse(
+            status="completed",
+            output=output,
+            exit_code=proc.returncode or 0,
+        )
+    except asyncio.TimeoutError:
+        return AiApprovalResponse(
+            status="error",
+            output=f"命令执行超时（{_COMPUTER_CMD_TIMEOUT}s）",
+            exit_code=-1,
+        )
+    except Exception as exc:
+        return AiApprovalResponse(
+            status="error",
+            output=str(exc),
+            exit_code=-1,
+        )
 
 
 @router.post("/assistant/stream")

@@ -164,7 +164,11 @@ All API keys are encrypted at rest with Fernet.
 The built-in AI assistant supports two modes:
 
 - **Chat mode** — Conversational Q&A with knowledge base context, content analysis
-- **Agent mode** — Tool-calling with search, folder management, sync, export, sandbox execution
+- **Agent mode** — Tool-calling with search, folder management, sync, export, sandbox execution, and system commands
+
+The **Reader sidebar AI** uses agent mode automatically — it decides whether to use tools based on your request, no manual mode switching needed.
+
+**System command execution** — The agent can run commands on your computer (git clone, brew install, etc.) with a per-command approval popup. You see the exact command and must click "Allow" before it runs. The agent interprets each command's output before deciding the next step.
 
 Supports reasoning/thinking models with `<think>` tag streaming. Works with any OpenAI-compatible API (OpenAI, Claude, local models, etc.).
 

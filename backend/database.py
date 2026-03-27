@@ -322,6 +322,10 @@ def ensure_runtime_schema():
             connection.exec_driver_sql(
                 "ALTER TABLE settings ADD COLUMN ai_agent_can_web_search BOOLEAN NOT NULL DEFAULT 1"
             )
+        if "ai_agent_can_run_computer_commands" not in settings_columns:
+            connection.exec_driver_sql(
+                "ALTER TABLE settings ADD COLUMN ai_agent_can_run_computer_commands BOOLEAN NOT NULL DEFAULT 0"
+            )
         connection.exec_driver_sql(
             "UPDATE settings SET user_id = ? WHERE user_id IS NULL OR trim(user_id) = ''",
             (DEFAULT_USER_ID,),
@@ -347,6 +351,9 @@ def ensure_runtime_schema():
         )
         connection.exec_driver_sql(
             "UPDATE settings SET ai_agent_can_web_search = 1 WHERE ai_agent_can_web_search IS NULL"
+        )
+        connection.exec_driver_sql(
+            "UPDATE settings SET ai_agent_can_run_computer_commands = 0 WHERE ai_agent_can_run_computer_commands IS NULL"
         )
         connection.exec_driver_sql("DROP INDEX IF EXISTS idx_settings_workspace_id")
         connection.exec_driver_sql("CREATE UNIQUE INDEX IF NOT EXISTS idx_settings_user_id ON settings(user_id)")

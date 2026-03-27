@@ -109,6 +109,7 @@ class SettingsResponse(BaseModel):
     ai_agent_can_sync_notion: bool = False
     ai_agent_can_execute_commands: bool = False
     ai_agent_can_web_search: bool = True
+    ai_agent_can_run_computer_commands: bool = False
     auto_sync_target: str = "none"
     notion_ready: bool = False
     notion_missing_fields: list[str] = Field(default_factory=list)
@@ -179,6 +180,7 @@ class SettingsUpdateRequest(BaseModel):
     ai_agent_can_sync_notion: Optional[bool] = None
     ai_agent_can_execute_commands: Optional[bool] = None
     ai_agent_can_web_search: Optional[bool] = None
+    ai_agent_can_run_computer_commands: Optional[bool] = None
     auto_sync_target: Optional[str] = None
 
 
@@ -249,6 +251,13 @@ class AiToolEventResponse(BaseModel):
     download_url: Optional[str] = None
 
 
+class AiPendingApprovalResponse(BaseModel):
+    approval_id: str
+    command: str
+    description: str
+    working_directory: Optional[str] = None
+
+
 class AiAssistantResponse(BaseModel):
     mode: str
     message: str
@@ -259,6 +268,18 @@ class AiAssistantResponse(BaseModel):
     insufficient_context: bool = False
     agent_permissions: list[str] = Field(default_factory=list)
     updated_items: list[ItemResponse] = Field(default_factory=list)
+    pending_approval: Optional[AiPendingApprovalResponse] = None
+
+
+class AiApprovalRequest(BaseModel):
+    approval_id: str
+    approved: bool
+
+
+class AiApprovalResponse(BaseModel):
+    status: str
+    output: str = ""
+    exit_code: int = 0
 
 
 class AiConversationStoredMessage(BaseModel):

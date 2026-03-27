@@ -35,6 +35,7 @@
             save_memory: '记住偏好',
             delete_memory: '删除记忆',
             web_search: '联网搜索',
+            run_computer_command: '系统命令',
         };
         const AI_MUTATING_TOOLS = new Set([
             'assign_item_folders',
@@ -45,6 +46,7 @@
             'export_items_to_zip',
             'create_folder',
             'batch_assign_item_folders',
+            'run_computer_command',
         ]);
         const READER_AI_SUGGESTIONS = [
             '结合正文和我的笔记，总结核心观点',
@@ -398,7 +400,7 @@
         }
 
         function normalizeStoredConversationMessage(entry = {}) {
-            return {
+            const msg = {
                 role: entry.role === 'user' ? 'user' : 'assistant',
                 mode: entry.mode === 'agent' ? 'agent' : 'chat',
                 content: entry.content || '',
@@ -410,23 +412,29 @@
                 isError: Boolean(entry.is_error ?? entry.isError),
                 createdAt: entry.created_at || entry.createdAt || '',
             };
+            if (entry._hidden || entry.hidden) msg._hidden = true;
+            return msg;
         }
 
         function serializeConversationForSave(conversation = []) {
             return conversation
                 .filter((entry) => (entry.role === 'user' || entry.role === 'assistant') && String(entry.content || '').trim())
-                .map((entry) => ({
-                    role: entry.role,
-                    mode: entry.mode === 'agent' ? 'agent' : 'chat',
-                    content: entry.content || '',
-                    citations: Array.isArray(entry.citations) ? entry.citations : [],
-                    tool_events: Array.isArray(entry.toolEvents) ? entry.toolEvents : [],
-                    insufficient_context: Boolean(entry.insufficientContext),
-                    knowledge_base_path: entry.knowledgeBasePath || '',
-                    note_count: Number(entry.noteCount || 0),
-                    is_error: Boolean(entry.isError),
-                    created_at: entry.createdAt || new Date().toISOString(),
-                }));
+                .map((entry) => {
+                    const msg = {
+                        role: entry.role,
+                        mode: entry.mode === 'agent' ? 'agent' : 'chat',
+                        content: entry.content || '',
+                        citations: Array.isArray(entry.citations) ? entry.citations : [],
+                        tool_events: Array.isArray(entry.toolEvents) ? entry.toolEvents : [],
+                        insufficient_context: Boolean(entry.insufficientContext),
+                        knowledge_base_path: entry.knowledgeBasePath || '',
+                        note_count: Number(entry.noteCount || 0),
+                        is_error: Boolean(entry.isError),
+                        created_at: entry.createdAt || new Date().toISOString(),
+                    };
+                    if (entry._hidden) msg.hidden = true;
+                    return msg;
+                });
         }
 
         function renderAiConversationHistory() {
@@ -1271,6 +1279,158 @@
             `;
         }
 
+        // ── Approval popup ──────────────────────────────────────────
+        let _approvalResolve = null; // resolve callback for the popup promise
+
+        function showApprovalPopup(pendingApproval) {
+            return new Promise((resolve) => {
+                _approvalResolve = resolve;
+                const overlay = document.getElementById('approvalOverlay');
+                const descEl = document.getElementById('approvalDesc');
+                const cmdEl = document.getElementById('approvalCmd');
+                const cwdEl = document.getElementById('approvalCwd');
+                const actionsEl = document.getElementById('approvalActions');
+
+                descEl.textContent = pendingApproval.description || '';
+                cmdEl.textContent = pendingApproval.command || '';
+                if (pendingApproval.working_directory) {
+                    cwdEl.textContent = '工作目录：' + pendingApproval.working_directory;
+                    cwdEl.style.display = '';
+                } else {
+                    cwdEl.textContent = '';
+                    cwdEl.style.display = 'none';
+                }
+
+                // Reset actions to buttons
+                actionsEl.innerHTML = `
+                    <button class="approval-popup-btn approval-popup-allow" id="approvalAllowBtn" type="button">
+                        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"></path></svg>
+                        Allow
+                    </button>
+                    <button class="approval-popup-btn approval-popup-deny" id="approvalDenyBtn" type="button">
+                        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18M6 6l12 12"></path></svg>
+                        Deny
+                    </button>
+                `;
+
+                document.getElementById('approvalAllowBtn').onclick = () => _resolveApproval(true);
+                document.getElementById('approvalDenyBtn').onclick = () => _resolveApproval(false);
+
+                overlay.classList.add('is-visible');
+            });
+        }
+
+        function _resolveApproval(approved) {
+            if (_approvalResolve) {
+                _approvalResolve(approved);
+                _approvalResolve = null;
+            }
+        }
+
+        function hideApprovalPopup() {
+            const overlay = document.getElementById('approvalOverlay');
+            overlay.classList.remove('is-visible');
+        }
+
+        function setApprovalPopupLoading() {
+            const actionsEl = document.getElementById('approvalActions');
+            if (actionsEl) {
+                actionsEl.innerHTML = '<div class="approval-popup-running">执行中…</div>';
+            }
+        }
+
+        async function handlePendingApproval(pendingApproval, messageIndex) {
+            // Show popup and wait for user decision
+            const approved = await showApprovalPopup(pendingApproval);
+
+            if (approved) {
+                setApprovalPopupLoading();
+            }
+
+            try {
+                const response = await fetch('/api/ai/assistant/approve', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ approval_id: pendingApproval.approval_id, approved }),
+                });
+                const data = await response.json().catch(() => ({}));
+
+                hideApprovalPopup();
+
+                if (!approved) {
+                    // Nothing to do — just close the popup
+                    return;
+                }
+
+                const exitCode = data.exit_code ?? 0;
+                const isSuccess = data.status === 'completed' && exitCode === 0;
+                const output = data.output || '';
+                const statusLabel = isSuccess ? '执行成功' : '执行失败';
+
+                // Update the tool event status in the assistant message
+                if (typeof messageIndex === 'number' && aiConversation[messageIndex]) {
+                    const entry = aiConversation[messageIndex];
+                    entry.toolEvents = (entry.toolEvents || []).map((ev) =>
+                        ev.name === 'run_computer_command' && ev.status === 'pending'
+                            ? { ...ev, status: isSuccess ? 'completed' : 'failed', summary: `${statusLabel}：${pendingApproval.command.slice(0, 60)}` }
+                            : ev
+                    );
+                    delete entry.pendingApproval;
+                }
+
+                // Inject a hidden context message with the result (not rendered, but sent to LLM)
+                aiConversation.push({
+                    role: 'user',
+                    content: `[系统：命令 \`${pendingApproval.command}\` 已执行，exit code: ${exitCode}]\n${output ? output.slice(0, 3000) : '（无输出）'}`,
+                    _hidden: true,
+                    createdAt: new Date().toISOString(),
+                });
+                aiAgentConversation = aiConversation.slice();
+                renderAiConversation();
+
+                // Auto-continue: let the agent interpret the result and respond
+                try {
+                    submitAskAiBtn.classList.add('is-loading');
+                    const followUp = await requestAiAssistant(
+                        normalizeConversationForRequest(),
+                        'agent',
+                        { currentItemId: currentAiContextItemId }
+                    );
+                    await applyAiAssistantSideEffects(followUp);
+
+                    aiConversation.push({
+                        role: 'assistant',
+                        mode: followUp.mode || 'agent',
+                        content: followUp.message || '',
+                        citations: Array.isArray(followUp.citations) ? followUp.citations : [],
+                        toolEvents: Array.isArray(followUp.tool_events) ? followUp.tool_events : [],
+                        insufficientContext: Boolean(followUp.insufficient_context),
+                        knowledgeBasePath: followUp.knowledge_base_path || '',
+                        noteCount: Number(followUp.note_count || 0),
+                        createdAt: new Date().toISOString(),
+                    });
+                    aiAgentConversation = aiConversation.slice();
+                    renderAiConversation();
+                    try { await persistTopAiConversation(); } catch (_) {}
+
+                    // If the follow-up also needs approval, show popup again
+                    if (followUp.pending_approval) {
+                        const newMsgIndex = aiConversation.length - 1;
+                        handlePendingApproval(followUp.pending_approval, newMsgIndex);
+                    }
+                } catch (err) {
+                    // Follow-up failed — not critical, just show what we have
+                    renderAiConversation();
+                    try { await persistTopAiConversation(); } catch (_) {}
+                } finally {
+                    submitAskAiBtn.classList.remove('is-loading');
+                }
+            } catch (error) {
+                hideApprovalPopup();
+                showToast(`审批请求失败：${error.message || '未知错误'}`, 'error');
+            }
+        }
+
         function buildAiMetaMarkup(entry) {
             const metaBits = [];
             if (entry.knowledgeBasePath) {
@@ -1640,6 +1800,9 @@
                     // Streaming entry — rendered separately, skip here
                     return '';
                 }
+                if (entry._hidden) {
+                    return '';
+                }
                 if (entry.role === 'user') {
                     return renderUserMessage(entry);
                 }
@@ -1892,7 +2055,8 @@
                     );
                     await applyAiAssistantSideEffects(data);
                     askAiRequestInFlight = false;
-                    aiConversation.push({
+
+                    const entry = {
                         role: 'assistant',
                         mode: data.mode || 'agent',
                         content: data.message || '',
@@ -1902,10 +2066,18 @@
                         knowledgeBasePath: data.knowledge_base_path || '',
                         noteCount: Number(data.note_count || 0),
                         createdAt: new Date().toISOString(),
-                    });
+                    };
+
+                    aiConversation.push(entry);
                     aiAgentConversation = aiConversation.slice();
                     renderAiConversation();
                     await persistTopAiConversation();
+
+                    // If there's a pending approval, show the popup
+                    if (data.pending_approval) {
+                        const msgIndex = aiConversation.length - 1;
+                        handlePendingApproval(data.pending_approval, msgIndex);
+                    }
                 } catch (error) {
                     askAiRequestInFlight = false;
                     aiConversation.push({
@@ -2251,6 +2423,7 @@
 
             const messagesMarkup = conversation.length
                 ? conversation.map((entry, index) => {
+                    if (entry._hidden) return '';
                     if (entry.role === 'user') {
                         return renderUserMessage(entry, { compact: true });
                     }
@@ -2282,7 +2455,7 @@
             `;
             const loadingMarkup = isBusy
                 ? renderAiLoadingMessage({
-                    mode: 'chat',
+                    mode: 'agent',
                     compact: true,
                     label: 'Ask AI 正在思考',
                     description: '正在结合当前笔记的内容分析与知识库上下文生成回答。',
@@ -2390,13 +2563,13 @@
             try {
                 const data = await requestAiAssistant(
                     buildReaderAiRequestMessages(item),
-                    'chat',
+                    'agent',
                     { currentItemId: itemKey }
                 );
                 await applyAiAssistantSideEffects(data);
                 conversation.push({
                     role: 'assistant',
-                    mode: data.mode || 'chat',
+                    mode: data.mode || 'agent',
                     content: data.message || '',
                     citations: Array.isArray(data.citations) ? data.citations : [],
                     toolEvents: Array.isArray(data.tool_events) ? data.tool_events : [],
@@ -2407,10 +2580,16 @@
                 });
                 readerAiConversationByItem.set(itemKey, conversation);
                 await persistReaderAiConversation(itemKey);
+                rerenderReaderAiSidebar(itemKey);
+
+                // Handle pending approval (run_computer_command)
+                if (data.pending_approval) {
+                    await handleReaderAiPendingApproval(data.pending_approval, item, itemKey, conversation);
+                }
             } catch (error) {
                 conversation.push({
                     role: 'assistant',
-                    mode: 'chat',
+                    mode: 'agent',
                     content: error.message || 'AI 请求失败',
                     citations: [],
                     toolEvents: [],
@@ -2427,6 +2606,89 @@
             } finally {
                 readerAiRequestInFlight = false;
                 rerenderReaderAiSidebar(itemKey);
+            }
+        }
+
+        async function handleReaderAiPendingApproval(pendingApproval, item, itemKey, conversation) {
+            const approved = await showApprovalPopup(pendingApproval);
+            if (approved) setApprovalPopupLoading();
+
+            try {
+                const response = await fetch('/api/ai/assistant/approve', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ approval_id: pendingApproval.approval_id, approved }),
+                });
+                const data = await response.json().catch(() => ({}));
+                hideApprovalPopup();
+
+                if (!approved) return;
+
+                const exitCode = data.exit_code ?? 0;
+                const isSuccess = data.status === 'completed' && exitCode === 0;
+                const output = data.output || '';
+                const statusLabel = isSuccess ? '执行成功' : '执行失败';
+
+                // Update tool event status in the last assistant message
+                const lastAssistant = [...conversation].reverse().find(e => e.role === 'assistant');
+                if (lastAssistant) {
+                    lastAssistant.toolEvents = (lastAssistant.toolEvents || []).map((ev) =>
+                        ev.name === 'run_computer_command' && ev.status === 'pending'
+                            ? { ...ev, status: isSuccess ? 'completed' : 'failed', summary: `${statusLabel}：${pendingApproval.command.slice(0, 60)}` }
+                            : ev
+                    );
+                    delete lastAssistant.pendingApproval;
+                }
+
+                // Inject hidden context message for LLM
+                conversation.push({
+                    role: 'user',
+                    content: `[系统：命令 \`${pendingApproval.command}\` 已执行，exit code: ${exitCode}]\n${output ? output.slice(0, 3000) : '（无输出）'}`,
+                    _hidden: true,
+                    createdAt: new Date().toISOString(),
+                });
+                readerAiConversationByItem.set(itemKey, conversation);
+                rerenderReaderAiSidebar(itemKey);
+
+                // Auto-continue: let the agent interpret the result
+                try {
+                    readerAiRequestInFlight = true;
+                    rerenderReaderAiSidebar(itemKey);
+                    const followUp = await requestAiAssistant(
+                        buildReaderAiRequestMessages(item),
+                        'agent',
+                        { currentItemId: itemKey }
+                    );
+                    await applyAiAssistantSideEffects(followUp);
+                    conversation.push({
+                        role: 'assistant',
+                        mode: followUp.mode || 'agent',
+                        content: followUp.message || '',
+                        citations: Array.isArray(followUp.citations) ? followUp.citations : [],
+                        toolEvents: Array.isArray(followUp.tool_events) ? followUp.tool_events : [],
+                        insufficientContext: Boolean(followUp.insufficient_context),
+                        knowledgeBasePath: followUp.knowledge_base_path || '',
+                        noteCount: Number(followUp.note_count || 0),
+                        createdAt: new Date().toISOString(),
+                    });
+                    readerAiConversationByItem.set(itemKey, conversation);
+                    await persistReaderAiConversation(itemKey);
+                    rerenderReaderAiSidebar(itemKey);
+
+                    // Recursive: follow-up may also need approval
+                    if (followUp.pending_approval) {
+                        await handleReaderAiPendingApproval(followUp.pending_approval, item, itemKey, conversation);
+                    }
+                } catch (err) {
+                    rerenderReaderAiSidebar(itemKey);
+                    try { await persistReaderAiConversation(itemKey); } catch (_) {}
+                } finally {
+                    readerAiRequestInFlight = false;
+                    rerenderReaderAiSidebar(itemKey);
+                }
+            } catch (error) {
+                hideApprovalPopup();
+                showToast(`审批请求失败：${error.message || '未知错误'}`, 'error');
             }
         }
 

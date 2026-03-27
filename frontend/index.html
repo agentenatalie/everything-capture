@@ -291,8 +291,12 @@
                                             <input type="checkbox" id="aiAgentCanWebSearch" checked />
                                             <span>允许联网搜索</span>
                                         </label>
+                                        <label class="settings-checkbox-row">
+                                            <input type="checkbox" id="aiAgentCanRunComputerCommands" />
+                                            <span>允许系统命令（需逐条批准）</span>
+                                        </label>
                                     </div>
-                                    <div class="settings-help">只开放你愿意让 AI 直接执行的动作。</div>
+                                    <div class="settings-help">系统命令每次执行前都会弹出确认，你可以逐条批准或拒绝。</div>
                                 </div>
                                 <div id="aiKnowledgeBaseHint" class="settings-help" style="color: #6b7280;">未识别知识库目录</div>
                             </div>
@@ -558,6 +562,32 @@
                     </div>
                 </div>
             </main>
+        </div>
+    </div>
+
+    <!-- Approval popup -->
+    <div class="approval-overlay" id="approvalOverlay">
+        <div class="approval-popup" role="dialog" aria-modal="true" aria-label="命令审批">
+            <div class="approval-popup-header">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M12 9v4M12 17h.01"></path>
+                    <path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"></path>
+                </svg>
+                <span>Agent 需要你的批准</span>
+            </div>
+            <div class="approval-popup-desc" id="approvalDesc"></div>
+            <pre class="approval-popup-cmd"><code id="approvalCmd"></code></pre>
+            <div class="approval-popup-cwd" id="approvalCwd"></div>
+            <div class="approval-popup-actions" id="approvalActions">
+                <button class="approval-popup-btn approval-popup-allow" id="approvalAllowBtn" type="button">
+                    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"></path></svg>
+                    Allow
+                </button>
+                <button class="approval-popup-btn approval-popup-deny" id="approvalDenyBtn" type="button">
+                    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18M6 6l12 12"></path></svg>
+                    Deny
+                </button>
+            </div>
         </div>
     </div>
 

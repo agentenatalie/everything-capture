@@ -463,12 +463,14 @@
             const syncNotion = document.getElementById('aiAgentCanSyncNotion');
             const executeCommands = document.getElementById('aiAgentCanExecuteCommands');
             const webSearch = document.getElementById('aiAgentCanWebSearch');
+            const runComputerCommands = document.getElementById('aiAgentCanRunComputerCommands');
             if (manageFolders) manageFolders.checked = data?.ai_agent_can_manage_folders !== false;
             if (parseContent) parseContent.checked = data?.ai_agent_can_parse_content !== false;
             if (syncObsidian) syncObsidian.checked = Boolean(data?.ai_agent_can_sync_obsidian);
             if (syncNotion) syncNotion.checked = Boolean(data?.ai_agent_can_sync_notion);
             if (executeCommands) executeCommands.checked = Boolean(data?.ai_agent_can_execute_commands);
             if (webSearch) webSearch.checked = data?.ai_agent_can_web_search !== false;
+            if (runComputerCommands) runComputerCommands.checked = Boolean(data?.ai_agent_can_run_computer_commands);
         }
 
         function setObsidianTargetHint(data) {
@@ -682,6 +684,7 @@
                 ai_agent_can_sync_notion: document.getElementById('aiAgentCanSyncNotion').checked,
                 ai_agent_can_execute_commands: document.getElementById('aiAgentCanExecuteCommands').checked,
                 ai_agent_can_web_search: document.getElementById('aiAgentCanWebSearch').checked,
+                ai_agent_can_run_computer_commands: document.getElementById('aiAgentCanRunComputerCommands').checked,
                 auto_sync_target: document.getElementById('autoSyncTarget').value
             };
             const notionClientSecret = document.getElementById('notionClientSecret').value.trim();

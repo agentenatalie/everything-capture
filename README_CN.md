@@ -164,7 +164,11 @@ echo 'CAPTURE_SERVICE_URL="https://your-deployment.vercel.app"' > backend/.local
 内置 AI 助手支持两种模式：
 
 - **对话模式** — 知识库上下文问答、内容分析
-- **Agent 模式** — 工具调用：搜索、文件夹管理、同步、导出、沙盒执行
+- **Agent 模式** — 工具调用：搜索、文件夹管理、同步、导出、沙盒执行、系统命令
+
+**阅读器侧栏 AI** 自动使用 Agent 模式 — 根据你的请求自动判断是否需要调用工具，无需手动切换模式。
+
+**系统命令执行** — Agent 可以在你的电脑上执行命令（git clone、brew install 等），每条命令需要通过弹窗逐一审批。你会看到完整命令内容，点击「允许」后才会执行。Agent 会解读每条命令的输出后再决定下一步操作。
 
 支持 reasoning/思维链模型的 `<think>` 标签流式输出。兼容任意 OpenAI 兼容 API（OpenAI、Claude、本地模型等）。
 

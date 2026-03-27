@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-"""
+"""Everything Capture — data migration utility.
+
 One-time migration script: move user data from the project directory
 to the external data directory (everything-capture-data/).
 

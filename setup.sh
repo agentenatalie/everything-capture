@@ -1,4 +1,5 @@
 #!/bin/bash
+# Everything Capture — one-click setup script
 set -euo pipefail
 
 REPO_URL="https://github.com/agentenatalie/everything-capture"

@@ -1,4 +1,4 @@
-# Core
+# Core framework
 fastapi>=0.135.0
 uvicorn[standard]>=0.41.0
 sqlalchemy>=2.0.40

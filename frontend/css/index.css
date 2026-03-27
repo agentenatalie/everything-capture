@@ -2968,6 +2968,17 @@
             text-decoration: underline;
         }
 
+        .article-html ul,
+        .article-html ol {
+            padding-left: 1.5em;
+            margin: 0.5rem 0 1rem;
+        }
+
+        .modal-body ul,
+        .modal-body ol {
+            padding-left: 1.5em;
+        }
+
         .article-html blockquote {
             padding: 0.2rem 0 0.2rem 1rem;
             border-left: 3px solid rgba(148, 163, 184, 0.8);

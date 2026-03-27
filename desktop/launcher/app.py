@@ -1,3 +1,4 @@
+"""Everything Capture — macOS desktop launcher."""
 from __future__ import annotations
 
 import atexit

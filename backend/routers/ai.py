@@ -442,16 +442,23 @@ def _load_ai_memories(db: Session, user_id: str) -> list[AiMemory]:
 
 def _format_memories_for_prompt(memories: list[AiMemory]) -> str:
     if not memories:
-        return ""
+        return (
+            "【你的记忆】你还没有关于这位用户的任何记忆。\n"
+            "在交互过程中，主动用 save_memory 记住你观察到的用户偏好、分类习惯、兴趣领域等。\n"
+            "这些记忆会在未来的对话中帮助你更好地服务用户。"
+        )
     type_labels = {"learned": "学到的", "preference": "用户偏好", "correction": "纠正"}
-    lines = ["【你的记忆】以下是你从过去的交互中学到的内容，请据此调整行为："]
+    lines = [
+        "【你的记忆】以下是你从过去的交互中积累的对用户的了解。"
+        "这是你最重要的参考依据——务必据此调整行为，不要忽略这些记忆：",
+    ]
     for m in memories:
         label = type_labels.get(m.type, m.type)
         lines.append(f"- [{label}] {m.content}")
     lines.append(
-        "\n你可以用 save_memory 工具主动记住新发现的模式和偏好，"
-        "用 delete_memory 删除过时的记忆。"
-        "当用户纠正你或你观察到用户的习惯时，主动保存记忆。"
+        "\n持续维护你的记忆：用 save_memory 记住新发现的模式和偏好，"
+        "用 delete_memory 删除过时或不准确的记忆。"
+        "当用户纠正你时，必须立刻保存纠正记忆。"
     )
     return "\n".join(lines)
 
@@ -500,6 +507,28 @@ def _assistant_agent_system_prompt(agent_permissions: list[str], memories: list[
         "- 遇到复杂任务时，先用查询工具了解现状，再决定执行什么操作。\n"
         "- 批量操作优先用 batch_assign_item_folders，不要逐条调用 assign_item_folders。\n"
         "- 需要新文件夹时先用 create_folder 创建，再用 batch_assign_item_folders 归档。\n"
+        "\n"
+        "【重要：文件夹分配策略】\n"
+        "当用户要求整理、分类、归档内容时，你必须先学习用户现有的分类习惯，再动手操作：\n"
+        "1. 先用 list_folders 查看所有文件夹。\n"
+        "2. 用 search_library_items 按每个文件夹搜索几条已分类的内容，分析用户的分类逻辑和命名风格。\n"
+        "3. 检查你的记忆中是否已有用户的分类偏好。如果没有，先总结用户的分类规律，"
+        "用 save_memory 存储（type='learned'），例如：\n"
+        "   - '用户的文件夹按主题领域划分：技术/设计/商业/生活'\n"
+        "   - '用户倾向于把 AI 相关内容放在「AI与机器学习」而非「技术」'\n"
+        "   - '用户的文件夹命名风格是中文简短名词'\n"
+        "4. 根据学到的分类逻辑来分配未归档内容，不要按你自己的理解自创分类标准。\n"
+        "5. 如果现有文件夹都不合适，先询问用户是否要创建新文件夹，说明理由。\n"
+        "6. 用户纠正你的分配时，立刻用 save_memory(type='correction') 记住纠正内容。\n"
+        "\n"
+        "【重要：主动学习用户偏好】\n"
+        "你应该像一个了解用户的私人助理一样工作。在每次交互中主动观察并记忆：\n"
+        "- 用户的兴趣领域和关注方向\n"
+        "- 用户的分类习惯和组织逻辑\n"
+        "- 用户对你回答风格的偏好（简洁/详细、中文/英文等）\n"
+        "- 用户纠正过你的任何行为\n"
+        "发现新的模式时主动用 save_memory 保存，不需要用户明确要求。\n"
+        "当记忆中已有相关内容但发现过时或不准确时，先 delete_memory 删除旧的再保存新的。\n"
         "\n"
         "【重要：导出/打包/下载请求】\n"
         "当用户要求'打包''导出''下载''整理成文档'内容时：\n"
@@ -2036,7 +2065,12 @@ async def _execute_agent_tool(
         db.commit()
         db.refresh(memory)
         result = {"status": "ok", "memory_id": memory.id, "type": memory_type}
-        return result, AiToolEventResponse(name=tool_name, summary=f"已记住：{_truncate_text(content, 60)}"), [], []
+        type_label = {"learned": "学到的", "preference": "用户偏好", "correction": "纠正"}.get(memory_type, memory_type)
+        return result, AiToolEventResponse(
+            name=tool_name,
+            summary=f"已记住（{type_label}）：{_truncate_text(content, 40)}",
+            detail=content.strip(),
+        ), [], []
 
     if tool_name == "delete_memory":
         memory_id = _clean_optional_string(arguments.get("memory_id"))

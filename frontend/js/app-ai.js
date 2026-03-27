@@ -1262,12 +1262,24 @@
 
         function buildAiToolEventsMarkup(toolEvents = []) {
             if (!Array.isArray(toolEvents) || !toolEvents.length) return '';
-            // Filter out export_items_to_zip events — download link is already in the message text
-            const filtered = toolEvents.filter((e) => e.name !== 'export_items_to_zip');
+            // Filter out noisy/redundant tool events from the UI
+            const filtered = toolEvents.filter((e) => e.name !== 'export_items_to_zip' && e.name !== 'search_library_items');
             if (!filtered.length) return '';
             return `
                 <div class="ai-tool-events">
                     ${filtered.map((event) => {
+                        const hasDetail = event.detail && event.detail !== (event.summary || '');
+                        if (hasDetail) {
+                            return `
+                            <details class="ai-tool-event is-collapsible${event.status === 'failed' ? ' is-failed' : ''}">
+                                <summary class="ai-tool-event-header">
+                                    <div class="ai-tool-event-name">${escapeHtml(AI_TOOL_LABELS[event.name] || event.name || 'Agent')}</div>
+                                    <div class="ai-tool-event-summary">${renderInlineMarkdown(event.summary || '')}</div>
+                                </summary>
+                                <div class="ai-tool-event-detail">${renderInlineMarkdown(event.detail)}</div>
+                            </details>
+                            `;
+                        }
                         return `
                         <div class="ai-tool-event${event.status === 'failed' ? ' is-failed' : ''}">
                             <div class="ai-tool-event-name">${escapeHtml(AI_TOOL_LABELS[event.name] || event.name || 'Agent')}</div>

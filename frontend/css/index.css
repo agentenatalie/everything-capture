@@ -5621,6 +5621,39 @@
             line-height: 1.5;
         }
 
+        /* Collapsible tool event (e.g. save_memory) */
+        details.ai-tool-event.is-collapsible {
+            display: block;
+            cursor: pointer;
+        }
+        details.ai-tool-event.is-collapsible > summary {
+            list-style: none;
+            display: flex;
+            flex-direction: column;
+            gap: 3px;
+        }
+        details.ai-tool-event.is-collapsible > summary::-webkit-details-marker {
+            display: none;
+        }
+        details.ai-tool-event.is-collapsible > summary .ai-tool-event-summary::after {
+            content: ' ▸';
+            font-size: 11px;
+            color: #94a3b8;
+        }
+        details[open].ai-tool-event.is-collapsible > summary .ai-tool-event-summary::after {
+            content: ' ▾';
+        }
+        .ai-tool-event-detail {
+            margin-top: 8px;
+            padding-top: 8px;
+            border-top: 1px solid rgba(0,0,0,0.06);
+            font-size: 13px;
+            color: #475569;
+            line-height: 1.6;
+            white-space: pre-wrap;
+            word-break: break-word;
+        }
+
         /* ── Approval popup (Claude-style permission request) ── */
         .approval-overlay {
             position: fixed;

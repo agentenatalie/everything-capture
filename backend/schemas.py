@@ -248,6 +248,7 @@ class AiToolEventResponse(BaseModel):
     name: str
     status: str = "completed"
     summary: str
+    detail: Optional[str] = None
     download_url: Optional[str] = None
 
 

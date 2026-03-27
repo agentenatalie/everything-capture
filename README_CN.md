@@ -170,6 +170,8 @@ echo 'CAPTURE_SERVICE_URL="https://your-deployment.vercel.app"' > backend/.local
 
 **系统命令执行** — Agent 可以在你的电脑上执行命令（git clone、brew install 等），每条命令需要通过弹窗逐一审批。你会看到完整命令内容，点击「允许」后才会执行。Agent 会解读每条命令的输出后再决定下一步操作。
 
+**AI 持久记忆** — Agent 会跨对话记住你的偏好。它会观察你的文件夹组织方式、关注的主题领域和喜欢的回答风格，然后自动应用这些知识。整理内容时，它会先学习你现有的分类习惯再动手操作。你的纠正会被立即记住，不会犯同样的错误。
+
 支持 reasoning/思维链模型的 `<think>` 标签流式输出。兼容任意 OpenAI 兼容 API（OpenAI、Claude、本地模型等）。
 
 ## 配置项

@@ -170,6 +170,8 @@ The **Reader sidebar AI** uses agent mode automatically — it decides whether t
 
 **System command execution** — The agent can run commands on your computer (git clone, brew install, etc.) with a per-command approval popup. You see the exact command and must click "Allow" before it runs. The agent interprets each command's output before deciding the next step.
 
+**Persistent AI memory** — The agent learns and remembers your preferences across conversations. It observes how you organize folders, what topics you care about, and how you like responses — then applies that knowledge automatically. When organizing content, it first studies your existing folder structure and classification patterns before making any assignments. Corrections are saved immediately so the same mistake doesn't happen twice.
+
 Supports reasoning/thinking models with `<think>` tag streaming. Works with any OpenAI-compatible API (OpenAI, Claude, local models, etc.).
 
 ## Configuration

@@ -64,5 +64,6 @@ tmp_*
 # Local Codex / Claude config
 .claude/
 CLAUDE.md
+.impeccable.md
 logo-concepts.html
 logo-viewfinder-bw.html

@@ -167,7 +167,7 @@ func sampleTimestamps(durationSeconds: Double) -> [Double] {
 func loadDurationSeconds(for asset: AVURLAsset) -> Double {
     if #available(macOS 13.0, *) {
         let semaphore = DispatchSemaphore(value: 0)
-        var loadedDuration: CMTime = .zero
+        nonisolated(unsafe) var loadedDuration: CMTime = .zero
 
         Task {
             loadedDuration = (try? await asset.load(.duration)) ?? .zero

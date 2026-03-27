@@ -1,3 +1,4 @@
+"""Everything Capture — cloud capture queue service."""
 import json
 import os
 import secrets

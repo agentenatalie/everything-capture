@@ -1,3 +1,4 @@
+"""Everything Capture — FastAPI backend entry point."""
 import logging
 import os
 

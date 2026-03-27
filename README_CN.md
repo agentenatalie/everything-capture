@@ -60,7 +60,7 @@ backend/venv/bin/pip install -r requirements.txt
 ./run
 ```
 
-浏览器访问 **http://localhost:8010** 即可使用。
+浏览器访问 **http://localhost:8000** 即可使用。
 
 ### 系统依赖
 
@@ -76,7 +76,7 @@ backend/venv/bin/pip install -r requirements.txt
 
 ```
 桌面浏览器 / Web UI
-    → backend/ (FastAPI :8000) + frontend/ (静态文件 :8010)
+    → backend/ (FastAPI :8000，同时提供 UI 和 API)
     → ../everything-capture-data/app.db + media/
 
 手机 / 分享菜单 / 快捷指令

@@ -60,7 +60,7 @@ backend/venv/bin/pip install -r requirements.txt
 ./run
 ```
 
-Open **http://localhost:8010** in your browser.
+Open **http://localhost:8000** in your browser.
 
 ### System requirements
 
@@ -76,7 +76,7 @@ Open **http://localhost:8010** in your browser.
 
 ```
 Desktop browser / Web UI
-    → backend/ (FastAPI on :8000) + frontend/ (static on :8010)
+    → backend/ (FastAPI on :8000, serves UI + API)
     → ../everything-capture-data/app.db + media/
 
 Phone / Share Sheet / Shortcuts

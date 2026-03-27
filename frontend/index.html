@@ -214,7 +214,7 @@
             <div class="modal-header settings-header">
                 <div class="settings-headline">
                     <h2 class="modal-title">集成设置</h2>
-                    <div class="settings-subtitle">保持黑白简洁，把 AI、同步和知识库放进同一条设置流里。</div>
+                    <div class="settings-subtitle">AI、同步和连接，一站配好。</div>
                 </div>
                 <div class="modal-header-actions">
                     <button class="close-btn" id="closeSettingsModal" type="button">×</button>
@@ -224,219 +224,210 @@
                 <div class="settings-main">
                     <div class="settings-main-grid">
                         <div class="settings-group">
-                            <div class="settings-section" id="settingsSectionAi">
-                                <div class="settings-section-head">
-                                    <div class="settings-section-head-main">
-                                        <span class="settings-section-mark" aria-hidden="true">01</span>
-                                        <div>
-                                            <h3>AI</h3>
-                                            <div class="settings-section-copy">先把 AI 接好，再决定它能读取和操作什么。</div>
+                            <div class="settings-section" id="settingsSectionAll">
+
+                                <details class="settings-accordion" id="settingsSectionAi" open>
+                                    <summary class="settings-accordion-trigger">
+                                        <div class="settings-accordion-lead">
+                                            <svg class="settings-section-icon" width="18" height="18" viewBox="0 0 24 24" fill="none"><path d="M12 3L14 9L20 8L16 13L19 20L12 16L5 20L8 13L4 8L10 9Z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round" stroke-linecap="round"/></svg>
+                                            <span class="settings-accordion-title">AI 助手</span>
+                                        </div>
+                                        <div class="settings-accordion-right">
+                                            <span id="aiStatusText" class="settings-status">未配置</span>
+                                            <svg class="settings-accordion-chevron" width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M4 6l4 4 4-4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                                        </div>
+                                    </summary>
+                                    <div class="settings-accordion-body">
+                                        <div class="settings-field">
+                                            <label class="settings-label">接口地址</label>
+                                            <input type="text" id="aiBaseUrl" class="filter-input" style="width: 100%;"
+                                                placeholder="https://api.openai.com/v1" />
+                                            <div class="settings-help">常见接口会自动切到预设模型，其它地址可继续手动填写。</div>
+                                        </div>
+                                        <div class="settings-field">
+                                            <label class="settings-label">模型</label>
+                                            <select id="aiModelSelect" class="platform-select" style="width: 100%; display: none;"></select>
+                                            <input type="text" id="aiModel" class="filter-input" style="width: 100%;"
+                                                list="aiModelOptions"
+                                                placeholder="输入模型名" />
+                                            <datalist id="aiModelOptions">
+                                                <option value="deepseek-v3.2"></option>
+                                                <option value="deepseek-v3.2-thinking"></option>
+                                                <option value="glm-4.7"></option>
+                                                <option value="minimax-m2.1"></option>
+                                                <option value="kimi-k2.5"></option>
+                                                <option value="glm-5"></option>
+                                                <option value="minimax-m2.5"></option>
+                                            </datalist>
+                                            <div id="aiModelModeHint" class="settings-help">当前为手动输入。</div>
+                                        </div>
+                                        <div class="settings-field">
+                                            <label class="settings-label">密钥</label>
+                                            <input type="password" id="aiApiKey" class="filter-input" style="width: 100%;"
+                                                placeholder="输入密钥" />
+                                            <div class="settings-help">已保存的密钥不会回显，留空会保留当前值。</div>
+                                        </div>
+                                        <div class="settings-field">
+                                            <label class="settings-label">操作权限</label>
+                                            <div class="settings-checkbox-list">
+                                                <label class="settings-checkbox-row">
+                                                    <input type="checkbox" id="aiAgentCanManageFolders" />
+                                                    <span>允许调整文件夹</span>
+                                                </label>
+                                                <label class="settings-checkbox-row">
+                                                    <input type="checkbox" id="aiAgentCanParseContent" />
+                                                    <span>允许识别内容</span>
+                                                </label>
+                                                <label class="settings-checkbox-row">
+                                                    <input type="checkbox" id="aiAgentCanSyncObsidian" />
+                                                    <span>允许同步到 Obsidian</span>
+                                                </label>
+                                                <label class="settings-checkbox-row">
+                                                    <input type="checkbox" id="aiAgentCanSyncNotion" />
+                                                    <span>允许同步到 Notion</span>
+                                                </label>
+                                                <label class="settings-checkbox-row">
+                                                    <input type="checkbox" id="aiAgentCanExecuteCommands" />
+                                                    <span>允许执行沙箱命令</span>
+                                                </label>
+                                                <label class="settings-checkbox-row">
+                                                    <input type="checkbox" id="aiAgentCanWebSearch" checked />
+                                                    <span>允许联网搜索</span>
+                                                </label>
+                                                <label class="settings-checkbox-row">
+                                                    <input type="checkbox" id="aiAgentCanRunComputerCommands" />
+                                                    <span>允许系统命令（需逐条批准）</span>
+                                                </label>
+                                            </div>
+                                            <div class="settings-help">系统命令每次执行前都会弹出确认，你可以逐条批准或拒绝。</div>
                                         </div>
                                     </div>
-                                    <div id="aiStatusText" class="settings-status">未配置</div>
-                                </div>
-                                <div class="settings-field">
-                                    <label class="settings-label">接口地址</label>
-                                    <input type="text" id="aiBaseUrl" class="filter-input" style="width: 100%;"
-                                        placeholder="https://api.openai.com/v1" />
-                                    <div class="settings-help">常见接口会自动切到预设模型，其它地址可继续手动填写。</div>
-                                </div>
-                                <div class="settings-field">
-                                    <label class="settings-label">模型</label>
-                                    <select id="aiModelSelect" class="platform-select" style="width: 100%; display: none;"></select>
-                                    <input type="text" id="aiModel" class="filter-input" style="width: 100%;"
-                                        list="aiModelOptions"
-                                        placeholder="输入模型名" />
-                                    <datalist id="aiModelOptions">
-                                        <option value="deepseek-v3.2"></option>
-                                        <option value="deepseek-v3.2-thinking"></option>
-                                        <option value="glm-4.7"></option>
-                                        <option value="minimax-m2.1"></option>
-                                        <option value="kimi-k2.5"></option>
-                                        <option value="glm-5"></option>
-                                        <option value="minimax-m2.5"></option>
-                                    </datalist>
-                                    <div id="aiModelModeHint" class="settings-help">当前为手动输入。</div>
-                                </div>
-                                <div class="settings-field">
-                                    <label class="settings-label">密钥</label>
-                                    <input type="password" id="aiApiKey" class="filter-input" style="width: 100%;"
-                                        placeholder="输入密钥" />
-                                    <div class="settings-help">已保存的密钥不会回显，留空会保留当前值。</div>
-                                </div>
-                                <div class="settings-field">
-                                    <label class="settings-label">操作权限</label>
-                                    <div class="settings-checkbox-list">
-                                        <label class="settings-checkbox-row">
-                                            <input type="checkbox" id="aiAgentCanManageFolders" />
-                                            <span>允许调整文件夹</span>
-                                        </label>
-                                        <label class="settings-checkbox-row">
-                                            <input type="checkbox" id="aiAgentCanParseContent" />
-                                            <span>允许识别内容</span>
-                                        </label>
-                                        <label class="settings-checkbox-row">
-                                            <input type="checkbox" id="aiAgentCanSyncObsidian" />
-                                            <span>允许同步到 Obsidian</span>
-                                        </label>
-                                        <label class="settings-checkbox-row">
-                                            <input type="checkbox" id="aiAgentCanSyncNotion" />
-                                            <span>允许同步到 Notion</span>
-                                        </label>
-                                        <label class="settings-checkbox-row">
-                                            <input type="checkbox" id="aiAgentCanExecuteCommands" />
-                                            <span>允许执行沙箱命令</span>
-                                        </label>
-                                        <label class="settings-checkbox-row">
-                                            <input type="checkbox" id="aiAgentCanWebSearch" checked />
-                                            <span>允许联网搜索</span>
-                                        </label>
-                                        <label class="settings-checkbox-row">
-                                            <input type="checkbox" id="aiAgentCanRunComputerCommands" />
-                                            <span>允许系统命令（需逐条批准）</span>
-                                        </label>
-                                    </div>
-                                    <div class="settings-help">系统命令每次执行前都会弹出确认，你可以逐条批准或拒绝。</div>
-                                </div>
-                                <div id="aiKnowledgeBaseHint" class="settings-help" style="color: #6b7280;">未识别知识库目录</div>
-                            </div>
-                        </div>
-                        <div class="settings-group">
-                            <div class="settings-section" id="settingsSectionComponents">
-                                <div class="settings-section-head">
-                                    <div class="settings-section-head-main">
-                                        <span class="settings-section-mark" aria-hidden="true">02</span>
-                                        <div>
-                                            <h3>组件</h3>
-                                            <div class="settings-section-copy">可选能力由桌面端后端负责下载、校验和切换，前端只负责发起和显示进度。</div>
+                                </details>
+
+                                <details class="settings-accordion" id="settingsSectionNotion">
+                                    <summary class="settings-accordion-trigger">
+                                        <div class="settings-accordion-lead">
+                                            <svg class="settings-section-icon" width="18" height="18" viewBox="0 0 100 100" fill="currentColor"><path fill-rule="evenodd" clip-rule="evenodd" d="M61.35 0.227l-55.333 4.087C1.553 4.7 0 7.617 0 11.113v60.66c0 2.723 0.967 5.053 3.3 8.167l13.007 16.913c2.137 2.723 4.08 3.307 8.16 3.113l64.257 -3.89c5.433 -0.387 6.99 -2.917 6.99 -7.193V20.64c0 -2.21 -0.873 -2.847 -3.443 -4.733L74.167 3.143c-4.273 -3.107 -6.02 -3.5 -12.817 -2.917zM25.92 19.523c-5.247 0.353 -6.437 0.433 -9.417 -1.99L8.927 11.507c-0.77 -0.78 -0.383 -1.753 1.557 -1.947l53.193 -3.887c4.467 -0.39 6.793 1.167 8.54 2.527l9.123 6.61c0.39 0.197 1.36 1.36 0.193 1.36l-54.933 3.307 -0.68 0.047zM19.803 88.3V30.367c0 -2.53 0.777 -3.697 3.103 -3.893L86 22.78c2.14 -0.193 3.107 1.167 3.107 3.693v57.547c0 2.53 -0.39 4.67 -3.883 4.863l-60.377 3.5c-3.493 0.193 -5.043 -0.97 -5.043 -4.083zm59.6 -54.827c0.387 1.75 0 3.5 -1.75 3.7l-2.91 0.577v42.773c-2.527 1.36 -4.853 2.137 -6.797 2.137 -3.107 0 -3.883 -0.973 -6.21 -3.887l-19.03 -29.94v28.967l6.02 1.363s0 3.5 -4.857 3.5l-13.39 0.777c-0.39 -0.78 0 -2.723 1.357 -3.11l3.497 -0.97v-38.3L30.48 40.667c-0.39 -1.75 0.58 -4.277 3.3 -4.473l14.367 -0.967 19.8 30.327v-26.83l-5.047 -0.58c-0.39 -2.143 1.163 -3.7 3.103 -3.89l13.4 -0.78z"/></svg>
+                                            <span class="settings-accordion-title">Notion</span>
+                                        </div>
+                                        <div class="settings-accordion-right">
+                                            <span id="notionStatusText" class="settings-status">未同步</span>
+                                            <svg class="settings-accordion-chevron" width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M4 6l4 4 4-4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                                        </div>
+                                    </summary>
+                                    <div class="settings-accordion-body">
+                                        <div class="settings-field">
+                                            <label class="settings-label">客户端编号</label>
+                                            <input type="text" id="notionClientId" class="filter-input" style="width: 100%;"
+                                                placeholder="输入客户端编号" />
+                                        </div>
+                                        <div class="settings-field">
+                                            <label class="settings-label">客户端密钥</label>
+                                            <input type="password" id="notionClientSecret" class="filter-input" style="width: 100%;"
+                                                placeholder="输入客户端密钥" />
+                                            <div class="settings-help">已保存的密钥不会回显，留空会保留当前值。</div>
+                                        </div>
+                                        <div class="settings-field">
+                                            <label class="settings-label">回调地址</label>
+                                            <input type="text" id="notionRedirectUri" class="filter-input" style="width: 100%;"
+                                                placeholder="http://localhost:8000/api/connect/notion/oauth/callback" />
+                                        </div>
+                                        <div class="settings-field">
+                                            <label class="settings-label">授权令牌</label>
+                                            <input type="password" id="notionApiToken" class="filter-input"
+                                                style="width: 100%; background: #f5f7fa;" placeholder="尚未授权" disabled />
+                                            <div class="settings-help">完成授权后自动保存。</div>
+                                        </div>
+                                        <div class="settings-actions">
+                                            <button id="connectNotionBtn" class="extract-btn"
+                                                style="width: 100%; background: #000; color: #fff;">连接 Notion</button>
+                                        </div>
+                                        <div class="settings-field">
+                                            <label class="settings-label">可用目标</label>
+                                            <div class="settings-row">
+                                                <select id="notionDbSelect" class="platform-select" style="flex: 1;">
+                                                    <option value="">先授权，再选择目标</option>
+                                                </select>
+                                                <button id="refreshNotionDbsBtn" class="extract-btn"
+                                                    style="padding: 0 14px; white-space: nowrap;">刷新</button>
+                                            </div>
+                                        </div>
+                                        <div class="settings-field">
+                                            <label class="settings-label">同步目标</label>
+                                            <input type="text" id="notionDbId" class="filter-input" style="width: 100%;"
+                                                placeholder="粘贴目标链接或编号" />
+                                            <div id="notionTargetHint" class="settings-help" style="color: #6b7280;">未选择目标</div>
                                         </div>
                                     </div>
-                                    <div id="componentsStatusText" class="settings-status">未安装</div>
-                                </div>
-                                <div id="componentsCatalogHint" class="settings-help" style="color: #6b7280;">正在加载组件清单...</div>
-                                <div id="componentsList" class="settings-components-list" aria-live="polite"></div>
-                            </div>
-                        </div>
-                        <div class="settings-group">
-                            <div class="settings-section" id="settingsSectionNotion">
-                                <div class="settings-section-head">
-                                    <div class="settings-section-head-main">
-                                        <span class="settings-section-mark" aria-hidden="true">03</span>
-                                        <div>
-                                            <h3>Notion</h3>
-                                            <div class="settings-section-copy">连上后直接选同步目标，减少多余配置。</div>
+                                </details>
+
+                                <details class="settings-accordion" id="settingsSectionObsidian">
+                                    <summary class="settings-accordion-trigger">
+                                        <div class="settings-accordion-lead">
+                                            <svg class="settings-section-icon" width="18" height="18" viewBox="0 0 256 256" fill="currentColor"><path d="M94.82 149.44c6.53-1.94 17.13-4.9 29.26-5.71a102.97 102.97 0 0 1-7.64-48.84c1.63-16.51 7.54-30.38 13.25-42.1l3.47-7.14 4.48-9.18c2.35-5 4.08-9.38 4.9-13.56.81-4.07.81-7.64-.2-11.11-1.03-3.47-3.07-7.14-7.15-11.21a17.02 17.02 0 0 0-15.8 3.77l-52.81 47.5a17.12 17.12 0 0 0-5.5 10.2l-4.5 30.18a149.26 149.26 0 0 1 38.24 57.2ZM54.45 106l-1.02 3.06-27.94 62.2a17.33 17.33 0 0 0 3.27 18.96l43.94 45.16a88.7 88.7 0 0 0 8.97-88.5A139.47 139.47 0 0 0 54.45 106Z"/><path d="m82.9 240.79 2.34.2c8.26.2 22.33 1.02 33.64 3.06 9.28 1.73 27.73 6.83 42.82 11.21 11.52 3.47 23.45-5.8 25.08-17.73 1.23-8.67 3.57-18.46 7.75-27.53a94.81 94.81 0 0 0-25.9-40.99 56.48 56.48 0 0 0-29.56-13.35 96.55 96.55 0 0 0-40.99 4.79 98.89 98.89 0 0 1-15.29 80.34h.1Z"/><path d="M201.87 197.76a574.87 574.87 0 0 0 19.78-31.6 8.67 8.67 0 0 0-.61-9.48 185.58 185.58 0 0 1-21.82-35.9c-5.91-14.16-6.73-36.08-6.83-46.69 0-4.07-1.22-8.05-3.77-11.21l-34.16-43.33c0 1.94-.4 3.87-.81 5.81a76.42 76.42 0 0 1-5.71 15.9l-4.7 9.8-3.36 6.72a111.95 111.95 0 0 0-12.03 38.23 93.9 93.9 0 0 0 8.67 47.92 67.9 67.9 0 0 1 39.56 16.52 99.4 99.4 0 0 1 25.8 37.31Z"/></svg>
+                                            <span class="settings-accordion-title">Obsidian</span>
+                                        </div>
+                                        <div class="settings-accordion-right">
+                                            <span id="obsidianStatusText" class="settings-status">未同步</span>
+                                            <svg class="settings-accordion-chevron" width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M4 6l4 4 4-4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                                        </div>
+                                    </summary>
+                                    <div class="settings-accordion-body">
+                                        <div class="settings-field">
+                                            <label class="settings-label">接口地址</label>
+                                            <input type="text" id="obsidianApiUrl" class="filter-input" style="width: 100%;"
+                                                placeholder="https://127.0.0.1:27124" />
+                                        </div>
+                                        <div class="settings-field">
+                                            <label class="settings-label">密钥</label>
+                                            <input type="password" id="obsidianApiKey" class="filter-input" style="width: 100%;"
+                                                placeholder="输入密钥" />
+                                            <div class="settings-help">已保存的密钥不会回显，留空会保留当前值。</div>
+                                        </div>
+                                        <div class="settings-field">
+                                            <label class="settings-label">写入文件夹</label>
+                                            <input type="text" id="obsidianFolderPath" class="filter-input" style="width: 100%;"
+                                                placeholder="例如：EverythingCapture/Inbox" />
+                                            <div class="settings-help">留空时写入当前库根目录。</div>
+                                            <div id="obsidianTargetHint" class="settings-help" style="color: #6b7280;">未设置写入位置</div>
+                                        </div>
+                                        <div class="settings-actions">
+                                            <button id="testObsidianBtn" class="extract-btn"
+                                                style="width: 100%; background: #0f172a; color: #fff;">验证 Obsidian</button>
                                         </div>
                                     </div>
-                                    <div id="notionStatusText" class="settings-status">未同步</div>
-                                </div>
-                                <div class="settings-field">
-                                    <label class="settings-label">客户端编号</label>
-                                    <input type="text" id="notionClientId" class="filter-input" style="width: 100%;"
-                                        placeholder="输入客户端编号" />
-                                </div>
-                                <div class="settings-field">
-                                    <label class="settings-label">客户端密钥</label>
-                                    <input type="password" id="notionClientSecret" class="filter-input" style="width: 100%;"
-                                        placeholder="输入客户端密钥" />
-                                    <div class="settings-help">已保存的密钥不会回显，留空会保留当前值。</div>
-                                </div>
-                                <div class="settings-field">
-                                    <label class="settings-label">回调地址</label>
-                                    <input type="text" id="notionRedirectUri" class="filter-input" style="width: 100%;"
-                                        placeholder="http://localhost:8000/api/connect/notion/oauth/callback" />
-                                </div>
-                                <div class="settings-field">
-                                    <label class="settings-label">授权令牌</label>
-                                    <input type="password" id="notionApiToken" class="filter-input"
-                                        style="width: 100%; background: #f5f7fa;" placeholder="尚未授权" disabled />
-                                    <div class="settings-help">完成授权后自动保存。</div>
-                                </div>
-                                <div class="settings-actions">
-                                    <button id="connectNotionBtn" class="extract-btn"
-                                        style="width: 100%; background: #000; color: #fff;">连接 Notion</button>
-                                </div>
-                                <div class="settings-field">
-                                    <label class="settings-label">可用目标</label>
-                                    <div class="settings-row">
-                                        <select id="notionDbSelect" class="platform-select" style="flex: 1;">
-                                            <option value="">先授权，再选择目标</option>
-                                        </select>
-                                        <button id="refreshNotionDbsBtn" class="extract-btn"
-                                            style="padding: 0 14px; white-space: nowrap;">刷新</button>
-                                    </div>
-                                </div>
-                                <div class="settings-field">
-                                    <label class="settings-label">同步目标</label>
-                                    <input type="text" id="notionDbId" class="filter-input" style="width: 100%;"
-                                        placeholder="粘贴目标链接或编号" />
-                                    <div id="notionTargetHint" class="settings-help" style="color: #6b7280;">未选择目标</div>
-                                </div>
-                            </div>
-                        </div>
-                        <div class="settings-group">
-                            <div class="settings-section" id="settingsSectionObsidian">
-                                <div class="settings-section-head">
-                                    <div class="settings-section-head-main">
-                                        <span class="settings-section-mark" aria-hidden="true">04</span>
-                                        <div>
-                                            <h3>Obsidian</h3>
-                                            <div class="settings-section-copy">设好接口和写入位置，笔记就会按当前格式同步进去。</div>
+                                </details>
+
+                                <details class="settings-accordion" id="settingsSectionSync">
+                                    <summary class="settings-accordion-trigger">
+                                        <div class="settings-accordion-lead">
+                                            <svg class="settings-section-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8"/><polyline points="16 6 12 2 8 6"/><line x1="12" y1="2" x2="12" y2="15"/></svg>
+                                            <span class="settings-accordion-title">同步行为</span>
+                                        </div>
+                                        <div class="settings-accordion-right">
+                                            <svg class="settings-accordion-chevron" width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M4 6l4 4 4-4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                                        </div>
+                                    </summary>
+                                    <div class="settings-accordion-body">
+                                        <div class="settings-field">
+                                            <label class="settings-label">保存后自动同步</label>
+                                            <select id="autoSyncTarget" class="platform-select" style="width: 100%;">
+                                                <option value="none">关闭</option>
+                                                <option value="notion">仅同步到 Notion</option>
+                                                <option value="obsidian">仅同步到 Obsidian</option>
+                                                <option value="both">同时同步到 Notion 和 Obsidian</option>
+                                            </select>
+                                        </div>
+                                        <div class="settings-field">
+                                            <label class="settings-label">批量补同步</label>
+                                            <div class="settings-bulk-actions">
+                                                <button id="syncAllNotionBtn" class="extract-btn settings-secondary" type="button" disabled>同步 Notion</button>
+                                                <button id="syncAllObsidianBtn" class="extract-btn settings-secondary" type="button" disabled>同步 Obsidian</button>
+                                            </div>
+                                            <div class="settings-help settings-bulk-help">只补齐和更新，不删除外部内容。</div>
                                         </div>
                                     </div>
-                                    <div id="obsidianStatusText" class="settings-status">未同步</div>
-                                </div>
-                                <div class="settings-field">
-                                    <label class="settings-label">接口地址</label>
-                                    <input type="text" id="obsidianApiUrl" class="filter-input" style="width: 100%;"
-                                        placeholder="https://127.0.0.1:27124" />
-                                </div>
-                                <div class="settings-field">
-                                    <label class="settings-label">密钥</label>
-                                    <input type="password" id="obsidianApiKey" class="filter-input" style="width: 100%;"
-                                        placeholder="输入密钥" />
-                                    <div class="settings-help">已保存的密钥不会回显，留空会保留当前值。</div>
-                                </div>
-                                <div class="settings-field">
-                                    <label class="settings-label">写入文件夹</label>
-                                    <input type="text" id="obsidianFolderPath" class="filter-input" style="width: 100%;"
-                                        placeholder="例如：EverythingCapture/Inbox" />
-                                    <div class="settings-help">留空时写入当前库根目录。</div>
-                                    <div id="obsidianTargetHint" class="settings-help" style="color: #6b7280;">未设置写入位置</div>
-                                </div>
-                                <div class="settings-actions">
-                                    <button id="testObsidianBtn" class="extract-btn"
-                                        style="width: 100%; background: #0f172a; color: #fff;">验证 Obsidian</button>
-                                </div>
-                            </div>
-                        </div>
-                        <div class="settings-group">
-                            <div class="settings-section" id="settingsSectionSync">
-                                <div class="settings-section-head">
-                                    <div class="settings-section-head-main">
-                                        <span class="settings-section-mark" aria-hidden="true">05</span>
-                                        <div>
-                                            <h3>同步</h3>
-                                            <div class="settings-section-copy">自动同步和一次性补同步放在一起，减少来回切换。</div>
-                                        </div>
-                                    </div>
-                                </div>
-                                <div class="settings-field">
-                                    <label class="settings-label">保存后自动同步</label>
-                                    <select id="autoSyncTarget" class="platform-select" style="width: 100%;">
-                                        <option value="none">关闭</option>
-                                        <option value="notion">仅同步到 Notion</option>
-                                        <option value="obsidian">仅同步到 Obsidian</option>
-                                        <option value="both">同时同步到 Notion 和 Obsidian</option>
-                                    </select>
-                                </div>
-                                <div class="settings-field">
-                                    <label class="settings-label">批量补同步</label>
-                                    <div class="settings-bulk-actions">
-                                        <button id="syncAllNotionBtn" class="extract-btn settings-secondary" type="button" disabled>同步 Notion</button>
-                                        <button id="syncAllObsidianBtn" class="extract-btn settings-secondary" type="button" disabled>同步 Obsidian</button>
-                                    </div>
-                                    <div class="settings-help settings-bulk-help">只补齐和更新，不删除外部内容。</div>
-                                </div>
+                                </details>
                             </div>
                         </div>
                     </div>

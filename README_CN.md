@@ -28,7 +28,7 @@
 
 | | 功能 | 说明 |
 |---|---|---|
-| 📥 | **多端采集** | 桌面浏览器扩展、手机网页、iOS 快捷指令、分享菜单 |
+| 📥 | **多端采集** | Web UI（粘贴链接或 ⌘K 命令面板）、服务端 URL 提取 API |
 | 📄 | **智能提取** | 文章正文、社交媒体（小红书、抖音、Twitter/X、微信公众号）、图片、视频 |
 | 💾 | **本地媒体存储** | 所有媒体（图片、视频、封面）下载到本地磁盘 |
 | 🔍 | **全文搜索** | SQLite FTS5 trigram 索引，中英文混合高速搜索 |
@@ -37,8 +37,8 @@
 | 🎙️ | **本地语音转录** | 设备端 mlx-whisper 语音转文字（Apple Silicon） |
 | 👁️ | **OCR 识别** | macOS Vision 框架提取图片文字 + 识别二维码 |
 | 📤 | **同步到 Notion/Obsidian** | 推送到你已有的知识管理工具 |
-| 📱 | **云端收件箱** | 部署轻量采集服务，手机随时投递链接 |
-| 🖥️ | **桌面应用** | macOS .app 打包，支持代码签名和公证 |
+| 📱 | **云端收件箱** | 可选 — 自行部署轻量采集服务，手机/快捷指令投递链接 |
+| 🖥️ | **桌面应用** | *开发中* — macOS .app 打包，支持代码签名和公证 |
 
 ## 快速开始
 
@@ -127,9 +127,9 @@ everything-capture/
 
 可通过环境变量覆盖：`DATA_DIR`、`SQLITE_PATH`、`MEDIA_DIR`、`EXPORTS_DIR`。
 
-## 手机端 / 云端采集
+## 手机端 / 云端采集（可选，需自行部署）
 
-部署轻量的 `capture_service/` 实现手机采集：
+如需从手机或 iOS 快捷指令采集，需自行部署轻量的 `capture_service/`：
 
 ```bash
 backend/venv/bin/python scripts/prepare_capture_vercel_deploy.py ./deploy_output

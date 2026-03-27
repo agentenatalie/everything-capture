@@ -28,7 +28,7 @@ Most "read-it-later" services store your data on their servers. Everything Captu
 
 | | Feature | Description |
 |---|---|---|
-| 📥 | **Multi-source capture** | Desktop browser extension, mobile web, iOS Shortcuts, Share Sheet |
+| 📥 | **Multi-source capture** | Web UI (paste URL or ⌘K command palette), server-side extraction API |
 | 📄 | **Smart extraction** | Articles, social posts (Xiaohongshu, Douyin, Twitter/X, WeChat), images, videos |
 | 💾 | **Local media storage** | All media (images, videos, covers) downloaded to your disk |
 | 🔍 | **Full-text search** | SQLite FTS5 trigram index for fast Chinese + English search |
@@ -37,8 +37,8 @@ Most "read-it-later" services store your data on their servers. Everything Captu
 | 🎙️ | **Local transcription** | On-device speech-to-text via mlx-whisper (Apple Silicon) |
 | 👁️ | **OCR** | Image text extraction + QR code detection via macOS Vision framework |
 | 📤 | **Sync to Notion/Obsidian** | Push items to your existing knowledge management tools |
-| 📱 | **Cloud inbox** | Deploy a lightweight capture service for mobile submissions |
-| 🖥️ | **Desktop app** | macOS .app bundle with PyInstaller, code-signed and notarized |
+| 📱 | **Cloud inbox** | Optional — deploy a lightweight capture service for mobile/Shortcuts submissions (self-hosted) |
+| 🖥️ | **Desktop app** | *Coming soon* — macOS .app bundle with PyInstaller, code-signed and notarized |
 
 ## Quick Start
 
@@ -127,9 +127,9 @@ All data lives **outside** the repo in a sibling directory:
 
 Override with env vars: `DATA_DIR`, `SQLITE_PATH`, `MEDIA_DIR`, `EXPORTS_DIR`.
 
-## Mobile / Cloud Capture
+## Mobile / Cloud Capture (Optional, Self-hosted)
 
-Deploy the lightweight `capture_service/` to capture from your phone:
+To capture from your phone or iOS Shortcuts, deploy the lightweight `capture_service/` yourself:
 
 ```bash
 backend/venv/bin/python scripts/prepare_capture_vercel_deploy.py ./deploy_output

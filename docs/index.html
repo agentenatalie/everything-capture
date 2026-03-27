@@ -97,17 +97,13 @@
   <div class="container">
     <div class="setup-header reveal">
       <div class="section-label">快速开始</div>
-      <h2 class="section-title">五行命令，跑起来</h2>
-      <p class="section-desc">只需要 Python 3 和一台 Mac。</p>
+      <h2 class="section-title">一行命令，跑起来</h2>
+      <p class="section-desc">自动安装所有依赖，什么都不用提前准备。</p>
     </div>
     <div class="setup-terminal reveal">
       <div class="setup-cmd-box" style="cursor:pointer" onclick="navigator.clipboard.writeText(document.getElementById('setup-code').textContent);var b=this.querySelector('.setup-copy-btn');b.classList.add('copied');clearTimeout(b._t);b._t=setTimeout(()=>b.classList.remove('copied'),2000)">
         <div class="setup-cmd-dots"><span></span><span></span><span></span></div>
-<pre class="setup-code" id="setup-code">git clone https://github.com/agentenatalie/everything-capture.git
-cd everything-capture
-python3 -m venv backend/venv
-backend/venv/bin/pip install -r requirements.txt
-./run</pre>
+<pre class="setup-code" id="setup-code">curl -O https://raw.githubusercontent.com/agentenatalie/everything-capture/main/setup.sh && bash setup.sh</pre>
         <span class="setup-copy-btn">
           <svg class="icon-copy" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
           <svg class="icon-check" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12.5l6 6L20 6"/></svg>
@@ -116,8 +112,8 @@ backend/venv/bin/pip install -r requirements.txt
     </div>
     <div class="setup-notes reveal">
       <div class="setup-note">
-        <strong>环境要求</strong>
-        <span>Python 3.9+、macOS 13.0+（Apple Silicon）、Git</span>
+        <strong>自动安装</strong>
+        <span>Python 3、ffmpeg、代码下载、依赖安装全自动完成</span>
       </div>
       <div class="setup-note">
         <strong>AI 功能</strong>

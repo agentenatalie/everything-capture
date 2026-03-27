@@ -122,10 +122,33 @@ cleanup() {
   cleanup_existing_worker
 }
 
+auto_update() {
+  if [[ "${EC_SKIP_UPDATE:-0}" == "1" ]]; then
+    return
+  fi
+  if [[ ! -d "$ROOT_DIR/.git" ]] || ! command -v git &>/dev/null; then
+    return
+  fi
+  echo "Checking for updates..."
+  git -C "$ROOT_DIR" fetch origin main --quiet 2>/dev/null || return 0
+  local LOCAL_HASH REMOTE_HASH
+  LOCAL_HASH="$(git -C "$ROOT_DIR" rev-parse HEAD 2>/dev/null)"
+  REMOTE_HASH="$(git -C "$ROOT_DIR" rev-parse origin/main 2>/dev/null)"
+  if [[ "$LOCAL_HASH" != "$REMOTE_HASH" ]]; then
+    echo "New version found, updating..."
+    git -C "$ROOT_DIR" pull origin main --quiet 2>/dev/null || { echo "Update failed, continuing with current version"; return 0; }
+    "$VENV_PYTHON" -m pip install -r "$ROOT_DIR/requirements.txt" --quiet 2>/dev/null || true
+    echo "Updated to latest version"
+  else
+    echo "Already up to date"
+  fi
+}
+
 cleanup_existing_server
 cleanup_existing_worker
 load_capture_service_env
 ensure_runtime_python
+auto_update
 
 trap cleanup EXIT INT TERM
 

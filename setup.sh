@@ -91,8 +91,9 @@ else
   echo "✅ ffmpeg 已安装"
 fi
 
-# 3. 下载代码（git > curl > wget）
+# 3. 下载或更新代码
 if [ ! -d "$REPO_DIR" ]; then
+  # 首次安装：下载代码（git > curl > wget）
   if command -v git &>/dev/null; then
     git clone "$REPO_URL"
   elif command -v curl &>/dev/null; then
@@ -110,15 +111,53 @@ if [ ! -d "$REPO_DIR" ]; then
     exit 1
   fi
 else
-  echo "✅ $REPO_DIR 已存在，跳过下载"
+  # 已存在：检查更新
+  echo "📂 $REPO_DIR 已存在，检查更新..."
+  cd "$REPO_DIR"
+  if [ -d .git ] && command -v git &>/dev/null; then
+    # git 仓库：直接 pull
+    LOCAL_HASH=$(git rev-parse HEAD)
+    git fetch origin main --quiet
+    REMOTE_HASH=$(git rev-parse origin/main)
+    if [ "$LOCAL_HASH" != "$REMOTE_HASH" ]; then
+      echo "🔄 发现新版本，正在更新..."
+      git pull origin main
+      echo "✅ 代码已更新到最新版本"
+      UPDATED=1
+    else
+      echo "✅ 已是最新版本"
+    fi
+  else
+    # 非 git 目录（之前用 zip 下载的）：重新下载覆盖
+    echo "🔄 重新下载最新版本..."
+    cd ..
+    if command -v curl &>/dev/null; then
+      curl -L "$REPO_URL/archive/refs/heads/main.zip" -o ec.zip
+    elif command -v wget &>/dev/null; then
+      wget "$REPO_URL/archive/refs/heads/main.zip" -O ec.zip
+    else
+      echo "⚠️  无法更新：需要 curl 或 wget"
+      cd "$REPO_DIR"
+      UPDATED=0
+    fi
+    if [ -f ec.zip ]; then
+      # 保留用户数据目录和 venv，只更新代码文件
+      unzip -o ec.zip
+      rsync -a --exclude='backend/venv' everything-capture-main/ "$REPO_DIR/"
+      rm -rf everything-capture-main ec.zip
+      echo "✅ 代码已更新到最新版本"
+      cd "$REPO_DIR"
+      UPDATED=1
+    fi
+  fi
 fi
 
-# 4. 创建虚拟环境 + 安装依赖
-cd "$REPO_DIR"
+# 4. 创建虚拟环境 + 安装/更新依赖
+cd "$REPO_DIR" 2>/dev/null || true
 if [ ! -d backend/venv ]; then
   python3 -m venv backend/venv
 fi
-backend/venv/bin/pip install -r requirements.txt
+backend/venv/bin/pip install -r requirements.txt --quiet
 
 # 5. 启动
 ./run

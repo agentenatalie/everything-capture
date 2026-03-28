@@ -80,6 +80,11 @@
             currentFolderId = scope === 'folder' ? folderId : null;
             renderFolderNavigation();
             fetchItems();
+            // Reload graph if graph view is active
+            if (currentView === 'graph') {
+                _graphLoaded = false;
+                if (typeof initGraph === 'function') initGraph();
+            }
         }
 
         function renderFolderNavItem(label, scope, count, folderId = null, options = {}) {

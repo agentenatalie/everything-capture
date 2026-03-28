@@ -1229,6 +1229,7 @@
         }
 
         function renderItems(entries, options = {}) {
+            if (currentView === 'graph') return;
             const { animate = false } = options;
             if (entries.length === 0) {
                 grid.className = currentView === 'gallery' ? 'grid' : 'list-view';
@@ -1267,7 +1268,18 @@
             currentView = view;
             galleryViewBtn.classList.toggle('active', view === 'gallery');
             listViewBtn.classList.toggle('active', view === 'list');
-            renderItems(filteredEntries);
+            graphViewBtn.classList.toggle('active', view === 'graph');
+
+            if (view === 'graph') {
+                grid.style.display = 'none';
+                graphContainer.style.display = 'block';
+                if (typeof initGraph === 'function') initGraph();
+            } else {
+                grid.style.display = '';
+                graphContainer.style.display = 'none';
+                if (typeof destroyGraph === 'function') destroyGraph();
+                renderItems(filteredEntries);
+            }
         }
 
         filterInput.addEventListener('input', scheduleLibrarySearch);
@@ -1277,6 +1289,7 @@
         });
         galleryViewBtn.addEventListener('click', () => setView('gallery'));
         listViewBtn.addEventListener('click', () => setView('list'));
+        graphViewBtn.addEventListener('click', () => setView('graph'));
         createFolderBtn.addEventListener('click', () => openCreateFolderPrompt());
         mobileFolderPickerBtn?.addEventListener('click', () => openMobileCaptureFolderPicker());
         folderSearchInput.addEventListener('input', (e) => {

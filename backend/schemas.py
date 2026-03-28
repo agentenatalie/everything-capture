@@ -59,6 +59,26 @@ class ItemResponse(BaseModel):
     class Config:
         from_attributes = True
 
+class GraphNode(BaseModel):
+    id: str
+    title: str
+    platform: str
+    folder_ids: list[str] = Field(default_factory=list)
+    folder_names: list[str] = Field(default_factory=list)
+    media_url: Optional[str] = None
+    created_at: datetime
+
+class GraphEdge(BaseModel):
+    source: str
+    target: str
+    score: float = 0.0
+
+class GraphResponse(BaseModel):
+    nodes: list[GraphNode]
+    edges: list[GraphEdge]
+    folders: list[dict]
+
+
 class NotionConnectRequest(BaseModel):
     token: str
 

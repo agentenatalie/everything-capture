@@ -33,6 +33,10 @@
         const platformFilter = document.getElementById('platformFilter');
         const galleryViewBtn = document.getElementById('galleryViewBtn');
         const listViewBtn = document.getElementById('listViewBtn');
+        const graphViewBtn = document.getElementById('graphViewBtn');
+        const graphContainer = document.getElementById('graphContainer');
+        const graphCanvas = document.getElementById('graphCanvas');
+        const graphTooltip = document.getElementById('graphTooltip');
         const folderList = document.getElementById('folderList');
         const folderMobileStrip = document.getElementById('folderMobileStrip');
         const createFolderBtn = document.getElementById('createFolderBtn');

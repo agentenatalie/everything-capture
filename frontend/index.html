@@ -138,6 +138,7 @@
                         <div class="view-switch">
                             <button class="view-btn active" id="galleryViewBtn" type="button" title="画廊"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/></svg></button>
                             <button class="view-btn" id="listViewBtn" type="button" title="列表"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg></button>
+                            <button class="view-btn" id="graphViewBtn" type="button" title="关系图"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="5" cy="6" r="2.5"/><circle cx="19" cy="6" r="2.5"/><circle cx="5" cy="18" r="2.5"/><circle cx="19" cy="18" r="2.5"/><circle cx="12" cy="12" r="2.5"/><line x1="7" y1="7" x2="10" y2="11"/><line x1="14" y1="11" x2="17" y2="7"/><line x1="7" y1="17" x2="10" y2="13"/><line x1="14" y1="13" x2="17" y2="17"/></svg></button>
                         </div>
                         <div class="stats is-plain" id="stats">加载中...</div>
                     </div>
@@ -167,6 +168,20 @@
                     <div class="card skeleton-card"><div class="skeleton skeleton-cover"></div><div class="skeleton-content"><div class="skeleton skeleton-meta"></div><div class="skeleton skeleton-title"></div><div class="skeleton skeleton-tags"></div></div></div>
                     <div class="card skeleton-card"><div class="skeleton skeleton-cover"></div><div class="skeleton-content"><div class="skeleton skeleton-meta"></div><div class="skeleton skeleton-title"></div><div class="skeleton skeleton-title-short"></div><div class="skeleton skeleton-tags"></div></div></div>
                     <div class="card skeleton-card"><div class="skeleton skeleton-cover"></div><div class="skeleton-content"><div class="skeleton skeleton-meta"></div><div class="skeleton skeleton-title"></div><div class="skeleton skeleton-tags"></div></div></div>
+                </div>
+                <div id="graphContainer" class="graph-container" style="display:none;">
+                    <canvas id="graphCanvas"></canvas>
+                    <div class="graph-tooltip" id="graphTooltip"></div>
+                    <div class="graph-node-panel" id="graphNodePanel"></div>
+                    <div class="graph-search-wrapper" id="graphSearchWrapper">
+                        <div class="graph-search" id="graphSearch">
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><circle cx="10.5" cy="10.5" r="7"/><line x1="15.5" y1="15.5" x2="21" y2="21"/></svg>
+                            <input id="graphSearchInput" type="text" placeholder="搜索文章或概念…" autocomplete="off" spellcheck="false">
+                            <span id="graphSearchCount" class="graph-search-count"></span>
+                        </div>
+                        <div class="graph-search-results" id="graphSearchResults"></div>
+                    </div>
+                    <div class="graph-legend" id="graphLegend"></div>
                 </div>
             </section>
         </div>
@@ -582,13 +597,15 @@
         </div>
     </div>
 
-    <script src="js/app-core.js?v=20260325v1"></script>
+    <script src="https://cdn.jsdelivr.net/npm/d3@7/dist/d3.min.js"></script>
+    <script src="js/app-core.js?v=20260327v1"></script>
     <script src="js/app-settings.js?v=20260325v1"></script>
     <script src="js/app-command.js?v=20260325v1"></script>
     <script src="js/app-folders.js?v=20260325v1"></script>
     <script src="js/app-content.js?v=20260325v1"></script>
-    <script src="js/app-items.js?v=20260326v1"></script>
-    <script src="js/app-ai.js?v=20260326v1"></script>
+    <script src="js/app-items.js?v=20260327v1"></script>
+    <script src="js/app-graph.js?v=20260327v1"></script>
+    <script src="js/app-ai.js?v=20260327v1"></script>
 </body>
 
 </html>

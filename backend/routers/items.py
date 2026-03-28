@@ -20,6 +20,9 @@ from models import AiConversation, Folder, Highlight, Item, ItemFolderLink, Item
 from schemas import (
     BulkFolderUpdateRequest,
     BulkFolderUpdateResponse,
+    GraphEdge,
+    GraphNode,
+    GraphResponse,
     HighlightCreateRequest,
     HighlightListResponse,
     HighlightResponse,
@@ -835,6 +838,110 @@ def search_with_fts5(db: Session, user_id: str, query: str, limit: int = 1000):
     except Exception as exc:
         logger.warning("FTS5 search failed for query %r: %s", query, exc)
         return []
+
+
+@router.get("/items/graph", response_model=GraphResponse)
+def get_items_graph(
+    folder_id: str | None = None,
+    db: Session = Depends(get_db),
+):
+    """Return nodes and edges based on content similarity (TF-IDF cosine)."""
+    import math
+    from services.knowledge_base import extract_terms
+
+    user_id = get_current_user_id()
+
+    query = db.query(Item).filter(Item.user_id == user_id)
+    if folder_id:
+        query = query.join(ItemFolderLink).filter(ItemFolderLink.folder_id == folder_id)
+    items_list = query.order_by(Item.created_at.desc()).limit(500).all()
+
+    # Build nodes + TF-IDF vectors
+    nodes: list[GraphNode] = []
+    vectors: list[dict[str, float]] = []
+    norms: list[float] = []
+
+    for item in items_list:
+        links = sorted(
+            [l for l in (item.folder_links or []) if l.folder],
+            key=lambda l: (l.created_at or datetime.min),
+        )
+        first_image = next(
+            (m for m in sorted(item.media or [], key=lambda x: x.display_order)
+             if m.type in ("image", "cover")),
+            None,
+        )
+        nodes.append(GraphNode(
+            id=item.id,
+            title=item.title or "无标题",
+            platform=item.platform or "unknown",
+            folder_ids=[l.folder_id for l in links],
+            folder_names=[l.folder.name for l in links if l.folder],
+            media_url=(f"/static/{first_image.local_path}"
+                       if first_image and first_image.local_path else None),
+            created_at=item.created_at,
+        ))
+
+        # Build weighted term vector
+        weights: dict[str, float] = {}
+        for term in extract_terms(item.title or ""):
+            weights[term] = weights.get(term, 0.0) + 3.0
+        # Use first 500 chars of text for speed
+        text_snippet = (item.canonical_text or "")[:500]
+        for term in extract_terms(text_snippet):
+            weights[term] = weights.get(term, 0.0) + 1.0
+        for term in extract_terms(item.platform or ""):
+            weights[term] = weights.get(term, 0.0) + 0.5
+
+        vectors.append(weights)
+        norm = math.sqrt(sum(v * v for v in weights.values())) if weights else 0.0
+        norms.append(norm)
+
+    # Compute pairwise cosine similarity, keep top edges per node
+    SIMILARITY_THRESHOLD = 0.15
+    MAX_EDGES_PER_NODE = 5
+    n = len(nodes)
+    edge_counts: dict[int, int] = {i: 0 for i in range(n)}
+    edges: list[GraphEdge] = []
+    # Collect all candidate pairs with scores, then keep best
+    candidates: list[tuple[float, int, int]] = []
+
+    for i in range(n):
+        if norms[i] <= 0:
+            continue
+        vi = vectors[i]
+        ni = norms[i]
+        for j in range(i + 1, n):
+            if norms[j] <= 0:
+                continue
+            # Cosine similarity (iterate smaller vector)
+            a, b = (vi, vectors[j]) if len(vi) <= len(vectors[j]) else (vectors[j], vi)
+            dot = 0.0
+            for term, w in a.items():
+                dot += w * b.get(term, 0.0)
+            if dot <= 0:
+                continue
+            score = dot / (ni * norms[j])
+            if score >= SIMILARITY_THRESHOLD:
+                candidates.append((score, i, j))
+
+    # Sort by score descending, greedily pick edges respecting per-node limit
+    candidates.sort(key=lambda x: -x[0])
+    for score, i, j in candidates:
+        if edge_counts[i] >= MAX_EDGES_PER_NODE or edge_counts[j] >= MAX_EDGES_PER_NODE:
+            continue
+        edges.append(GraphEdge(
+            source=nodes[i].id,
+            target=nodes[j].id,
+            score=round(score, 3),
+        ))
+        edge_counts[i] += 1
+        edge_counts[j] += 1
+
+    all_folders = db.query(Folder).filter(Folder.user_id == user_id).all()
+    folder_list = [{"id": f.id, "name": f.name} for f in all_folders]
+
+    return GraphResponse(nodes=nodes, edges=edges, folders=folder_list)
 
 
 @router.get("/items/search-suggestions")

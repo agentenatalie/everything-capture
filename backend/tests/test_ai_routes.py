@@ -24,7 +24,6 @@ from security import encrypt_secret  # noqa: E402
 from services.knowledge_base import KnowledgeBaseNote, KnowledgeBaseSnapshot, prepare_note_for_similarity  # noqa: E402
 from database import Base  # noqa: E402
 
-# ai.py now uses _build_items_only_snapshot instead of load_knowledge_base_snapshot
 _SNAPSHOT_FUNC = "_build_items_only_snapshot"
 
 
@@ -112,14 +111,40 @@ class AiRouteTests(unittest.TestCase):
             loaded_at=datetime.utcnow(),
         )
 
+    def _make_rag_context(
+        self,
+        *,
+        insufficient_context: bool = False,
+        note_count: int = 2,
+    ) -> ai_router.RagGroundedContext:
+        snapshot = self._make_snapshot()
+        ranked_notes = [
+            (snapshot.notes[0], 0.98),
+            (snapshot.notes[1], 0.91),
+        ]
+        return ai_router.RagGroundedContext(
+            context_text=(
+                "[1] 标题: AI 写的 UI 太丑？这个 Skill 救了我\n"
+                "[1] 摘要: impeccable 插件让 AI 生成 UI 从能用升级到专业美观\n"
+                "[1] 相关片段1: AI 做 UI 的问题在于缺少设计规范和系统性打磨。\n\n"
+                "[2] 标题: Vibe Coding 的时候不知道怎么描述 UI？\n"
+                "[2] 摘要: Component Gallery 让提示词准确描述 UI 组件\n"
+                "[2] 相关片段1: 可以直接看不同设计系统里的真实组件。"
+            ),
+            ranked_notes=ranked_notes,
+            note_count=note_count,
+            insufficient_context=insufficient_context,
+            retrieval_mode="semantic",
+        )
+
     def test_ask_ai_returns_answer_and_citations(self) -> None:
         request = AiAskRequest(question="我之前保存过哪些关于 AI UI 设计的内容？", top_k=4)
 
         with self.Session() as db:
             with patch.object(ai_router, "get_current_user_id", return_value="local-default-user"), patch.object(
                 ai_router,
-                _SNAPSHOT_FUNC,
-                return_value=self._make_snapshot(),
+                "_retrieve_rag_context",
+                return_value=self._make_rag_context(),
             ), patch.object(
                 ai_router,
                 "chat_completion",
@@ -167,8 +192,8 @@ class AiRouteTests(unittest.TestCase):
         with self.Session() as db:
             with patch.object(ai_router, "get_current_user_id", return_value="local-default-user"), patch.object(
                 ai_router,
-                _SNAPSHOT_FUNC,
-                return_value=self._make_snapshot(),
+                "_retrieve_rag_context",
+                return_value=self._make_rag_context(),
             ), patch.object(
                 ai_router,
                 "chat_completion",
@@ -197,8 +222,14 @@ class AiRouteTests(unittest.TestCase):
         with self.Session() as db:
             with patch.object(ai_router, "get_current_user_id", return_value="local-default-user"), patch.object(
                 ai_router,
-                _SNAPSHOT_FUNC,
-                return_value=self._make_snapshot(),
+                "_retrieve_rag_context",
+                return_value=ai_router.RagGroundedContext(
+                    context_text="[1] 标题: AI 写的 UI 太丑？这个 Skill 救了我\n[1] 相关片段1: AI 做 UI 的问题在于缺少设计规范。",
+                    ranked_notes=[(self._make_snapshot().notes[0], 0.99)],
+                    note_count=1,
+                    insufficient_context=False,
+                    retrieval_mode="semantic",
+                ),
             ), patch.object(
                 ai_router,
                 "chat_completion",
@@ -393,8 +424,8 @@ class AiRouteTests(unittest.TestCase):
         with self.Session() as db:
             with patch.object(ai_router, "get_current_user_id", return_value="local-default-user"), patch.object(
                 ai_router,
-                _SNAPSHOT_FUNC,
-                return_value=self._make_snapshot(),
+                "_retrieve_rag_context",
+                return_value=self._make_rag_context(),
             ), patch.object(
                 ai_router,
                 "chat_completion",
@@ -404,6 +435,64 @@ class AiRouteTests(unittest.TestCase):
 
         self.assertEqual(response.mode, "chat")
         self.assertEqual(response.citations, [])
+
+    def test_retrieve_rag_context_builds_grounded_context_from_ranked_chunks(self) -> None:
+        snapshot = self._make_snapshot()
+
+        async def fake_embed_texts(ai_config, texts):
+            vectors: list[list[float]] = []
+            for text in texts:
+                normalized = text.lower()
+                if "impeccable" in normalized or "ai 写的 ui 太丑" in normalized:
+                    vectors.append([1.0, 0.0])
+                elif "component gallery" in normalized:
+                    vectors.append([0.7, 0.3])
+                else:
+                    vectors.append([0.1, 0.9])
+            return vectors
+
+        async def fake_embed_query(ai_config, text):
+            self.assertIn("AI UI", text)
+            return [1.0, 0.0]
+
+        async def fake_rerank(ai_config, *, question, candidates, limit):
+            self.assertIn("AI UI", question)
+            return candidates[:limit]
+
+        with self.Session() as db:
+            with patch.object(ai_router, _SNAPSHOT_FUNC, return_value=snapshot), patch.object(
+                ai_router,
+                "_embed_texts",
+                side_effect=fake_embed_texts,
+            ), patch.object(
+                ai_router,
+                "_embed_query",
+                side_effect=fake_embed_query,
+            ), patch.object(
+                ai_router,
+                "_ai_rerank_chunks",
+                side_effect=fake_rerank,
+            ):
+                rag_context = asyncio.run(
+                    ai_router._retrieve_rag_context(
+                        db=db,
+                        user_id="local-default-user",
+                        ai_config={
+                            "api_key": "test-ai-key",
+                            "base_url": "https://api.example.com/v1",
+                            "model": "test-model",
+                            "embedding_model": "test-embedding-model",
+                        },
+                        question="我之前保存过哪些关于 AI UI 设计的内容？",
+                        top_k=4,
+                    )
+                )
+
+        self.assertFalse(rag_context.insufficient_context)
+        self.assertEqual(rag_context.retrieval_mode, "semantic")
+        self.assertEqual(rag_context.ranked_notes[0][0].title, "AI 写的 UI 太丑？这个 Skill 救了我")
+        self.assertIn("[1] 标题: AI 写的 UI 太丑？这个 Skill 救了我", rag_context.context_text)
+        self.assertIn("相关片段1", rag_context.context_text)
 
     def test_assistant_agent_returns_updated_items_for_mutations(self) -> None:
         request = AiAssistantRequest(

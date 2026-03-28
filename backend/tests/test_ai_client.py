@@ -25,6 +25,15 @@ class _FakeResponse:
         raise json.JSONDecodeError("Expecting value", self.text, 0)
 
 
+class _JsonResponse(_FakeResponse):
+    def __init__(self, *, status_code: int, payload: dict, reason_phrase: str = "OK") -> None:
+        super().__init__(status_code=status_code, text=json.dumps(payload), reason_phrase=reason_phrase)
+        self._payload = payload
+
+    def json(self):
+        return self._payload
+
+
 class _FakeAsyncClient:
     def __init__(self, response: _FakeResponse, **kwargs) -> None:
         self._response = response
@@ -71,3 +80,26 @@ class AiClientTests(unittest.TestCase):
                 )
 
         self.assertEqual(str(ctx.exception), "upstream overloaded")
+
+    def test_create_embeddings_returns_vectors_sorted_by_index(self) -> None:
+        response = _JsonResponse(
+            status_code=200,
+            payload={
+                "data": [
+                    {"index": 1, "embedding": [0.1, 0.2, 0.3]},
+                    {"index": 0, "embedding": [0.9, 0.8, 0.7]},
+                ]
+            },
+        )
+
+        with patch.object(ai_client.httpx, "AsyncClient", side_effect=lambda **kwargs: _FakeAsyncClient(response, **kwargs)):
+            vectors = asyncio.run(
+                ai_client.create_embeddings(
+                    api_key="test-key",
+                    base_url="https://api.example.com/v1",
+                    model="test-embedding-model",
+                    inputs=["first", "second"],
+                )
+            )
+
+        self.assertEqual(vectors, [[0.9, 0.8, 0.7], [0.1, 0.2, 0.3]])

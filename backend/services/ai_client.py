@@ -19,6 +19,17 @@ def _chat_completion_url(base_url: str) -> str:
     return f"{cleaned}/chat/completions"
 
 
+def _embeddings_url(base_url: str) -> str:
+    cleaned = (base_url or "").strip().rstrip("/")
+    if not cleaned:
+        raise AiClientError("AI base URL is empty")
+    if cleaned.endswith("/embeddings"):
+        return cleaned
+    if cleaned.endswith("/chat/completions"):
+        return f"{cleaned[: -len('/chat/completions')]}/embeddings"
+    return f"{cleaned}/embeddings"
+
+
 def extract_assistant_message(payload: dict[str, Any]) -> dict[str, Any]:
     choices = payload.get("choices") or []
     if not choices:
@@ -124,6 +135,67 @@ async def create_chat_completion(
         raise AiClientError(detail_text or "AI request failed")
 
     return response_payload
+
+
+async def create_embeddings(
+    *,
+    api_key: str,
+    base_url: str,
+    model: str,
+    inputs: list[str] | str,
+    timeout_seconds: float = 60.0,
+) -> list[list[float]]:
+    url = _embeddings_url(base_url)
+    headers = {
+        "Authorization": f"Bearer {api_key}",
+        "Content-Type": "application/json",
+    }
+    payload: dict[str, Any] = {
+        "model": model,
+        "input": inputs,
+        "encoding_format": "float",
+    }
+
+    try:
+        async with httpx.AsyncClient(timeout=timeout_seconds) as client:
+            response = await client.post(url, headers=headers, json=payload)
+    except httpx.HTTPError as exc:
+        raise AiClientError(f"AI embeddings request failed: {exc}") from exc
+
+    response_text = (response.text or "").strip()
+    try:
+        response_payload = response.json()
+    except json.JSONDecodeError as exc:
+        detail_text = response_text or response.reason_phrase or "AI embeddings request failed"
+        raise AiClientError(detail_text if not response.is_success else "AI embeddings returned a non-JSON response") from exc
+
+    if not response.is_success:
+        detail = response_payload.get("error")
+        if isinstance(detail, dict):
+            detail = detail.get("message")
+        detail_text = str(detail or response.text or response.reason_phrase).strip()
+        raise AiClientError(detail_text or "AI embeddings request failed")
+
+    raw_data = response_payload.get("data")
+    if not isinstance(raw_data, list) or not raw_data:
+        raise AiClientError("AI embeddings response did not include data")
+
+    ordered = sorted(
+        (entry for entry in raw_data if isinstance(entry, dict)),
+        key=lambda entry: int(entry.get("index", 0)),
+    )
+    embeddings: list[list[float]] = []
+    for entry in ordered:
+        embedding = entry.get("embedding")
+        if not isinstance(embedding, list) or not embedding:
+            raise AiClientError("AI embeddings response included an invalid embedding")
+        try:
+            vector = [float(value) for value in embedding]
+        except (TypeError, ValueError) as exc:
+            raise AiClientError("AI embeddings response included a non-numeric embedding") from exc
+        embeddings.append(vector)
+
+    return embeddings
 
 
 async def chat_completion(

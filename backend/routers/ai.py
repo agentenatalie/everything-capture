@@ -1,10 +1,13 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
+import math
 import os
 import re
 import uuid
+from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any, Optional
 
@@ -38,6 +41,7 @@ from security import decrypt_secret
 from services.ai_client import (
     AiClientError,
     chat_completion,
+    create_embeddings,
     create_chat_completion,
     extract_assistant_message,
     extract_message_text,
@@ -62,6 +66,7 @@ from services.knowledge_base import (
     KnowledgeBaseNote,
     KnowledgeBaseSnapshot,
     expand_query_from_top_results,
+    extract_terms,
     prepare_note_for_similarity,
     rank_notes_for_expanded_queries,
     rank_related_notes,
@@ -77,6 +82,17 @@ _CHAT_HISTORY_LIMIT = 10
 _SAVED_CHAT_HISTORY_LIMIT = 120
 _AGENT_TOOL_STEP_LIMIT = 10
 
+_RAG_CHUNK_CHAR_LIMIT = 1100
+_RAG_CHUNK_OVERLAP_CHAR_LIMIT = 180
+_RAG_MAX_CHUNKS_PER_NOTE = 12
+_RAG_VECTOR_CANDIDATE_MULTIPLIER = 4
+_RAG_VECTOR_MIN_CANDIDATES = 10
+_RAG_MAX_SNIPPETS_PER_NOTE = 2
+_RAG_EMBED_BATCH_SIZE = 24
+_RAG_CONTEXT_SNIPPET_LIMIT = 420
+
+_SEMANTIC_INDEX_CACHE: dict[str, tuple[str, "SemanticChunkIndex"]] = {}
+
 # ── Computer command approval system ──────────────────────────────────
 _pending_approvals: dict[str, dict[str, Any]] = {}
 _APPROVAL_EXPIRY_SECONDS = 600  # 10 minutes
@@ -87,6 +103,37 @@ _COMPUTER_CMD_BANNED_PATTERNS = [
     "sudo rm", "mkfs", "dd if=", "> /dev/",
     ":(){ :|:& };:",  # fork bomb
 ]
+
+
+@dataclass
+class SemanticChunk:
+    chunk_id: str
+    note: KnowledgeBaseNote
+    text: str
+    title: str
+    summary: str
+    chunk_index: int
+    total_chunks: int
+    term_weights: dict[str, float] = field(default_factory=dict, repr=False)
+    term_norm: float = field(default=0.0, repr=False)
+
+
+@dataclass
+class SemanticChunkIndex:
+    chunks: list[SemanticChunk]
+    embeddings: list[list[float]] = field(default_factory=list, repr=False)
+    mode: str = "lexical"
+    embedding_model: str | None = None
+    loaded_at: datetime = field(default_factory=datetime.utcnow)
+
+
+@dataclass
+class RagGroundedContext:
+    context_text: str
+    ranked_notes: list[tuple[KnowledgeBaseNote, float]]
+    note_count: int
+    insufficient_context: bool
+    retrieval_mode: str
 
 
 def _clean_optional_string(value: object | None) -> str | None:
@@ -121,6 +168,11 @@ def _resolve_ai_config(settings: Settings | None) -> dict[str, str]:
     api_key = _get_setting_secret(settings, "ai_api_key")
     base_url = _clean_optional_string(settings.ai_base_url if settings else None) or _clean_optional_string(AI_DEFAULT_BASE_URL)
     model = _clean_optional_string(settings.ai_model if settings else None) or AI_DEFAULT_MODEL
+    embedding_model = (
+        _clean_optional_string(getattr(settings, "ai_embedding_model", None) if settings else None)
+        or _clean_optional_string(os.getenv("AI_EMBEDDING_MODEL"))
+        or "text-embedding-3-small"
+    )
     missing_fields: list[str] = []
     if not api_key:
         missing_fields.append("ai_api_key")
@@ -132,6 +184,7 @@ def _resolve_ai_config(settings: Settings | None) -> dict[str, str]:
         "api_key": api_key,
         "base_url": base_url,
         "model": model,
+        "embedding_model": embedding_model,
     }
 
 
@@ -988,6 +1041,565 @@ def _build_full_items_index(db: Session, user_id: str) -> tuple[str, list[Knowle
         indexed.append(note)
 
     return "\n".join(lines), indexed
+
+
+def _semantic_chunk_signature(snapshot: KnowledgeBaseSnapshot) -> str:
+    digest = hashlib.sha1()
+    for note in snapshot.notes:
+        digest.update((note.note_id or "").encode("utf-8", errors="ignore"))
+        digest.update(b"|")
+        digest.update((note.title or "").encode("utf-8", errors="ignore"))
+        digest.update(b"|")
+        digest.update((note.summary or "").encode("utf-8", errors="ignore"))
+        digest.update(b"|")
+        digest.update(str(len(note.body or "")).encode("ascii"))
+        digest.update(b"|")
+        digest.update(str(len(note.extracted_text or "")).encode("ascii"))
+        digest.update(b"|")
+        digest.update(str(note.created_at.isoformat() if note.created_at else "").encode("utf-8", errors="ignore"))
+        digest.update(b"\n")
+    return digest.hexdigest()
+
+
+def _split_oversized_text(text: str, limit: int) -> list[str]:
+    normalized = _normalize_multiline_text(text)
+    if not normalized:
+        return []
+    if len(normalized) <= limit:
+        return [normalized]
+
+    parts = re.split(r"(?<=[。！？!?\.])\s+|\n", normalized)
+    segments: list[str] = []
+    for raw_part in parts:
+        part = raw_part.strip()
+        if not part:
+            continue
+        if len(part) <= limit:
+            segments.append(part)
+            continue
+        start = 0
+        while start < len(part):
+            chunk = part[start : start + limit].strip()
+            if chunk:
+                segments.append(chunk)
+            start += limit
+    return segments
+
+
+def _split_text_into_semantic_chunks(
+    text: str,
+    *,
+    limit: int = _RAG_CHUNK_CHAR_LIMIT,
+    overlap: int = _RAG_CHUNK_OVERLAP_CHAR_LIMIT,
+) -> list[str]:
+    normalized = _normalize_multiline_text(text)
+    if not normalized:
+        return []
+    if len(normalized) <= limit:
+        return [normalized]
+
+    raw_paragraphs = [paragraph.strip() for paragraph in re.split(r"\n{2,}", normalized) if paragraph.strip()]
+    paragraphs: list[str] = []
+    for paragraph in raw_paragraphs:
+        if len(paragraph) <= limit:
+            paragraphs.append(paragraph)
+            continue
+        paragraphs.extend(_split_oversized_text(paragraph, limit))
+
+    chunks: list[str] = []
+    current_parts: list[str] = []
+    current_len = 0
+
+    for paragraph in paragraphs:
+        paragraph_len = len(paragraph) + (2 if current_parts else 0)
+        if current_parts and current_len + paragraph_len > limit:
+            chunk_text = "\n\n".join(current_parts).strip()
+            if chunk_text:
+                chunks.append(chunk_text)
+            overlap_text = chunk_text[-overlap:].strip() if overlap > 0 else ""
+            current_parts = [overlap_text] if overlap_text else []
+            current_len = len(overlap_text)
+
+        if current_parts and current_parts[-1] != paragraph and current_len + len(paragraph) + 2 <= limit:
+            current_parts.append(paragraph)
+            current_len += len(paragraph) + 2
+        elif not current_parts:
+            current_parts = [paragraph]
+            current_len = len(paragraph)
+        else:
+            chunk_text = "\n\n".join(current_parts).strip()
+            if chunk_text and (not chunks or chunks[-1] != chunk_text):
+                chunks.append(chunk_text)
+            current_parts = [paragraph]
+            current_len = len(paragraph)
+
+    if current_parts:
+        chunk_text = "\n\n".join(current_parts).strip()
+        if chunk_text and (not chunks or chunks[-1] != chunk_text):
+            chunks.append(chunk_text)
+
+    deduped: list[str] = []
+    seen: set[str] = set()
+    for chunk in chunks:
+        key = chunk.strip()
+        if not key or key in seen:
+            continue
+        seen.add(key)
+        deduped.append(key)
+    return deduped
+
+
+def _build_note_source_text(note: KnowledgeBaseNote) -> str:
+    sections: list[str] = []
+    seen: set[str] = set()
+    for raw_value in (note.summary, note.excerpt, note.body, note.extracted_text):
+        value = _normalize_multiline_text(raw_value)
+        if not value:
+            continue
+        fingerprint = value.lower()
+        if fingerprint in seen:
+            continue
+        seen.add(fingerprint)
+        sections.append(value)
+    if not sections and note.title:
+        sections.append(note.title.strip())
+    return "\n\n".join(sections).strip()
+
+
+def _add_weighted_chunk_terms(bucket: dict[str, float], text: str, weight: float) -> None:
+    for term in extract_terms(text):
+        bucket[term] = bucket.get(term, 0.0) + weight
+
+
+def _vector_norm(values: dict[str, float]) -> float:
+    return math.sqrt(sum(value * value for value in values.values()))
+
+
+def _lexical_cosine(left: dict[str, float], left_norm: float, right: dict[str, float], right_norm: float) -> float:
+    if not left or not right or left_norm <= 0 or right_norm <= 0:
+        return 0.0
+    dot = 0.0
+    if len(left) > len(right):
+        left, right = right, left
+    for key, value in left.items():
+        dot += value * right.get(key, 0.0)
+    if dot <= 0:
+        return 0.0
+    return dot / (left_norm * right_norm)
+
+
+def _build_chunk_term_weights(chunk: SemanticChunk) -> dict[str, float]:
+    weights: dict[str, float] = {}
+    _add_weighted_chunk_terms(weights, chunk.title, 3.2)
+    _add_weighted_chunk_terms(weights, chunk.summary, 2.4)
+    _add_weighted_chunk_terms(weights, " ".join(chunk.note.tags or []), 1.8)
+    _add_weighted_chunk_terms(weights, chunk.note.folder or "", 0.9)
+    _add_weighted_chunk_terms(weights, chunk.text, 1.0)
+    return weights
+
+
+def _build_semantic_chunks(snapshot: KnowledgeBaseSnapshot) -> list[SemanticChunk]:
+    chunks: list[SemanticChunk] = []
+    for note in snapshot.notes:
+        source_text = _build_note_source_text(note)
+        chunk_texts = _split_text_into_semantic_chunks(source_text)[:_RAG_MAX_CHUNKS_PER_NOTE]
+        total_chunks = max(1, len(chunk_texts))
+        if not chunk_texts:
+            chunk_texts = [note.summary or note.excerpt or note.title]
+        for index, chunk_text in enumerate(chunk_texts, start=1):
+            chunk = SemanticChunk(
+                chunk_id=f"{note.note_id}::chunk::{index}",
+                note=note,
+                text=chunk_text,
+                title=note.title,
+                summary=note.summary,
+                chunk_index=index,
+                total_chunks=total_chunks,
+            )
+            chunk.term_weights = _build_chunk_term_weights(chunk)
+            chunk.term_norm = _vector_norm(chunk.term_weights)
+            chunks.append(chunk)
+    return chunks
+
+
+def _chunk_embedding_text(chunk: SemanticChunk) -> str:
+    parts = [chunk.title.strip()]
+    summary = _clean_optional_string(chunk.summary)
+    if summary:
+        parts.append(summary)
+    parts.append(chunk.text.strip())
+    return "\n\n".join(part for part in parts if part).strip()
+
+
+async def _embed_texts(ai_config: dict[str, str], texts: list[str]) -> list[list[float]]:
+    if not texts:
+        return []
+    vectors: list[list[float]] = []
+    for start in range(0, len(texts), _RAG_EMBED_BATCH_SIZE):
+        batch = texts[start : start + _RAG_EMBED_BATCH_SIZE]
+        batch_vectors = await create_embeddings(
+            api_key=ai_config["api_key"],
+            base_url=ai_config["base_url"],
+            model=ai_config["embedding_model"],
+            inputs=batch,
+            timeout_seconds=90.0,
+        )
+        if len(batch_vectors) != len(batch):
+            raise AiClientError("AI embeddings response count did not match the request")
+        vectors.extend(batch_vectors)
+    return vectors
+
+
+async def _embed_query(ai_config: dict[str, str], text: str) -> list[float]:
+    vectors = await _embed_texts(ai_config, [text])
+    if not vectors:
+        raise AiClientError("AI query embedding is empty")
+    return vectors[0]
+
+
+async def _build_semantic_chunk_index(
+    *,
+    snapshot: KnowledgeBaseSnapshot,
+    user_id: str,
+    ai_config: dict[str, str],
+) -> SemanticChunkIndex:
+    signature = _semantic_chunk_signature(snapshot)
+    cache_key = "|".join(
+        [
+            user_id,
+            ai_config.get("base_url") or "",
+            ai_config.get("embedding_model") or "",
+        ]
+    )
+    cached = _SEMANTIC_INDEX_CACHE.get(cache_key)
+    if cached and cached[0] == signature:
+        return cached[1]
+
+    chunks = _build_semantic_chunks(snapshot)
+    index = SemanticChunkIndex(
+        chunks=chunks,
+        embeddings=[],
+        mode="lexical",
+        embedding_model=ai_config.get("embedding_model"),
+        loaded_at=datetime.utcnow(),
+    )
+
+    if chunks:
+        try:
+            embeddings = await _embed_texts(ai_config, [_chunk_embedding_text(chunk) for chunk in chunks])
+        except AiClientError:
+            embeddings = []
+        if len(embeddings) == len(chunks):
+            index.embeddings = embeddings
+            index.mode = "semantic"
+
+    _SEMANTIC_INDEX_CACHE[cache_key] = (signature, index)
+    return index
+
+
+def _embedding_cosine(left: list[float], right: list[float]) -> float:
+    if not left or not right or len(left) != len(right):
+        return 0.0
+    dot = 0.0
+    left_norm = 0.0
+    right_norm = 0.0
+    for left_value, right_value in zip(left, right):
+        dot += left_value * right_value
+        left_norm += left_value * left_value
+        right_norm += right_value * right_value
+    if left_norm <= 0 or right_norm <= 0:
+        return 0.0
+    return dot / math.sqrt(left_norm * right_norm)
+
+
+def _rank_chunks_lexically(
+    question: str,
+    chunks: list[SemanticChunk],
+    *,
+    limit: int,
+) -> list[tuple[SemanticChunk, float]]:
+    query_weights: dict[str, float] = {}
+    _add_weighted_chunk_terms(query_weights, question, 1.0)
+    query_norm = _vector_norm(query_weights)
+    if query_norm <= 0:
+        return []
+
+    lowered_query = question.lower()
+    query_terms = [term for term in extract_terms(question) if len(term) >= 2]
+    scored: list[tuple[SemanticChunk, float]] = []
+    for chunk in chunks:
+        score = _lexical_cosine(query_weights, query_norm, chunk.term_weights, chunk.term_norm)
+        if lowered_query and lowered_query in chunk.title.lower():
+            score += 0.45
+        if query_terms:
+            snippet_lower = chunk.text.lower()
+            hits = sum(1 for term in query_terms if term in snippet_lower)
+            if hits > 0:
+                score += min(0.35, hits * 0.08)
+        if score > 0:
+            scored.append((chunk, round(score, 4)))
+
+    scored.sort(
+        key=lambda entry: (
+            entry[1],
+            entry[0].note.created_at or datetime.min,
+            entry[0].note.relative_path,
+            -entry[0].chunk_index,
+        ),
+        reverse=True,
+    )
+    return scored[: max(1, limit)]
+
+
+def _rank_chunks_by_vector(
+    query_vector: list[float],
+    index: SemanticChunkIndex,
+    *,
+    limit: int,
+) -> list[tuple[SemanticChunk, float]]:
+    if not index.embeddings or len(index.embeddings) != len(index.chunks):
+        return []
+
+    scored: list[tuple[SemanticChunk, float]] = []
+    for chunk, embedding in zip(index.chunks, index.embeddings):
+        score = _embedding_cosine(query_vector, embedding)
+        if score > 0:
+            scored.append((chunk, round(score, 4)))
+
+    scored.sort(
+        key=lambda entry: (
+            entry[1],
+            entry[0].note.created_at or datetime.min,
+            entry[0].note.relative_path,
+            -entry[0].chunk_index,
+        ),
+        reverse=True,
+    )
+    return scored[: max(1, limit)]
+
+
+def _build_chunk_candidate_index(
+    candidates: list[tuple[SemanticChunk, float]],
+) -> tuple[str, list[SemanticChunk]]:
+    lines: list[str] = []
+    indexed: list[SemanticChunk] = []
+    for chunk, _score in candidates:
+        idx = len(indexed) + 1
+        title = (chunk.title or "").strip()[:80]
+        summary = (chunk.summary or "").strip()[:120]
+        snippet = _truncate_text(chunk.text, 180)
+        parts = [f"{idx}. [{title}]"]
+        if summary:
+            parts.append(summary)
+        if snippet:
+            parts.append(f"片段:{snippet}")
+        lines.append(" | ".join(parts))
+        indexed.append(chunk)
+    return "\n".join(lines), indexed
+
+
+def _parse_ranked_indices(response: str, result_count: int, limit: int) -> list[int]:
+    cleaned = _strip_reasoning_blocks(response).strip()
+    if not cleaned or cleaned == "无":
+        return []
+
+    selected: list[int] = []
+    seen: set[int] = set()
+    for raw_number in re.findall(r"\d+", cleaned):
+        try:
+            index = int(raw_number)
+        except ValueError:
+            continue
+        if index < 1 or index > result_count or index in seen:
+            continue
+        selected.append(index)
+        seen.add(index)
+        if len(selected) >= limit:
+            break
+    return selected
+
+
+_RAG_RERANK_SYSTEM_PROMPT = (
+    "你是收藏库 RAG 语义精排助手。下面给你一组候选内容片段。"
+    "请根据用户问题，选出真正相关的片段编号，按相关度从高到低排序。\n"
+    "规则：\n"
+    "1. 不要只看字面关键词，要理解语义。\n"
+    "2. 优先保留能直接支持回答的问题片段。\n"
+    "3. 最多输出 12 个编号。\n"
+    "4. 只输出编号，用英文逗号分隔；如果没有相关内容，输出：无"
+)
+
+
+async def _ai_rerank_chunks(
+    ai_config: dict[str, str],
+    *,
+    question: str,
+    candidates: list[tuple[SemanticChunk, float]],
+    limit: int,
+) -> list[tuple[SemanticChunk, float]]:
+    if not candidates:
+        return []
+
+    index_text, indexed_chunks = _build_chunk_candidate_index(candidates)
+    try:
+        response = await chat_completion(
+            api_key=ai_config["api_key"],
+            base_url=ai_config["base_url"],
+            model=ai_config["model"],
+            messages=[
+                {"role": "system", "content": _RAG_RERANK_SYSTEM_PROMPT},
+                {
+                    "role": "user",
+                    "content": f"候选片段：\n{index_text}\n\n用户问题：{question}",
+                },
+            ],
+            temperature=0.1,
+        )
+    except AiClientError:
+        return candidates[:limit]
+
+    selected = _parse_ranked_indices(response, len(indexed_chunks), limit)
+    if not selected:
+        return candidates[:limit]
+
+    reranked: list[tuple[SemanticChunk, float]] = []
+    for position, selected_index in enumerate(selected):
+        chunk = indexed_chunks[selected_index - 1]
+        reranked.append((chunk, round(max(0.1, 1.0 - position * 0.07), 4)))
+    return reranked
+
+
+def _build_rag_note_context_lines(note: KnowledgeBaseNote, index: int, snippets: list[str]) -> str:
+    lines = [
+        f"[{index}] 标题: {note.title}",
+        f"[{index}] 摘要: {note.summary or '无已整理摘要'}",
+        f"[{index}] 文件夹: {note.folder or '未归档'}",
+        f"[{index}] 来源: {note.source or '无'}",
+    ]
+    for snippet_index, snippet in enumerate(snippets, start=1):
+        lines.append(f"[{index}] 相关片段{snippet_index}: {snippet}")
+    return "\n".join(lines)
+
+
+def _merge_rag_chunks_into_context(
+    ranked_chunks: list[tuple[SemanticChunk, float]],
+    *,
+    note_limit: int,
+    note_count: int,
+    retrieval_mode: str,
+) -> RagGroundedContext:
+    if not ranked_chunks:
+        return RagGroundedContext(
+            context_text="",
+            ranked_notes=[],
+            note_count=note_count,
+            insufficient_context=True,
+            retrieval_mode=retrieval_mode,
+        )
+
+    ordered_note_ids: list[str] = []
+    note_entries: dict[str, dict[str, Any]] = {}
+
+    for chunk, score in ranked_chunks:
+        note_id = chunk.note.note_id
+        entry = note_entries.get(note_id)
+        if entry is None:
+            if len(ordered_note_ids) >= note_limit:
+                continue
+            entry = {
+                "note": chunk.note,
+                "score": score,
+                "snippets": [],
+            }
+            note_entries[note_id] = entry
+            ordered_note_ids.append(note_id)
+        else:
+            entry["score"] = max(entry["score"], score)
+
+        snippet = _truncate_text(_normalize_multiline_text(chunk.text), _RAG_CONTEXT_SNIPPET_LIMIT)
+        if snippet and snippet not in entry["snippets"] and len(entry["snippets"]) < _RAG_MAX_SNIPPETS_PER_NOTE:
+            entry["snippets"].append(snippet)
+
+    ranked_notes: list[tuple[KnowledgeBaseNote, float]] = []
+    context_blocks: list[str] = []
+    for display_index, note_id in enumerate(ordered_note_ids, start=1):
+        entry = note_entries[note_id]
+        note = entry["note"]
+        score = float(entry["score"])
+        ranked_notes.append((note, round(score, 4)))
+        context_blocks.append(_build_rag_note_context_lines(note, display_index, entry["snippets"]))
+
+    return RagGroundedContext(
+        context_text="\n\n".join(context_blocks).strip(),
+        ranked_notes=ranked_notes,
+        note_count=note_count,
+        insufficient_context=not ranked_notes,
+        retrieval_mode=retrieval_mode,
+    )
+
+
+async def _retrieve_rag_context(
+    *,
+    db: Session,
+    user_id: str,
+    ai_config: dict[str, str],
+    question: str,
+    top_k: int,
+) -> RagGroundedContext:
+    snapshot = _build_items_only_snapshot(db, user_id)
+    if snapshot.note_count <= 0:
+        return RagGroundedContext(
+            context_text="",
+            ranked_notes=[],
+            note_count=0,
+            insufficient_context=True,
+            retrieval_mode="empty",
+        )
+
+    index = await _build_semantic_chunk_index(snapshot=snapshot, user_id=user_id, ai_config=ai_config)
+    candidate_limit = max(_RAG_VECTOR_MIN_CANDIDATES, max(1, top_k) * _RAG_VECTOR_CANDIDATE_MULTIPLIER)
+    retrieval_mode = index.mode
+    vector_candidates: list[tuple[SemanticChunk, float]] = []
+
+    if index.mode == "semantic":
+        try:
+            query_vector = await _embed_query(ai_config, question)
+        except AiClientError:
+            query_vector = []
+        if query_vector:
+            vector_candidates = _rank_chunks_by_vector(query_vector, index, limit=candidate_limit)
+        if not vector_candidates:
+            retrieval_mode = "lexical"
+
+    candidates = vector_candidates or _rank_chunks_lexically(question, index.chunks, limit=candidate_limit)
+    rerank_limit = max(top_k, min(candidate_limit, max(4, top_k * 2)))
+    reranked = await _ai_rerank_chunks(
+        ai_config,
+        question=question,
+        candidates=candidates,
+        limit=rerank_limit,
+    )
+
+    return _merge_rag_chunks_into_context(
+        reranked,
+        note_limit=max(1, top_k),
+        note_count=snapshot.note_count,
+        retrieval_mode=retrieval_mode,
+    )
+
+
+def _build_retrieval_query_from_conversation(conversation: list[dict[str, str]]) -> str:
+    user_turns = [
+        _clean_optional_string(message.get("content"))
+        for message in conversation
+        if message.get("role") == "user"
+    ]
+    filtered_turns = [turn for turn in user_turns if turn]
+    if not filtered_turns:
+        return ""
+    if len(filtered_turns) == 1:
+        return filtered_turns[0]
+    return "\n".join(filtered_turns[-3:])
 
 
 def _match_organized_analysis_heading(line: str | None) -> str | None:
@@ -3198,18 +3810,30 @@ async def ask_ai(request: AiAskRequest, db: Session = Depends(get_db)):
     user_id = get_current_user_id()
     settings = _get_user_settings(db, user_id)
     ai_config = _resolve_ai_config(settings)
+    rag_context = await _retrieve_rag_context(
+        db=db,
+        user_id=user_id,
+        ai_config=ai_config,
+        question=question,
+        top_k=max(1, min(request.top_k, 8)),
+    )
 
-    # Build full items index — AI scans all items directly (no search needed)
-    index_text, indexed_notes = _build_full_items_index(db, user_id)
-    all_notes_with_scores = [(note, 0.0) for note in indexed_notes]
-
-    if not indexed_notes:
+    if rag_context.note_count <= 0:
         return AiAskResponse(
             question=question,
             answer="收藏库里没有找到任何内容。",
             citations=[],
             knowledge_base_path=None,
             note_count=0,
+            insufficient_context=True,
+        )
+    if rag_context.insufficient_context or not rag_context.context_text:
+        return AiAskResponse(
+            question=question,
+            answer="收藏库里没有找到足够相关的内容来可靠回答这个问题。",
+            citations=[],
+            knowledge_base_path=None,
+            note_count=rag_context.note_count,
             insufficient_context=True,
         )
 
@@ -3224,10 +3848,10 @@ async def ask_ai(request: AiAskRequest, db: Session = Depends(get_db)):
                     "role": "user",
                     "content": (
                         f"用户问题：{question}\n\n"
-                        "下面是用户收藏库中所有内容的索引（编号、标题、摘要）。"
-                        "请仔细浏览所有条目，找出与问题相关的内容并基于它们回答。"
+                        "下面是从用户收藏库中检索出的相关内容。"
+                        "请只基于这些证据回答。"
                         "引用时使用 [编号] 格式。若信息不够，请直接说明缺口。\n\n"
-                        f"{index_text}"
+                        f"{rag_context.context_text}"
                     ),
                 },
             ],
@@ -3241,10 +3865,10 @@ async def ask_ai(request: AiAskRequest, db: Session = Depends(get_db)):
         citations=_serialize_citations(
             db,
             user_id,
-            _filter_ranked_notes_by_citation_markers(answer, all_notes_with_scores),
+            _filter_ranked_notes_by_citation_markers(answer, rag_context.ranked_notes),
         ),
         knowledge_base_path=None,
-        note_count=len(indexed_notes),
+        note_count=rag_context.note_count,
         insufficient_context=False,
     )
 
@@ -3278,9 +3902,14 @@ async def assistant(request: AiAssistantRequest, db: Session = Depends(get_db)):
             current_item_note=current_item_note,
         )
 
-    # Build full items index — AI scans all items directly
-    index_text, indexed_notes = _build_full_items_index(db, user_id)
-    all_notes_with_scores = [(note, 0.0) for note in indexed_notes]
+    retrieval_query = _build_retrieval_query_from_conversation(conversation) or conversation[-1]["content"]
+    rag_context = await _retrieve_rag_context(
+        db=db,
+        user_id=user_id,
+        ai_config=ai_config,
+        question=retrieval_query,
+        top_k=max(1, min(request.top_k, 8)),
+    )
 
     current_item_context = _build_current_item_context(current_item, current_item_note, current_page_notes) if current_item is not None else ""
     system_message = _compose_system_message(
@@ -3290,11 +3919,11 @@ async def assistant(request: AiAssistantRequest, db: Session = Depends(get_db)):
             f"{current_item_context}"
         ) if current_item_context else "",
         (
-            "下面是用户收藏库中所有内容的索引（编号、标题、摘要）。"
-            "请仔细浏览所有条目，找出与对话相关的内容作为辅助参考。"
+            "下面是从用户收藏库中检索出的相关内容。"
+            "请把它们当作辅助证据来回答。"
             "引用时使用 [编号] 格式。\n\n"
-            f"{index_text}"
-        ) if index_text else "",
+            f"{rag_context.context_text}"
+        ) if rag_context.context_text else "",
     )
     model_messages: list[dict[str, Any]] = [{"role": "system", "content": system_message}, *conversation]
     try:
@@ -3314,12 +3943,12 @@ async def assistant(request: AiAssistantRequest, db: Session = Depends(get_db)):
         citations=_serialize_citations(
             db,
             user_id,
-            _filter_ranked_notes_by_citation_markers(answer, all_notes_with_scores),
+            _filter_ranked_notes_by_citation_markers(answer, rag_context.ranked_notes),
         ),
         tool_events=[],
         knowledge_base_path=None,
-        note_count=len(indexed_notes),
-        insufficient_context=False,
+        note_count=rag_context.note_count,
+        insufficient_context=rag_context.insufficient_context,
         agent_permissions=_agent_permissions(settings),
         updated_items=[],
     )
@@ -3394,17 +4023,22 @@ async def assistant_stream(request: AiAssistantRequest, db: Session = Depends(ge
         def _sse(data: dict) -> str:
             return f"data: {json.dumps(data, ensure_ascii=False, default=str)}\n\n"
 
-        # Build full items index instantly — no AI search needed
-        index_text, indexed_notes = _build_full_items_index(db, user_id)
-        all_notes_with_scores = [(note, 0.0) for note in indexed_notes]
+        retrieval_query = _build_retrieval_query_from_conversation(conversation) or conversation[-1]["content"]
+        rag_context = await _retrieve_rag_context(
+            db=db,
+            user_id=user_id,
+            ai_config=ai_config,
+            question=retrieval_query,
+            top_k=max(1, min(request.top_k, 8)),
+        )
 
         yield _sse({
             "type": "status",
             "status": "found",
-            "message": f"已加载 {len(indexed_notes)} 条收藏内容，正在生成回答",
+            "message": f"已完成检索，已命中 {len(rag_context.ranked_notes)} 条相关收藏内容，正在生成回答",
         })
 
-        if not indexed_notes:
+        if rag_context.note_count <= 0:
             yield _sse({
                 "type": "done",
                 "message": "收藏库里没有任何内容。",
@@ -3422,11 +4056,11 @@ async def assistant_stream(request: AiAssistantRequest, db: Session = Depends(ge
                 f"{current_item_context}"
             ) if current_item_context else "",
             (
-                "下面是用户收藏库中所有内容的索引（编号、标题、摘要）。"
-                "请仔细浏览所有条目，找出与对话相关的内容作为辅助参考。"
+                "下面是从用户收藏库中检索出的相关内容。"
+                "请把它们当作辅助证据来回答。"
                 "引用时使用 [编号] 格式。\n\n"
-                f"{index_text}"
-            ) if index_text else "",
+                f"{rag_context.context_text}"
+            ) if rag_context.context_text else "",
         )
         model_messages: list[dict[str, Any]] = [{"role": "system", "content": system_message}, *conversation]
 
@@ -3448,7 +4082,7 @@ async def assistant_stream(request: AiAssistantRequest, db: Session = Depends(ge
         # Final event with citations — build directly from indexed_notes
         # without DB query (all notes come from items, so item_id is valid)
         answer = full_answer.strip()
-        filtered = _filter_ranked_notes_by_citation_markers(answer, all_notes_with_scores)
+        filtered = _filter_ranked_notes_by_citation_markers(answer, rag_context.ranked_notes)
         citations = [
             AiCitationResponse(
                 note_id=note.note_id,
@@ -3469,7 +4103,7 @@ async def assistant_stream(request: AiAssistantRequest, db: Session = Depends(ge
             "type": "done",
             "message": answer,
             "citations": [c.model_dump() if hasattr(c, 'model_dump') else c.dict() for c in citations],
-            "insufficient_context": False,
+            "insufficient_context": rag_context.insufficient_context,
         })
 
     return StreamingResponse(

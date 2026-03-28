@@ -73,6 +73,21 @@ class ItemContentParseRouteTests(unittest.TestCase):
         self.assertEqual(response.extracted_text, "手动修改后的解析笔记")
         self.assertEqual(response.parse_status, "completed")
 
+    def test_content_route_updates_title_and_detected_title_marker(self) -> None:
+        request = items_router.ItemContentUpdateRequest(title="新的标题")
+
+        with self.TestSession() as db:
+            item = db.query(Item).filter(Item.id == "item-parse-route").one()
+            item.extracted_text = "[detected_title]\n旧标题\n[ocr_text]\n原始正文"
+            db.commit()
+
+            with patch.object(items_router, "get_current_user_id", return_value="local-default-user"):
+                response = items_router.update_item_content("item-parse-route", request, db=db)
+
+        self.assertEqual(response.title, "新的标题")
+        self.assertIn("[detected_title]\n新的标题", response.extracted_text or "")
+        self.assertIn("[ocr_text]\n原始正文", response.extracted_text or "")
+
     def test_page_note_routes_create_list_and_update(self) -> None:
         create_request = items_router.ItemPageNoteCreateRequest(
             title="",

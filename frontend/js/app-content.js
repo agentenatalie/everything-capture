@@ -1480,8 +1480,17 @@
             const repoFromUrl = getGitHubRepoPath(item?.source_url || '');
             const titleMatch = rawTitle.match(/^GitHub\s*-\s*([^:：]+?)\s*[:：]\s*(.+)$/i);
             const repoOnlyMatch = rawTitle.match(/^GitHub\s*-\s*(.+)$/i);
-            const repoName = (titleMatch?.[1] || repoFromUrl || repoOnlyMatch?.[1] || rawTitle || 'GitHub 项目').trim();
-            const description = (titleMatch?.[2] || '').trim();
+            const rawTitleLooksGenerated = /^GitHub\s*-\s*/i.test(rawTitle);
+            const rawTitleLooksLikeRepoPath = Boolean(
+                rawTitle
+                && repoFromUrl
+                && rawTitle.replace(/\.git$/i, '').trim().toLowerCase() === repoFromUrl.toLowerCase()
+            );
+            const customDisplayTitle = rawTitle && !rawTitleLooksGenerated && !rawTitleLooksLikeRepoPath
+                ? rawTitle
+                : '';
+            const repoName = (customDisplayTitle || titleMatch?.[1] || repoFromUrl || repoOnlyMatch?.[1] || rawTitle || 'GitHub 项目').trim();
+            const description = customDisplayTitle ? '' : (titleMatch?.[2] || '').trim();
 
             return {
                 repoName: repoName || 'GitHub 项目',

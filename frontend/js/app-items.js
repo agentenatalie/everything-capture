@@ -14,6 +14,7 @@
         let contentTitleAC = null; // AbortController for title edit listeners
         let contentBodyAC = null; // AbortController for body contenteditable listeners
         let contentWasEdited = false; // tracks if content was edited in this modal session
+        let modalCloseInFlight = false;
         let readerSidebarResizing = false;
         let readerSidebarStartX = 0;
         let readerSidebarStartWidth = 0;
@@ -1489,6 +1490,10 @@
 
         // Pause polling when tab is hidden, resume when visible
         document.addEventListener('visibilitychange', () => {
+            if (document.visibilityState === 'hidden') {
+                flushPendingContentEdits({ keepalive: true });
+                return;
+            }
             if (document.visibilityState === 'visible') {
                 startBackgroundRefresh();
                 _bgRefreshTick();
@@ -1776,6 +1781,36 @@
             return { title, canonical_text, canonical_html };
         }
 
+        function flushPendingContentEdits(options = {}) {
+            const { keepalive = false } = options;
+            if (contentViewMode !== 'edit' || !currentOpenItemId) return null;
+
+            clearTimeout(contentAutoSaveTimer);
+            const vals = readContentEditorDOM();
+            if (!vals || (vals.title == null && vals.canonical_text == null && vals.canonical_html == null)) {
+                return null;
+            }
+
+            if (!keepalive) {
+                return saveContentToServer(currentOpenItemId, vals);
+            }
+
+            try {
+                const pendingRequest = fetch(`/api/items/${currentOpenItemId}/content`, {
+                    method: 'PATCH',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(vals),
+                    keepalive: true,
+                });
+                pendingRequest.catch((error) => {
+                    console.warn('Failed to flush content edits during page hide', error);
+                });
+            } catch (error) {
+                console.warn('Failed to flush content edits during page hide', error);
+            }
+            return null;
+        }
+
         // Save content edits to the database. Returns the server response item.
         async function saveContentToServer(itemId, vals) {
             if (!itemId || !vals || (vals.title == null && vals.canonical_text == null && vals.canonical_html == null)) return null;
@@ -2053,8 +2088,8 @@
             clearItemDragPreview();
         }
 
-        function closeModalDialog() {
-            if (modalOverlay.classList.contains('is-closing')) return;
+        async function closeModalDialog() {
+            if (modalOverlay.classList.contains('is-closing') || modalCloseInFlight) return;
 
             // If there's a previous item on the nav stack, go back to it instead of closing
             if (readerNavStack.length > 0) {
@@ -2082,62 +2117,65 @@
                 }
             }
 
-            // Save any pending content edits before closing
-            if (contentViewMode === 'edit' && currentOpenItemId) {
+            modalCloseInFlight = true;
+            try {
+                await flushPendingContentEdits();
+
+                const previousOpenItemId = currentOpenItemId;
+                currentOpenItemId = null;
+                noteSaveInFlight = false;
+                analysisOrganizeInFlightItemId = null;
+                isNotePanelOpen = false;
+                contentViewMode = 'view';
+                contentWasEdited = false;
                 clearTimeout(contentAutoSaveTimer);
-                saveContentToServer(currentOpenItemId, readContentEditorDOM());
+                _disableContentEditing();
+
+                document.title = 'Everything Capture - 收录看板';
+
+                // Start close animation
+                modalOverlay.classList.add('is-closing');
+
+                const cleanup = () => {
+                    modalOverlay.classList.remove('active', 'is-closing');
+                    // Keep overflow hidden when Ask AI is on top to avoid scrollbar-induced reflow
+                    if (!returningToAskAi) {
+                        document.body.style.overflow = '';
+                    }
+                    toggleReaderFullscreen(false);
+                    readerSidebarOpen = false;
+                    readerSidebarTab = 'note';
+                    readerLastScrollTop = 0;
+                    readerNavStack.length = 0;
+                    readerNavOrigin = null;
+
+                    if (readerNotePanel) {
+                        readerNotePanel.innerHTML = '';
+                    }
+                    if (readerSidebarContent) {
+                        readerSidebarContent.innerHTML = '';
+                    }
+                    readerSidebar?.classList.remove('is-open');
+
+                    setNotePanelOpen(false);
+                    toggleNoteBtn?.classList.remove('is-available');
+                    toggleNoteBtn?.classList.remove('is-active');
+                    toggleNoteBtn?.setAttribute('title', '查看解析笔记');
+                    if (readerMetaLine) {
+                        readerMetaLine.textContent = '当前笔记';
+                    }
+                    readerStatusDots.innerHTML = '';
+                    modalFooter.innerHTML = '';
+
+                    patchRenderedItemsById(previousOpenItemId);
+                    modalCloseInFlight = false;
+                };
+
+                window.setTimeout(cleanup, 240);
+            } catch (error) {
+                modalCloseInFlight = false;
+                throw error;
             }
-
-            const previousOpenItemId = currentOpenItemId;
-            currentOpenItemId = null;
-            noteSaveInFlight = false;
-            analysisOrganizeInFlightItemId = null;
-            isNotePanelOpen = false;
-            contentViewMode = 'view';
-            contentWasEdited = false;
-            clearTimeout(contentAutoSaveTimer);
-            _disableContentEditing();
-
-            document.title = 'Everything Capture - 收录看板';
-
-            // Start close animation
-            modalOverlay.classList.add('is-closing');
-
-            const cleanup = () => {
-                modalOverlay.classList.remove('active', 'is-closing');
-                // Keep overflow hidden when Ask AI is on top to avoid scrollbar-induced reflow
-                if (!returningToAskAi) {
-                    document.body.style.overflow = '';
-                }
-                toggleReaderFullscreen(false);
-                readerSidebarOpen = false;
-                readerSidebarTab = 'note';
-                readerLastScrollTop = 0;
-                readerNavStack.length = 0;
-                readerNavOrigin = null;
-
-                if (readerNotePanel) {
-                    readerNotePanel.innerHTML = '';
-                }
-                if (readerSidebarContent) {
-                    readerSidebarContent.innerHTML = '';
-                }
-                readerSidebar?.classList.remove('is-open');
-
-                setNotePanelOpen(false);
-                toggleNoteBtn?.classList.remove('is-available');
-                toggleNoteBtn?.classList.remove('is-active');
-                toggleNoteBtn?.setAttribute('title', '查看解析笔记');
-                if (readerMetaLine) {
-                    readerMetaLine.textContent = '当前笔记';
-                }
-                readerStatusDots.innerHTML = '';
-                modalFooter.innerHTML = '';
-
-                patchRenderedItemsById(previousOpenItemId);
-            };
-
-            window.setTimeout(cleanup, 240);
         }
 
         closeModal?.addEventListener('click', () => {
@@ -2169,6 +2207,7 @@
         };
 
         window.addEventListener('beforeunload', () => {
+            flushPendingContentEdits({ keepalive: true });
             if (remoteSyncRefreshTimer) window.clearInterval(remoteSyncRefreshTimer);
             if (remoteSyncRefreshQueuedTimer) window.clearTimeout(remoteSyncRefreshQueuedTimer);
             if (mobileClipboardPollTimer) window.clearInterval(mobileClipboardPollTimer);

@@ -1262,32 +1262,55 @@
 
         function buildAiToolEventsMarkup(toolEvents = []) {
             if (!Array.isArray(toolEvents) || !toolEvents.length) return '';
-            // Filter out noisy/redundant tool events from the UI
             const filtered = toolEvents.filter((e) => e.name !== 'export_items_to_zip' && e.name !== 'search_library_items');
             if (!filtered.length) return '';
+
+            const _SUMMARY_MAX_LEN = 40;
+            function truncSummary(s) {
+                if (!s) return '';
+                return s.length > _SUMMARY_MAX_LEN ? s.slice(0, _SUMMARY_MAX_LEN) + '…' : s;
+            }
+
+            // Group events by tool name, preserving order of first appearance
+            const groups = [];
+            const groupMap = {};
+            for (const event of filtered) {
+                const key = event.name || 'unknown';
+                if (!groupMap[key]) {
+                    groupMap[key] = { name: key, events: [] };
+                    groups.push(groupMap[key]);
+                }
+                groupMap[key].events.push(event);
+            }
+
+            // Build one line per group for the collapsed summary
+            const headerParts = groups.map((g) => {
+                const label = AI_TOOL_LABELS[g.name] || g.name || 'Agent';
+                return g.events.length > 1 ? `${label} ×${g.events.length}` : label;
+            });
+            const headerText = headerParts.join('，');
+
+            // Build expanded detail lines — full text, no truncation
+            const detailLines = groups.map((group) => {
+                const label = AI_TOOL_LABELS[group.name] || group.name || 'Agent';
+                if (group.events.length === 1) {
+                    const e = group.events[0];
+                    const failMark = e.status === 'failed' ? ' <span class="ai-tool-line-fail">失败</span>' : '';
+                    const summary = e.summary || '';
+                    return `<div class="ai-tool-line${e.status === 'failed' ? ' is-failed' : ''}"><span class="ai-tool-line-label">${escapeHtml(label)}</span>${summary ? ' ' + renderInlineMarkdown(summary) : ''}${failMark}</div>`;
+                }
+                return group.events.map((e) => {
+                    const failMark = e.status === 'failed' ? ' <span class="ai-tool-line-fail">失败</span>' : '';
+                    const summary = e.summary || '';
+                    return `<div class="ai-tool-line${e.status === 'failed' ? ' is-failed' : ''}"><span class="ai-tool-line-label">${escapeHtml(label)}</span>${summary ? ' ' + renderInlineMarkdown(summary) : ''}${failMark}</div>`;
+                }).join('');
+            }).join('');
+
             return `
-                <div class="ai-tool-events">
-                    ${filtered.map((event) => {
-                        const hasDetail = event.detail && event.detail !== (event.summary || '');
-                        if (hasDetail) {
-                            return `
-                            <details class="ai-tool-event is-collapsible${event.status === 'failed' ? ' is-failed' : ''}">
-                                <summary class="ai-tool-event-header">
-                                    <div class="ai-tool-event-name">${escapeHtml(AI_TOOL_LABELS[event.name] || event.name || 'Agent')}</div>
-                                    <div class="ai-tool-event-summary">${renderInlineMarkdown(event.summary || '')}</div>
-                                </summary>
-                                <div class="ai-tool-event-detail">${renderInlineMarkdown(event.detail)}</div>
-                            </details>
-                            `;
-                        }
-                        return `
-                        <div class="ai-tool-event${event.status === 'failed' ? ' is-failed' : ''}">
-                            <div class="ai-tool-event-name">${escapeHtml(AI_TOOL_LABELS[event.name] || event.name || 'Agent')}</div>
-                            <div class="ai-tool-event-summary">${renderInlineMarkdown(event.summary || '')}</div>
-                        </div>
-                        `;
-                    }).join('')}
-                </div>
+                <details class="ai-tool-events-collapse">
+                    <summary class="ai-tool-events-header">${escapeHtml(headerText)}</summary>
+                    <div class="ai-tool-events-body">${detailLines}</div>
+                </details>
             `;
         }
 
@@ -1351,6 +1374,14 @@
             }
         }
 
+        function isPendingApprovalToolEvent(event) {
+            return Boolean(
+                event
+                && event.status === 'pending'
+                && (event.name === 'run_computer_command' || event.name === 'execute_sandbox_command')
+            );
+        }
+
         async function handlePendingApproval(pendingApproval, messageIndex) {
             // Show popup and wait for user decision
             const approved = await showApprovalPopup(pendingApproval);
@@ -1383,7 +1414,7 @@
                 if (typeof messageIndex === 'number' && aiConversation[messageIndex]) {
                     const entry = aiConversation[messageIndex];
                     entry.toolEvents = (entry.toolEvents || []).map((ev) =>
-                        ev.name === 'run_computer_command' && ev.status === 'pending'
+                        isPendingApprovalToolEvent(ev)
                             ? { ...ev, status: isSuccess ? 'completed' : 'failed', summary: `${statusLabel}：${pendingApproval.command.slice(0, 60)}` }
                             : ev
                     );
@@ -2645,7 +2676,7 @@
                 const lastAssistant = [...conversation].reverse().find(e => e.role === 'assistant');
                 if (lastAssistant) {
                     lastAssistant.toolEvents = (lastAssistant.toolEvents || []).map((ev) =>
-                        ev.name === 'run_computer_command' && ev.status === 'pending'
+                        isPendingApprovalToolEvent(ev)
                             ? { ...ev, status: isSuccess ? 'completed' : 'failed', summary: `${statusLabel}：${pendingApproval.command.slice(0, 60)}` }
                             : ev
                     );

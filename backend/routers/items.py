@@ -1001,6 +1001,98 @@ def get_item(
     return serialize_items([item])[0]
 
 
+# ── Memory-based query expansion ──────────────────────────────────────
+# Personal references like "我的项目" get expanded using AI memories,
+# e.g. a memory "Everything Capture 是用户自己的开源项目" maps "我的项目" → "Everything Capture".
+
+_PERSONAL_PRONOUNS = {"我的", "我", "自己的", "自己"}
+# Only extract proper nouns / names: capitalized English words (3+ chars), or CJK in brackets/quotes
+_MEMORY_ENTITY_RE = re.compile(
+    r"[A-Z][a-zA-Z0-9]{2,}(?:\s[A-Z][a-zA-Z0-9]{2,})*"  # Capitalized English 3+ chars (e.g. "Everything Capture", "FolderLM")
+    r"|(?<=[「『\"'（(])[\u4e00-\u9fff]{2,}(?=[」』\"'）)])"  # Quoted Chinese terms
+)
+
+
+def _expand_query_with_memories(db: Session, user_id: str, query: str) -> str:
+    """If query contains personal references, expand it with entity names from matching memories."""
+    from models import AiMemory
+
+    q_lower = query.lower().strip()
+    if not q_lower:
+        return query
+
+    # Quick check: does the query look like a personal reference?
+    has_personal = any(p in q_lower for p in _PERSONAL_PRONOUNS)
+    if not has_personal:
+        return query
+
+    # Strip pronouns to get the concept the user is referring to
+    concept = q_lower
+    for p in sorted(_PERSONAL_PRONOUNS, key=len, reverse=True):
+        concept = concept.replace(p, "")
+    concept = concept.strip()
+    if not concept:
+        return query
+
+    # Load memories and find ones that mention this concept
+    memories = (
+        db.query(AiMemory.content)
+        .filter(AiMemory.user_id == user_id)
+        .order_by(AiMemory.updated_at.desc())
+        .limit(50)
+        .all()
+    )
+    if not memories:
+        return query
+
+    expanded_terms: list[str] = []
+    for (content,) in memories:
+        c_lower = (content or "").lower()
+        # Skip classification/structural memories (they describe folder logic, not identity)
+        if "分类逻辑" in c_lower or "文件夹分类" in c_lower:
+            continue
+        # Strip URLs before position check (URLs inflate position)
+        content_no_urls = re.sub(r"https?://\S+", "", content)
+        c_clean_lower = content_no_urls.lower()
+        # Only match if concept appears early in the memory (subject position, not incidental mention)
+        pos = c_clean_lower.find(concept)
+        if pos < 0 or pos > 50:
+            continue
+        entities = _MEMORY_ENTITY_RE.findall(content_no_urls)
+        mem_terms: list[str] = []
+        for w in entities:
+            w_lower = w.lower()
+            if (
+                len(w) >= 2
+                and w_lower != concept
+                and w_lower not in _PERSONAL_PRONOUNS
+                and not any(x in w_lower.split() for x in {
+                    "the", "is", "a", "an", "for", "and", "or", "not", "this", "that", "it",
+                    "chrome", "safari", "firefox", "google", "apple", "microsoft", "github",
+                    "macos", "mac", "windows", "linux", "ios", "android", "python", "javascript",
+                    "web", "api", "app", "sdk", "cli", "npm", "pip",
+                })
+                and w_lower not in q_lower
+            ):
+                mem_terms.append(w)
+        # Take only the first 2 entities per memory (the most prominent names)
+        expanded_terms.extend(mem_terms[:2])
+
+    if not expanded_terms:
+        return query
+
+    # Deduplicate while preserving order
+    seen = set()
+    unique = []
+    for t in expanded_terms:
+        tl = t.lower()
+        if tl not in seen:
+            seen.add(tl)
+            unique.append(t)
+
+    return query + " " + " ".join(unique[:3])
+
+
 @router.get("/items", response_model=List[ItemResponse])
 def get_items(
     response: Response,
@@ -1018,11 +1110,14 @@ def get_items(
 
     raw_query = (q or "").strip()
     if raw_query:
+        # Expand personal references using AI memories (e.g. "我的项目" → "我的项目 Everything Capture")
+        expanded_query = _expand_query_with_memories(db, user_id, raw_query)
+
         use_fts = USE_FTS5_SEARCH
         fts_results = None
 
         if use_fts:
-            fts_results = search_with_fts5(db, user_id, raw_query, limit=1000)
+            fts_results = search_with_fts5(db, user_id, expanded_query, limit=1000)
             # FTS5 returned empty — could be a query too short for trigram;
             # fall through to legacy scoring so users still get results.
             if not fts_results:
@@ -1077,7 +1172,7 @@ def get_items(
                 )
                 .all()
             )
-            ranked_item_ids = rank_search_rows(candidate_rows, raw_query)
+            ranked_item_ids = rank_search_rows(candidate_rows, expanded_query)
             visible_count = len(ranked_item_ids)
             page_item_ids = ranked_item_ids[skip: skip + safe_limit]
             if page_item_ids:

@@ -143,6 +143,55 @@ def _clean_optional_string(value: object | None) -> str | None:
     return text or None
 
 
+def _cleanup_expired_approvals() -> None:
+    now = datetime.utcnow()
+    expired_ids: list[str] = []
+
+    for approval_id, approval in list(_pending_approvals.items()):
+        created_at = approval.get("created_at")
+        if isinstance(created_at, str):
+            try:
+                created_at = datetime.fromisoformat(created_at)
+            except ValueError:
+                expired_ids.append(approval_id)
+                continue
+        if not isinstance(created_at, datetime):
+            expired_ids.append(approval_id)
+            continue
+        if (now - created_at).total_seconds() > _APPROVAL_EXPIRY_SECONDS:
+            expired_ids.append(approval_id)
+
+    for approval_id in expired_ids:
+        _pending_approvals.pop(approval_id, None)
+
+
+def _create_pending_approval(
+    *,
+    command: str,
+    description: str,
+    working_directory: str | None,
+    extra_fields: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    approval_id = str(uuid.uuid4())
+    approval_payload: dict[str, Any] = {
+        "command": command,
+        "description": description,
+        "working_directory": working_directory,
+        "created_at": datetime.utcnow(),
+    }
+    if extra_fields:
+        approval_payload.update(extra_fields)
+    _pending_approvals[approval_id] = approval_payload
+    _cleanup_expired_approvals()
+    return {
+        "status": "pending_approval",
+        "approval_id": approval_id,
+        "command": command,
+        "description": description,
+        "working_directory": working_directory,
+    }
+
+
 def _get_user_settings(db: Session, user_id: str) -> Settings | None:
     return db.query(Settings).filter(Settings.user_id == user_id).first()
 
@@ -552,6 +601,12 @@ def _assistant_agent_system_prompt(agent_permissions: list[str], memories: list[
         "3. 如果第一次搜索结果不够理想（分数低或明显不相关），务必用不同的关键词再搜索1-2次。\n"
         "4. 综合所有搜索结果后再给出最终回答。\n"
         "\n"
+        "【重要：用记忆解析个人指代】\n"
+        "当用户使用'我的XX''自己的XX'等个人指代时，必须先查看你的记忆来理解用户指的是什么。\n"
+        "例如：记忆里有'Everything Capture 是用户自己的开源项目'，用户说'我的项目'时你应该知道是 Everything Capture，"
+        "搜索时用具体名称而非'我的项目'。\n"
+        "同理，'我的公司''我的团队''我喜欢的XX'等都应结合记忆展开成具体名称再搜索。\n"
+        "\n"
         "【重要：执行操作的通用原则】\n"
         "你拥有多个原子工具，可以自由组合来完成用户的各种请求：\n"
         "- 查看内容：search_library_items / list_recent_notes（支持 scope='unfiled' 筛选未归档）/ get_item_details\n"
@@ -582,6 +637,18 @@ def _assistant_agent_system_prompt(agent_permissions: list[str], memories: list[
         "- 用户纠正过你的任何行为\n"
         "发现新的模式时主动用 save_memory 保存，不需要用户明确要求。\n"
         "当记忆中已有相关内容但发现过时或不准确时，先 delete_memory 删除旧的再保存新的。\n"
+        "\n"
+        "【重要：了解外部项目/网页】\n"
+        "当用户要求你'去看看''去读一下''了解一下'某个外部项目、GitHub 仓库或网页时：\n"
+        "1. 必须使用 web_search 搜索相关信息，而不是用 execute_sandbox_command 的 git_clone 把项目克隆到本地。\n"
+        "2. 克隆仓库会占用用户磁盘空间，用户只是想了解项目内容，不是要下载代码。\n"
+        "3. 只有当用户明确要求'下载''克隆''clone'到本地时，才使用 git_clone，且必须先征得用户同意。\n"
+        "\n"
+        "【重要：沙盒命令中的下载操作】\n"
+        "使用 execute_sandbox_command 的 git_clone 或 download_file 时，必须先向用户确认：\n"
+        "- 告诉用户你要下载什么、大概占用多少空间\n"
+        "- 等用户同意后再执行\n"
+        "- 绝对不要未经用户同意就下载文件或克隆仓库到本地\n"
         "\n"
         "【重要：导出/打包/下载请求】\n"
         "当用户要求'打包''导出''下载''整理成文档'内容时：\n"
@@ -1556,6 +1623,10 @@ async def _retrieve_rag_context(
             retrieval_mode="empty",
         )
 
+    # Expand personal references using AI memories for better retrieval
+    from routers.items import _expand_query_with_memories
+    expanded_question = _expand_query_with_memories(db, user_id, question)
+
     index = await _build_semantic_chunk_index(snapshot=snapshot, user_id=user_id, ai_config=ai_config)
     candidate_limit = max(_RAG_VECTOR_MIN_CANDIDATES, max(1, top_k) * _RAG_VECTOR_CANDIDATE_MULTIPLIER)
     retrieval_mode = index.mode
@@ -1563,7 +1634,7 @@ async def _retrieve_rag_context(
 
     if index.mode == "semantic":
         try:
-            query_vector = await _embed_query(ai_config, question)
+            query_vector = await _embed_query(ai_config, expanded_question)
         except AiClientError:
             query_vector = []
         if query_vector:
@@ -1571,7 +1642,7 @@ async def _retrieve_rag_context(
         if not vector_candidates:
             retrieval_mode = "lexical"
 
-    candidates = vector_candidates or _rank_chunks_lexically(question, index.chunks, limit=candidate_limit)
+    candidates = vector_candidates or _rank_chunks_lexically(expanded_question, index.chunks, limit=candidate_limit)
     rerank_limit = max(top_k, min(candidate_limit, max(4, top_k * 2)))
     reranked = await _ai_rerank_chunks(
         ai_config,
@@ -2559,7 +2630,10 @@ async def _execute_agent_tool(
         if not query:
             result = {"status": "error", "message": "query is required"}
             return result, AiToolEventResponse(name=tool_name, status="failed", summary="搜索失败：缺少 query"), [], []
-        from routers.items import rank_search_rows
+        from routers.items import rank_search_rows, _expand_query_with_memories
+
+        # Expand personal references using AI memories
+        expanded_query = _expand_query_with_memories(db, user_id, query)
 
         candidate_rows = (
             db.query(
@@ -2574,7 +2648,7 @@ async def _execute_agent_tool(
             .filter(Item.user_id == user_id)
             .all()
         )
-        ranked_item_ids = rank_search_rows(candidate_rows, query)[:limit]
+        ranked_item_ids = rank_search_rows(candidate_rows, expanded_query)[:limit]
         items = db.query(Item).filter(Item.user_id == user_id, Item.id.in_(ranked_item_ids)).all() if ranked_item_ids else []
         items_by_id = {item.id: item for item in items}
         ordered_items = [items_by_id[item_id] for item_id in ranked_item_ids if item_id in items_by_id]
@@ -3105,6 +3179,60 @@ async def _execute_agent_tool(
         from services.sandbox_executor import execute_sandbox_action, SandboxError
 
         action = _clean_optional_string(arguments.get("action")) or ""
+
+        # Route git_clone and download_file through approval system
+        _SANDBOX_APPROVAL_ACTIONS = {"git_clone", "download_file"}
+        if action in _SANDBOX_APPROVAL_ACTIONS:
+            url = _clean_optional_string(arguments.get("url")) or ""
+            desc = f"沙盒{action}: {url}" if url else f"沙盒{action}"
+            approval_command = f"[sandbox] {action}: {url}" if url else f"[sandbox] {action}"
+            result = _create_pending_approval(
+                command=approval_command,
+                description=desc,
+                working_directory="exports/",
+                extra_fields={
+                    "_sandbox_action": action,
+                    "_sandbox_arguments": arguments,
+                },
+            )
+            return result, AiToolEventResponse(
+                name=tool_name,
+                status="pending",
+                summary=f"等待用户批准：{desc}",
+                approval_id=result["approval_id"],
+                approval_command=approval_command,
+                approval_description=desc,
+            ), [], []
+
+        # Also check batch operations for git_clone/download_file
+        if action == "batch":
+            operations = arguments.get("operations") or []
+            has_download_op = any(
+                isinstance(op, dict) and op.get("action") in _SANDBOX_APPROVAL_ACTIONS
+                for op in operations
+            )
+            if has_download_op:
+                urls = [op.get("url", "") for op in operations if isinstance(op, dict) and op.get("action") in _SANDBOX_APPROVAL_ACTIONS]
+                desc = f"沙盒批量下载: {', '.join(u for u in urls if u)}" if any(urls) else "沙盒批量下载操作"
+                approval_command = "[sandbox] batch with download ops"
+                result = _create_pending_approval(
+                    command=approval_command,
+                    description=desc,
+                    working_directory="exports/",
+                    extra_fields={
+                        "_sandbox_action": action,
+                        "_sandbox_arguments": arguments,
+                    },
+                )
+                return result, AiToolEventResponse(
+                    name=tool_name,
+                    status="pending",
+                    summary=f"等待用户批准：{desc}",
+                    approval_id=result["approval_id"],
+                    approval_command=f"[sandbox] batch download",
+                    approval_description=desc,
+                ), [], []
+
         try:
             result = await execute_sandbox_action(action, arguments)
             summary = f"已执行 {action}"
@@ -3141,26 +3269,11 @@ async def _execute_agent_tool(
                 return result, AiToolEventResponse(name=tool_name, status="failed", summary=f"命令被禁止：{banned}"), [], []
 
         # Create pending approval — do NOT execute yet
-        approval_id = str(uuid.uuid4())
-        _pending_approvals[approval_id] = {
-            "command": command,
-            "description": description,
-            "working_directory": working_directory,
-            "created_at": datetime.utcnow(),
-        }
-        # Clean up expired approvals
-        now = datetime.utcnow()
-        expired = [k for k, v in _pending_approvals.items()
-                   if (now - v["created_at"]).total_seconds() > _APPROVAL_EXPIRY_SECONDS]
-        for k in expired:
-            _pending_approvals.pop(k, None)
-
-        result = {
-            "status": "pending_approval",
-            "approval_id": approval_id,
-            "command": command,
-            "description": description,
-        }
+        result = _create_pending_approval(
+            command=command,
+            description=description,
+            working_directory=working_directory,
+        )
         event = AiToolEventResponse(name=tool_name, status="pending", summary=f"等待用户批准：{_truncate_text(command, 60)}")
         return result, event, [], []
 
@@ -3684,6 +3797,14 @@ async def _run_agent_loop(
     )
 
 
+@router.get("/memories")
+def list_ai_memories_for_frontend(db: Session = Depends(get_db)):
+    """Return AI memories for frontend query expansion (search bar, graph search)."""
+    user_id = get_current_user_id()
+    memories = _load_ai_memories(db, user_id)
+    return [{"id": m.id, "type": m.type, "content": m.content} for m in memories]
+
+
 @router.get("/conversations", response_model=AiConversationListResponse)
 def list_ai_conversations(
     q: str | None = None,
@@ -3963,6 +4084,30 @@ async def approve_computer_command(request: AiApprovalRequest):
 
     if not request.approved:
         return AiApprovalResponse(status="denied", output="用户拒绝了此命令。", exit_code=-1)
+
+    # Handle sandbox command approvals (git_clone, download_file)
+    if "_sandbox_action" in approval:
+        from services.sandbox_executor import execute_sandbox_action, SandboxError
+        sandbox_action = approval["_sandbox_action"]
+        sandbox_arguments = approval["_sandbox_arguments"]
+        try:
+            result = await execute_sandbox_action(sandbox_action, sandbox_arguments)
+            output_parts = [f"操作完成: {sandbox_action}"]
+            if result.get("files_created"):
+                output_parts.append(f"创建了 {len(result['files_created'])} 个文件")
+            if result.get("output"):
+                output_parts.append(str(result["output"])[:_COMPUTER_CMD_MAX_OUTPUT])
+            return AiApprovalResponse(
+                status="completed",
+                output="\n".join(output_parts),
+                exit_code=0,
+            )
+        except (SandboxError, Exception) as exc:
+            return AiApprovalResponse(
+                status="error",
+                output=f"沙盒执行失败: {exc}",
+                exit_code=-1,
+            )
 
     command = approval["command"]
     working_directory = approval.get("working_directory") or os.path.expanduser("~")

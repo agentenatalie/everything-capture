@@ -714,10 +714,20 @@
                 return;
             }
 
-            const terms = query.split(/\s+/).filter(Boolean);
+            // Expand query using AI memories (e.g. "我的项目" → "我的项目 Everything Capture")
+            const expanded = expandQueryWithMemories(query).toLowerCase();
+            const originalTerms = query.toLowerCase().split(/\s+/).filter(Boolean);
+            const expandedTerms = expanded.split(/\s+/).filter(Boolean);
+            // Extra terms added by memory expansion (OR matching)
+            const extraTerms = expandedTerms.filter(t => !originalTerms.includes(t));
+
             _graphSearchMatches = _graphNodes.filter(n => {
                 const text = ((n.title || '') + ' ' + (n.folder_names || []).join(' ') + ' ' + (n.platform || '')).toLowerCase();
-                return terms.every(t => text.includes(t));
+                // Original terms: all must match (AND)
+                const originalMatch = originalTerms.every(t => text.includes(t));
+                // Memory-expanded terms: any match (OR)
+                const memoryMatch = extraTerms.length > 0 && extraTerms.some(t => text.includes(t));
+                return originalMatch || memoryMatch;
             });
 
             if (_graphSearchMatches.length > 0) {

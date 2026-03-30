@@ -84,6 +84,77 @@
         const iconCalendar = '<svg class="inline-icon" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M7 3v3M17 3v3M4 9h16M6.5 5h11A1.5 1.5 0 0 1 19 6.5v11A1.5 1.5 0 0 1 17.5 19h-11A1.5 1.5 0 0 1 5 17.5v-11A1.5 1.5 0 0 1 6.5 5Z" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>';
         const iconText = '<svg class="inline-icon" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M5 7.5h14M5 12h14M5 16.5h9" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>';
 
+        // ── AI memory-based query expansion ──────────────────────────
+        let _aiMemories = [];
+        let _aiMemoriesLoaded = false;
+        const _PERSONAL_PRONOUNS = ['我的', '自己的', '自己', '我'];
+        const _MEMORY_ENTITY_RE = /[A-Z][a-zA-Z0-9]{2,}(?:\s[A-Z][a-zA-Z0-9]{2,})*|[「『"'（(][\u4e00-\u9fff]{2,}[」』"'）)]/g;
+        const _MEMORY_PLATFORM_WORDS = new Set([
+            'chrome', 'safari', 'firefox', 'google', 'apple', 'microsoft', 'github',
+            'macos', 'mac', 'windows', 'linux', 'ios', 'android', 'python', 'javascript',
+            'web', 'api', 'app', 'sdk', 'cli',
+        ]);
+
+        async function loadAiMemories() {
+            try {
+                const res = await fetch(window.API_BASE_URL + '/api/ai/memories');
+                if (res.ok) _aiMemories = await res.json();
+                _aiMemoriesLoaded = true;
+            } catch (e) { /* silent */ }
+        }
+
+        function extractMemoryEntities(text) {
+            const matches = String(text || '').match(_MEMORY_ENTITY_RE) || [];
+            return matches.map((entity) => entity.replace(/^[「『"'（(]|[」』"'）)]$/g, ''));
+        }
+
+        function expandQueryWithMemories(query) {
+            if (!_aiMemoriesLoaded || !_aiMemories.length) return query;
+            const q = (query || '').trim().toLowerCase();
+            if (!q) return query;
+
+            const hasPersonal = _PERSONAL_PRONOUNS.some(p => q.includes(p));
+            if (!hasPersonal) return query;
+
+            // Strip pronouns to get the concept
+            let concept = q;
+            for (const p of _PERSONAL_PRONOUNS.slice().sort((a, b) => b.length - a.length)) {
+                concept = concept.replaceAll(p, '');
+            }
+            concept = concept.trim();
+            if (!concept) return query;
+
+            const extra = [];
+            for (const mem of _aiMemories) {
+                const c = (mem.content || '');
+                // Skip classification memories
+                if (c.includes('分类逻辑') || c.includes('文件夹分类')) continue;
+                // Strip URLs and check concept position
+                const cClean = c.replace(/https?:\/\/\S+/g, '');
+                const pos = cClean.toLowerCase().indexOf(concept);
+                if (pos < 0 || pos > 50) continue;
+                const entities = extractMemoryEntities(cClean);
+                let count = 0;
+                for (const w of entities) {
+                    if (count >= 2) break;
+                    const wl = w.toLowerCase();
+                    if (wl !== concept && !q.includes(wl) && !w.split(' ').some(p => _MEMORY_PLATFORM_WORDS.has(p.toLowerCase()))) {
+                        extra.push(w);
+                        count++;
+                    }
+                }
+            }
+            if (!extra.length) return query;
+            const seen = new Set();
+            const unique = extra.filter((term) => {
+                const key = term.toLowerCase();
+                if (seen.has(key)) return false;
+                seen.add(key);
+                return true;
+            }).slice(0, 3);
+            return query + ' ' + unique.join(' ');
+        }
+
         let itemsData = [];
         let currentView = 'gallery';
         let filteredEntries = [];
@@ -221,7 +292,7 @@
             const { force = false } = options;
             if (hasLoadedAuthenticatedData && !force) return;
             hasLoadedAuthenticatedData = true;
-            await Promise.all([loadSettings({ includeNotionDatabases: false }), fetchFolders(), fetchItems()]);
+            await Promise.all([loadSettings({ includeNotionDatabases: false }), fetchFolders(), fetchItems(), loadAiMemories()]);
         }
 
         function openSettingsPanel() {

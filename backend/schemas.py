@@ -53,9 +53,12 @@ class ItemResponse(BaseModel):
     folder_name: Optional[str] = None
     folder_ids: list[str] = Field(default_factory=list)
     folder_names: list[str] = Field(default_factory=list)
+    last_viewed_at: Optional[datetime] = None
     folder_count: int = 0
+    tag_ids: list[str] = Field(default_factory=list)
+    tag_names: list[str] = Field(default_factory=list)
     media: list[MediaResponse] = []
-    
+
     class Config:
         from_attributes = True
 
@@ -131,6 +134,7 @@ class SettingsResponse(BaseModel):
     ai_agent_can_web_search: bool = True
     ai_agent_can_run_computer_commands: bool = False
     auto_sync_target: str = "none"
+    ai_auto_tag_enabled: bool = False
     notion_ready: bool = False
     notion_missing_fields: list[str] = Field(default_factory=list)
     obsidian_ready: bool = False
@@ -202,6 +206,7 @@ class SettingsUpdateRequest(BaseModel):
     ai_agent_can_web_search: Optional[bool] = None
     ai_agent_can_run_computer_commands: Optional[bool] = None
     auto_sync_target: Optional[str] = None
+    ai_auto_tag_enabled: Optional[bool] = None
 
 
 class AiCitationResponse(BaseModel):
@@ -426,6 +431,7 @@ class FolderResponse(BaseModel):
     id: str
     name: str
     sort_order: int = 0
+    parent_id: Optional[str] = None
     created_at: datetime
     updated_at: datetime
     item_count: int = 0
@@ -442,14 +448,49 @@ class FolderListResponse(BaseModel):
 
 class FolderCreateRequest(BaseModel):
     name: str
+    parent_id: Optional[str] = None
 
 
 class FolderUpdateRequest(BaseModel):
     name: str
 
 
+class FolderMoveRequest(BaseModel):
+    parent_id: Optional[str] = None
+
+
 class FolderReorderRequest(BaseModel):
     folder_ids: list[str] = Field(default_factory=list)
+    parent_id: Optional[str] = None
+
+
+class TagResponse(BaseModel):
+    id: str
+    name: str
+    color: Optional[str] = None
+    item_count: int = 0
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+class TagListResponse(BaseModel):
+    tags: list[TagResponse] = Field(default_factory=list)
+
+
+class TagCreateRequest(BaseModel):
+    name: str
+    color: Optional[str] = None
+
+
+class TagUpdateRequest(BaseModel):
+    name: Optional[str] = None
+    color: Optional[str] = None
+
+
+class ItemTagUpdateRequest(BaseModel):
+    tag_ids: list[str] = Field(default_factory=list)
 
 
 class ItemFolderUpdateRequest(BaseModel):

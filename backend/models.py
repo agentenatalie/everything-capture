@@ -1,5 +1,5 @@
 from sqlalchemy import Boolean, Column, String, Integer, Float, DateTime, ForeignKey, Text
-from sqlalchemy.orm import relationship
+from sqlalchemy.orm import relationship, backref
 from database import Base
 from tenant import DEFAULT_USER_ID, DEFAULT_WORKSPACE_ID
 import datetime
@@ -78,6 +78,7 @@ class Item(Base):
     parse_error = Column(String, nullable=True)
     parsed_at = Column(DateTime, nullable=True)
     parse_retry_count = Column(Integer, nullable=False, default=0)
+    last_viewed_at = Column(DateTime, nullable=True)
 
     user = relationship("User", back_populates="items", lazy="joined")
     workspace = relationship("Workspace", back_populates="items", lazy="joined")
@@ -87,6 +88,7 @@ class Item(Base):
     ai_conversations = relationship("AiConversation", back_populates="current_item")
     page_notes = relationship("ItemPageNote", back_populates="item", cascade="all, delete-orphan")
     highlights = relationship("Highlight", back_populates="item", cascade="all, delete-orphan")
+    tag_links = relationship("ItemTagLink", back_populates="item", cascade="all, delete-orphan", lazy="selectin")
 
 
 class Media(Base):
@@ -116,6 +118,7 @@ class Folder(Base):
     workspace_id = Column(String, ForeignKey("workspaces.id"), nullable=False, index=True, default=DEFAULT_WORKSPACE_ID)
     name = Column(String, nullable=False, index=True)
     sort_order = Column(Integer, nullable=False, default=0, index=True)
+    parent_id = Column(String, ForeignKey("folders.id"), nullable=True, index=True)
     created_at = Column(DateTime, default=datetime.datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.datetime.utcnow)
 
@@ -123,6 +126,7 @@ class Folder(Base):
     workspace = relationship("Workspace", back_populates="folders", lazy="joined")
     items = relationship("Item", back_populates="folder")
     item_links = relationship("ItemFolderLink", back_populates="folder", cascade="all, delete-orphan")
+    children = relationship("Folder", backref=backref("parent", remote_side="Folder.id"), lazy="selectin")
 
 
 class ItemFolderLink(Base):
@@ -161,6 +165,7 @@ class Settings(Base):
     ai_agent_can_web_search = Column(Boolean, nullable=False, default=True)
     ai_agent_can_run_computer_commands = Column(Boolean, nullable=False, default=False)
     auto_sync_target = Column(String, default="none") # "none", "notion", "obsidian", "both"
+    ai_auto_tag_enabled = Column(Boolean, nullable=False, default=False)
 
     user = relationship("User", back_populates="settings", lazy="joined")
     workspace = relationship("Workspace", back_populates="settings", lazy="joined")
@@ -232,6 +237,31 @@ class Highlight(Base):
     user = relationship("User", back_populates="highlights", lazy="joined")
     workspace = relationship("Workspace", back_populates="highlights", lazy="joined")
     page_note = relationship("ItemPageNote", lazy="joined")
+
+
+class Tag(Base):
+    __tablename__ = "tags"
+
+    id = Column(String, primary_key=True, index=True, default=generate_uuid)
+    user_id = Column(String, ForeignKey("users.id"), nullable=False, index=True, default=DEFAULT_USER_ID)
+    name = Column(String, nullable=False)
+    color = Column(String, nullable=True)
+    created_at = Column(DateTime, default=datetime.datetime.utcnow)
+
+    user = relationship("User")
+    item_links = relationship("ItemTagLink", back_populates="tag", cascade="all, delete-orphan")
+
+
+class ItemTagLink(Base):
+    __tablename__ = "item_tag_links"
+
+    item_id = Column(String, ForeignKey("items.id"), primary_key=True)
+    tag_id = Column(String, ForeignKey("tags.id"), primary_key=True)
+    source = Column(String, nullable=False, default="manual")  # "manual" or "ai"
+    created_at = Column(DateTime, default=datetime.datetime.utcnow)
+
+    item = relationship("Item", back_populates="tag_links")
+    tag = relationship("Tag", back_populates="item_links", lazy="joined")
 
 
 class AiMemory(Base):

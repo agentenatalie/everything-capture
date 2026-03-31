@@ -53,10 +53,19 @@
 
         function renderFolderTags(item) {
             const folderNames = getItemFolderNames(item);
-            if (!folderNames.length) return '';
-            return folderNames.slice(0, 3).map((folderName) => (
-                `<span class="folder-tag">${folderIconSvg()}<span>${escapeHtml(folderName)}</span></span>`
-            )).join('');
+            let html = '';
+            if (folderNames.length) {
+                html += folderNames.slice(0, 3).map((folderName) => (
+                    `<span class="folder-tag">${folderIconSvg()}<span>${escapeHtml(folderName)}</span></span>`
+                )).join('');
+            }
+            const tagNames = item.tag_names || [];
+            if (tagNames.length) {
+                html += tagNames.slice(0, 2).map((tagName) => (
+                    `<span class="item-tag-pill">${escapeHtml(tagName)}</span>`
+                )).join('');
+            }
+            return html;
         }
 
         function openFolderPickerForItem(itemId, title = '管理文件夹') {
@@ -93,17 +102,58 @@
                 ? `<button class="folder-item-menu" type="button" onclick="openFolderContextMenu('${folderId}', event)">···</button>`
                 : '';
             const glyph = getFolderGlyph(label, scope);
+            const level = options.level || 0;
+            const indent = level * 20;
+            const hasChildren = options.hasChildren || false;
+            const isCollapsed = hasChildren && collapsedFolderIds.has(folderId);
+            const chevron = hasChildren
+                ? `<span class="folder-chevron${isCollapsed ? '' : ' folder-chevron-open'}" onclick="event.stopPropagation();toggleFolderCollapse('${folderId}')" aria-hidden="true">›</span>`
+                : (level > 0 ? '<span class="folder-chevron-placeholder"></span>' : '');
+            const contextMenuAttr = scope === 'folder' ? ` oncontextmenu="event.preventDefault();openFolderContextMenu('${folderId}', event)"` : '';
             const dragAttrs = scope === 'folder'
                 ? ` draggable="true" data-folder-id="${folderId}" data-folder-scope="${scope}" ondragstart="handleFolderDragStart(event, '${folderId}')" ondragend="handleFolderDragEnd()" ondragover="handleFolderDragOver(event, '${folderId}')" ondragleave="handleFolderDragLeave(event, '${folderId}')" ondrop="handleFolderDrop(event, '${folderId}')"`
                 : ` data-folder-scope="${scope}"`;
             return `
-                <div class="folder-item${active ? ' active' : ''}" role="button" tabindex="0" title="${escapeAttribute(label)}" onclick="setActiveFolder('${scope}', ${folderId ? `'${folderId}'` : 'null'})" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();setActiveFolder('${scope}', ${folderId ? `'${folderId}'` : 'null'});}"${dragAttrs}>
+                <div class="folder-item${active ? ' active' : ''}" role="button" tabindex="0" title="${escapeAttribute(label)}" style="${indent ? `padding-left:${12 + indent}px` : ''}" onclick="setActiveFolder('${scope}', ${folderId ? `'${folderId}'` : 'null'})" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();setActiveFolder('${scope}', ${folderId ? `'${folderId}'` : 'null'});}"${dragAttrs}${contextMenuAttr}>
+                    ${chevron}
                     <span class="folder-item-glyph" aria-hidden="true">${escapeHtml(glyph)}</span>
                     <span class="folder-item-name">${escapeHtml(label)}</span>
                     <span class="folder-item-count">${count}</span>
                     ${menuButton}
                 </div>
             `;
+        }
+
+        function toggleFolderCollapse(folderId) {
+            if (collapsedFolderIds.has(folderId)) {
+                collapsedFolderIds.delete(folderId);
+            } else {
+                collapsedFolderIds.add(folderId);
+            }
+            localStorage.setItem('collapsedFolderIds', JSON.stringify([...collapsedFolderIds]));
+            renderFolderNavigation();
+        }
+
+        function buildFolderTree(folders) {
+            const byParent = {};
+            for (const f of folders) {
+                const pid = f.parent_id || '__root__';
+                if (!byParent[pid]) byParent[pid] = [];
+                byParent[pid].push(f);
+            }
+            function collect(parentId, level) {
+                const children = byParent[parentId] || [];
+                const result = [];
+                for (const f of children) {
+                    const hasChildren = (byParent[f.id] || []).length > 0;
+                    result.push({ ...f, _level: level, _hasChildren: hasChildren });
+                    if (hasChildren && !collapsedFolderIds.has(f.id)) {
+                        result.push(...collect(f.id, level + 1));
+                    }
+                }
+                return result;
+            }
+            return collect('__root__', 0);
         }
 
         function updateSidebarState() {
@@ -122,23 +172,31 @@
 
         function renderFolderNavigation() {
             const normalizedQuery = folderSearchQuery.trim().toLowerCase();
-            const baseItems = [
-                { label: '全部内容', scope: 'all', count: totalFolderCount },
+            const treeItems = buildFolderTree(foldersData);
+            const allItems = [
+                { label: '全部内容', scope: 'all', count: totalFolderCount, _level: 0, _hasChildren: false },
+                ...treeItems.map((f) => ({
+                    label: f.name,
+                    scope: 'folder',
+                    count: f.item_count || 0,
+                    id: f.id,
+                    _level: f._level,
+                    _hasChildren: f._hasChildren,
+                })),
             ];
-            const userItems = foldersData.map((folder) => ({
-                label: folder.name,
-                scope: 'folder',
-                count: folder.item_count || 0,
-                id: folder.id,
-            }));
-            const visibleItems = [...baseItems, ...userItems].filter((entry) => {
+            const visibleItems = allItems.filter((entry) => {
                 if (!normalizedQuery) return true;
                 return String(entry.label || '').toLowerCase().includes(normalizedQuery);
             });
 
-            folderList.innerHTML = visibleItems.length
-                ? visibleItems.map((entry) => renderFolderNavItem(entry.label, entry.scope, entry.count, entry.id || null, { menu: entry.scope === 'folder' })).join('')
+            let html = visibleItems.length
+                ? visibleItems.map((entry) => renderFolderNavItem(entry.label, entry.scope, entry.count, entry.id || null, { menu: entry.scope === 'folder', level: entry._level, hasChildren: entry._hasChildren })).join('')
                 : '<div class="folder-empty">没有匹配的文件夹</div>';
+
+            // Tags section
+            html += renderTagsSidebarSection();
+
+            folderList.innerHTML = html;
 
             const mobileItems = [
                 { label: '全部', scope: 'all', count: totalFolderCount },
@@ -149,6 +207,30 @@
                 const folderId = item.id ? `'${item.id}'` : 'null';
                 return `<button class="folder-chip${active ? ' active' : ''}" type="button" onclick="setActiveFolder('${item.scope}', ${folderId})">${escapeHtml(item.label)} · ${item.count}</button>`;
             }).join('') + '<button class="folder-chip" type="button" onclick="openCreateFolderPrompt()">+ 新建</button>';
+        }
+
+        function renderTagsSidebarSection() {
+            if (!tagsData || !tagsData.length) return '';
+            const pills = tagsData.map(t => {
+                const active = currentTagId === t.id;
+                return `<span class="sidebar-tag-pill${active ? ' active' : ''}" onclick="event.stopPropagation();setActiveTag('${t.id}')" title="${escapeAttribute(t.name)}">${escapeHtml(t.name)}<span class="sidebar-tag-count">${t.item_count || 0}</span></span>`;
+            }).join('');
+            return `<div class="sidebar-tags-section"><div class="sidebar-tags-header">标签</div><div class="sidebar-tags-cloud">${pills}</div></div>`;
+        }
+
+        function renderTagsInSidebar() {
+            renderFolderNavigation();
+        }
+
+        function setActiveTag(tagId) {
+            if (currentTagId === tagId) {
+                currentTagId = null;
+            } else {
+                currentTagId = tagId;
+            }
+            tagFilter.value = currentTagId || '';
+            renderFolderNavigation();
+            fetchItems();
         }
 
         function setFolderReorderArmed(isArmed) {
@@ -344,6 +426,7 @@
                 }
                 renderFolderNavigation();
                 updateMobileCaptureFolderSummary();
+                fetchTags();
             } catch (error) {
                 folderList.innerHTML = '<div class="folder-loading">文件夹加载失败</div>';
                 folderMobileStrip.innerHTML = '';
@@ -351,13 +434,15 @@
             }
         }
 
-        async function createFolder(name) {
+        async function createFolder(name, parentId = null) {
             const trimmedName = String(name || '').trim();
             if (!trimmedName) return null;
+            const body = { name: trimmedName };
+            if (parentId) body.parent_id = parentId;
             const response = await fetch('/api/folders', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ name: trimmedName }),
+                body: JSON.stringify(body),
             });
             const data = await response.json().catch(() => ({}));
             if (!response.ok) {
@@ -719,11 +804,52 @@
             }
         }
 
+        function getFolderDepth(folderId) {
+            let depth = 0;
+            let current = foldersData.find(f => f.id === folderId);
+            while (current && current.parent_id) {
+                depth++;
+                current = foldersData.find(f => f.id === current.parent_id);
+            }
+            return depth;
+        }
+
+        async function createSubfolderPrompt(parentId) {
+            closeFolderContextMenu();
+            const parent = foldersData.find(f => f.id === parentId);
+            if (!parent) return;
+            const name = window.prompt(`在「${parent.name}」下创建子文件夹`);
+            if (!name) return;
+            try {
+                await createFolder(name, parentId);
+                if (collapsedFolderIds.has(parentId)) {
+                    collapsedFolderIds.delete(parentId);
+                    localStorage.setItem('collapsedFolderIds', JSON.stringify([...collapsedFolderIds]));
+                }
+                showToast(`已创建子文件夹：${name}`, 'success');
+            } catch (error) {
+                showToast(error.message, 'error');
+            }
+        }
+
         function openFolderContextMenu(folderId, event) {
             event.stopPropagation();
             const folder = foldersData.find((entry) => entry.id === folderId);
             if (!folder) return;
+            const depth = getFolderDepth(folderId);
+            const canNest = depth < 1;
+            const subfolderBtn = canNest ? `
+                <button type="button" onclick="createSubfolderPrompt('${folderId}')">
+                    <span class="folder-context-menu-icon" aria-hidden="true">
+                        <svg viewBox="0 0 24 24" fill="none" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">
+                            <path d="M12 5v14M5 12h14"></path>
+                        </svg>
+                    </span>
+                    <span class="folder-context-menu-copy">创建子文件夹</span>
+                </button>
+            ` : '';
             folderContextMenu.innerHTML = `
+                ${subfolderBtn}
                 <button type="button" onclick="renameFolderPrompt('${folderId}')">
                     <span class="folder-context-menu-icon" aria-hidden="true">
                         <svg viewBox="0 0 24 24" fill="none" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">
@@ -745,14 +871,15 @@
                     <span class="folder-context-menu-copy">删除文件夹</span>
                 </button>
             `;
-            const trigger = event.currentTarget || event.target;
-            const triggerRect = trigger.getBoundingClientRect();
             folderContextMenu.classList.add('show');
             folderContextMenu.style.visibility = 'hidden';
 
             const menuRect = folderContextMenu.getBoundingClientRect();
-            const desiredTop = triggerRect.bottom + 8;
-            const desiredLeft = triggerRect.right - menuRect.width;
+            const isContextMenu = event.type === 'contextmenu';
+            const trigger = event.currentTarget || event.target;
+            const triggerRect = trigger.getBoundingClientRect();
+            const desiredTop = isContextMenu ? event.clientY : triggerRect.bottom + 8;
+            const desiredLeft = isContextMenu ? event.clientX : triggerRect.right - menuRect.width;
             const maxLeft = window.innerWidth - menuRect.width - 12;
             const maxTop = window.innerHeight - menuRect.height - 12;
 

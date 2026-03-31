@@ -349,6 +349,7 @@
             } else if (currentFolderScope === 'folder' && currentFolderId) {
                 params.set('folder_id', currentFolderId);
             }
+            if (currentTagId) params.set('tag_id', currentTagId);
             return params;
         }
 

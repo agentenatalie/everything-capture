@@ -811,13 +811,15 @@
                 const hasKeyword = !!filterInput.value.trim();
                 const hasPlatformFilter = platformFilter.value !== 'all';
                 const hasFolderFilter = currentFolderScope !== 'all';
+                const hasTagFilter = !!currentTagId;
                 setStatsSummary(
                     latestTotalCount || itemsData.length,
                     latestVisibleCount || itemsData.length,
                     latestReturnedCount || itemsData.length,
-                    hasKeyword || hasPlatformFilter || hasFolderFilter
+                    hasKeyword || hasPlatformFilter || hasFolderFilter || hasTagFilter
                 );
                 renderItems(filteredEntries, { animate: true });
+                fetchRecentViews();
                 startBackgroundRefresh();
                 const trackedSyncIds = getTrackedRemoteSyncItemIds(itemsData);
                 if (trackedSyncIds.length) {
@@ -833,6 +835,58 @@
                     currentItemsRequestController = null;
                 }
             }
+        }
+
+        async function fetchRecentViews() {
+            const hasKeyword = !!filterInput.value.trim();
+            const hasFolderFilter = currentFolderScope !== 'all';
+            const hasTagFilter = !!currentTagId;
+            if (hasKeyword || hasFolderFilter || hasTagFilter) {
+                recentViewsSection.style.display = 'none';
+                return;
+            }
+            try {
+                const res = await fetch('/api/items/recent-views?limit=8');
+                if (!res.ok) return;
+                const views = await res.json();
+                renderRecentViews(views);
+            } catch (e) { /* silent */ }
+        }
+
+        function renderRecentViews(views) {
+            if (!views || !views.length) {
+                recentViewsSection.style.display = 'none';
+                return;
+            }
+            recentViewsSection.style.display = '';
+            const cards = views.map((item) => {
+                const thumbMedia = getItemThumbnail(item);
+                const thumb = thumbMedia
+                    ? `<div class="rv-card-thumb"><img src="${escapeAttribute(resolveMediaUrl(thumbMedia.url))}" alt="" loading="lazy" decoding="async"></div>`
+                    : `<div class="rv-card-thumb rv-card-thumb-empty"><span>${escapeHtml((item.platform || '').slice(0, 2).toUpperCase() || '📄')}</span></div>`;
+                return `<div class="rv-card" onclick="handleItemPrimaryAction('${item.id}')" title="${escapeAttribute(item.title || '')}">
+                    ${thumb}
+                    <div class="rv-card-title">${escapeHtml(item.title || '无标题')}</div>
+                </div>`;
+            }).join('');
+            recentViewsSection.innerHTML = `<div class="rv-header">最近查看</div><div class="rv-scroll">${cards}</div>`;
+        }
+
+        async function fetchTags() {
+            try {
+                const res = await fetch('/api/tags');
+                if (!res.ok) return;
+                const data = await res.json();
+                tagsData = data.tags || [];
+                populateTagFilter();
+                renderTagsInSidebar();
+            } catch (e) { /* silent */ }
+        }
+
+        function populateTagFilter() {
+            const current = tagFilter.value;
+            tagFilter.innerHTML = '<option value="">全部标签</option>' +
+                tagsData.map(t => `<option value="${t.id}"${t.id === current ? ' selected' : ''}>${escapeHtml(t.name)}${t.item_count ? ' (' + t.item_count + ')' : ''}</option>`).join('');
         }
 
         async function refreshRemoteSyncStatus(itemIds, requestId) {
@@ -1288,6 +1342,10 @@
             updateCommandPaletteState();
             fetchItems();
         });
+        tagFilter.addEventListener('change', () => {
+            currentTagId = tagFilter.value || null;
+            fetchItems();
+        });
         galleryViewBtn.addEventListener('click', () => setView('gallery'));
         listViewBtn.addEventListener('click', () => setView('list'));
         graphViewBtn.addEventListener('click', () => setView('graph'));
@@ -1531,6 +1589,85 @@
                 item.created_at ? formatDate(item.created_at) : '',
             ].filter(Boolean);
             return parts.join(' · ') || '当前笔记';
+        }
+
+        function renderReaderTags(item) {
+            let container = document.getElementById('readerTagsBar');
+            if (!container) {
+                container = document.createElement('div');
+                container.id = 'readerTagsBar';
+                container.className = 'reader-tags-bar';
+                if (readerMetaLine && readerMetaLine.parentNode) {
+                    readerMetaLine.parentNode.insertBefore(container, readerMetaLine.nextSibling);
+                }
+            }
+            if (!item) { container.innerHTML = ''; return; }
+            const tagNames = item.tag_names || [];
+            const pills = tagNames.map(n => `<span class="reader-tag-pill">${escapeHtml(n)}</span>`).join('');
+            const addBtn = `<button class="reader-tag-add" type="button" onclick="openReaderTagPicker('${item.id}')" title="管理标签">+</button>`;
+            container.innerHTML = pills + addBtn;
+        }
+
+        function openReaderTagPicker(itemId) {
+            const item = getItemById(itemId);
+            if (!item) return;
+            const existingTagIds = new Set(item.tag_ids || []);
+            const options = tagsData.map(t => {
+                const checked = existingTagIds.has(t.id) ? ' checked' : '';
+                return `<label class="tag-picker-row"><input type="checkbox" data-tag-id="${t.id}"${checked}/><span>${escapeHtml(t.name)}</span></label>`;
+            }).join('');
+            const html = `<div class="tag-picker-overlay" onclick="if(event.target===this)this.remove()">
+                <div class="tag-picker-panel">
+                    <div class="tag-picker-header">管理标签</div>
+                    <div class="tag-picker-list">${options || '<div style="padding:8px;color:#888;">暂无标签</div>'}</div>
+                    <div class="tag-picker-footer">
+                        <input type="text" class="tag-picker-new-input" placeholder="新建标签..." />
+                        <button type="button" class="tag-picker-save" onclick="saveReaderTags('${itemId}')">保存</button>
+                    </div>
+                </div>
+            </div>`;
+            document.body.insertAdjacentHTML('beforeend', html);
+            const input = document.querySelector('.tag-picker-new-input');
+            if (input) {
+                input.addEventListener('keydown', async (e) => {
+                    if (e.key !== 'Enter') return;
+                    const name = input.value.trim();
+                    if (!name) return;
+                    try {
+                        const res = await fetch('/api/tags', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name }) });
+                        if (res.ok) {
+                            const tag = await res.json();
+                            tagsData.push(tag);
+                            populateTagFilter();
+                            const list = document.querySelector('.tag-picker-list');
+                            if (list) list.insertAdjacentHTML('beforeend', `<label class="tag-picker-row"><input type="checkbox" data-tag-id="${tag.id}" checked/><span>${escapeHtml(tag.name)}</span></label>`);
+                            input.value = '';
+                        }
+                    } catch (err) { /* silent */ }
+                });
+            }
+        }
+
+        async function saveReaderTags(itemId) {
+            const overlay = document.querySelector('.tag-picker-overlay');
+            if (!overlay) return;
+            const checked = overlay.querySelectorAll('input[data-tag-id]:checked');
+            const tagIds = Array.from(checked).map(el => el.dataset.tagId);
+            try {
+                const res = await fetch(`/api/items/${encodeURIComponent(itemId)}/tags`, {
+                    method: 'PATCH',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ tag_ids: tagIds }),
+                });
+                if (res.ok) {
+                    const updatedItem = await res.json();
+                    const idx = itemsData.findIndex(i => i.id === itemId);
+                    if (idx >= 0) itemsData[idx] = updatedItem;
+                    renderReaderTags(updatedItem);
+                    fetchTags();
+                }
+            } catch (err) { /* silent */ }
+            overlay.remove();
         }
 
         function renderNotePanel(item) {
@@ -1902,6 +2039,8 @@
                 readerNavOrigin = navOrigin;
             }
             currentOpenItemId = item.id;
+            // Fire-and-forget view tracking
+            fetch(`/api/items/${encodeURIComponent(item.id)}/view`, { method: 'POST' }).catch(() => {});
             const isNewItem = previousOpenItemId !== currentOpenItemId;
             const preferredSidebarTab = preserveSidebarTab ? (readerSidebarTab || 'note') : 'note';
             if (isNewItem) {
@@ -1922,6 +2061,7 @@
             if (readerMetaLine) {
                 readerMetaLine.textContent = buildReaderMeta(item);
             }
+            renderReaderTags(item);
             readerStatusDots.innerHTML = renderKnowledgeDotMarkup(item);
             if (toggleNoteBtn) {
                 const parsedContentReady = hasParsedContent(item);

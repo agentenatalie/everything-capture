@@ -16,7 +16,7 @@ from fastapi.responses import StreamingResponse
 from sqlalchemy import func, or_, text
 from sqlalchemy.orm import Session
 from database import SessionLocal, get_db
-from models import AiConversation, Folder, Highlight, Item, ItemFolderLink, ItemPageNote
+from models import AiConversation, Folder, Highlight, Item, ItemFolderLink, ItemPageNote, ItemTagLink, Tag
 from schemas import (
     BulkFolderUpdateRequest,
     BulkFolderUpdateResponse,
@@ -35,6 +35,7 @@ from schemas import (
     ItemPageNoteResponse,
     ItemPageNoteUpdateRequest,
     ItemResponse,
+    ItemTagUpdateRequest,
     MediaResponse,
 )
 from paths import STATIC_DIR
@@ -290,6 +291,13 @@ def serialize_items(items: list[Item]) -> list[ItemResponse]:
         except json.JSONDecodeError:
             qr_links = []
 
+        tag_ids = []
+        tag_names = []
+        for tl in (item.tag_links or []):
+            if tl.tag:
+                tag_ids.append(tl.tag_id)
+                tag_names.append(tl.tag.name)
+
         results.append(ItemResponse(
             id=item.id,
             created_at=item.created_at,
@@ -316,6 +324,9 @@ def serialize_items(items: list[Item]) -> list[ItemResponse]:
             folder_ids=folder_ids,
             folder_names=folder_names,
             folder_count=len(folder_ids),
+            last_viewed_at=item.last_viewed_at,
+            tag_ids=tag_ids,
+            tag_names=tag_names,
             media=media_list,
         ))
     return results
@@ -388,9 +399,19 @@ def apply_platform_filter(query, platform: str):
     return query.filter(platform_expr == normalized)
 
 
+def _get_descendant_folder_ids(db: Session, folder_id: str) -> list[str]:
+    result = [folder_id]
+    children = db.query(Folder.id).filter(Folder.parent_id == folder_id).all()
+    for (child_id,) in children:
+        result.extend(_get_descendant_folder_ids(db, child_id))
+    return result
+
+
 def apply_folder_filter(query, folder_scope: str = "all", folder_id: Optional[str] = None):
     if folder_id:
-        linked_item_ids = query.session.query(ItemFolderLink.item_id).filter(ItemFolderLink.folder_id == folder_id)
+        db = query.session
+        all_folder_ids = _get_descendant_folder_ids(db, folder_id)
+        linked_item_ids = db.query(ItemFolderLink.item_id).filter(ItemFolderLink.folder_id.in_(all_folder_ids))
         return query.filter(Item.id.in_(linked_item_ids))
 
     normalized_scope = (folder_scope or "all").strip().lower()
@@ -398,6 +419,13 @@ def apply_folder_filter(query, folder_scope: str = "all", folder_id: Optional[st
         linked_item_ids = query.session.query(ItemFolderLink.item_id)
         return query.filter(~Item.id.in_(linked_item_ids))
     return query
+
+
+def apply_tag_filter(query, tag_id: Optional[str] = None):
+    if not tag_id:
+        return query
+    tagged_item_ids = query.session.query(ItemTagLink.item_id).filter(ItemTagLink.tag_id == tag_id)
+    return query.filter(Item.id.in_(tagged_item_ids))
 
 
 def normalize_requested_folder_ids(folder_id: Optional[str], folder_ids: Optional[list[str]]) -> list[str]:
@@ -989,6 +1017,20 @@ def get_search_suggestions(
         return []
 
 
+@router.get("/items/recent-views", response_model=List[ItemResponse])
+def get_recent_views(limit: int = 8, db: Session = Depends(get_db)):
+    user_id = get_current_user_id()
+    safe_limit = max(1, min(limit, 20))
+    items = (
+        db.query(Item)
+        .filter(Item.user_id == user_id, Item.last_viewed_at.isnot(None))
+        .order_by(Item.last_viewed_at.desc())
+        .limit(safe_limit)
+        .all()
+    )
+    return serialize_items(items)
+
+
 @router.get("/items/{item_id}", response_model=ItemResponse)
 def get_item(
     item_id: str,
@@ -1102,6 +1144,7 @@ def get_items(
     platform: str = "all",
     folder_scope: str = "all",
     folder_id: Optional[str] = None,
+    tag_id: Optional[str] = None,
     db: Session = Depends(get_db),
 ):
     user_id = get_current_user_id()
@@ -1133,10 +1176,13 @@ def get_items(
                 Item.id.in_(fts_item_ids)
             )
 
-            filtered_query = apply_folder_filter(
-                apply_platform_filter(base_query, platform),
-                folder_scope,
-                folder_id
+            filtered_query = apply_tag_filter(
+                apply_folder_filter(
+                    apply_platform_filter(base_query, platform),
+                    folder_scope,
+                    folder_id
+                ),
+                tag_id,
             )
 
             filtered_items = filtered_query.all()
@@ -1154,21 +1200,24 @@ def get_items(
         else:
             # 使用原有搜索逻辑
             candidate_rows = (
-                apply_folder_filter(
-                    apply_platform_filter(
-                        db.query(
-                            Item.id,
-                            Item.user_id,
-                            Item.title,
-                            Item.canonical_text,
-                            Item.source_url,
-                            Item.platform,
-                            Item.created_at,
-                        ).filter(Item.user_id == user_id),
-                        platform,
+                apply_tag_filter(
+                    apply_folder_filter(
+                        apply_platform_filter(
+                            db.query(
+                                Item.id,
+                                Item.user_id,
+                                Item.title,
+                                Item.canonical_text,
+                                Item.source_url,
+                                Item.platform,
+                                Item.created_at,
+                            ).filter(Item.user_id == user_id),
+                            platform,
+                        ),
+                        folder_scope,
+                        folder_id,
                     ),
-                    folder_scope,
-                    folder_id,
+                    tag_id,
                 )
                 .all()
             )
@@ -1184,10 +1233,13 @@ def get_items(
             else:
                 items = []
     else:
-        items_query = apply_folder_filter(
-            apply_platform_filter(db.query(Item).filter(Item.user_id == user_id), platform),
-            folder_scope,
-            folder_id,
+        items_query = apply_tag_filter(
+            apply_folder_filter(
+                apply_platform_filter(db.query(Item).filter(Item.user_id == user_id), platform),
+                folder_scope,
+                folder_id,
+            ),
+            tag_id,
         )
         visible_count = items_query.count()
         items = (
@@ -1202,6 +1254,38 @@ def get_items(
     response.headers["X-Visible-Count"] = str(visible_count)
     response.headers["X-Returned-Count"] = str(len(items))
     return serialize_items(items)
+
+
+@router.post("/items/{item_id}/view", status_code=204)
+def record_item_view(item_id: str, db: Session = Depends(get_db)):
+    user_id = get_current_user_id()
+    item = db.query(Item).filter(Item.id == item_id, Item.user_id == user_id).first()
+    if not item:
+        raise HTTPException(status_code=404, detail="Item not found")
+    item.last_viewed_at = datetime.utcnow()
+    db.commit()
+    return Response(status_code=204)
+
+
+@router.patch("/items/{item_id}/tags", response_model=ItemResponse)
+def update_item_tags(item_id: str, request: ItemTagUpdateRequest, db: Session = Depends(get_db)):
+    user_id = get_current_user_id()
+    item = db.query(Item).filter(Item.id == item_id, Item.user_id == user_id).first()
+    if not item:
+        raise HTTPException(status_code=404, detail="Item not found")
+
+    requested_tag_ids = list(dict.fromkeys(tid.strip() for tid in request.tag_ids if tid.strip()))
+    if requested_tag_ids:
+        existing_tags = db.query(Tag).filter(Tag.user_id == user_id, Tag.id.in_(requested_tag_ids)).all()
+        if len(existing_tags) != len(requested_tag_ids):
+            raise HTTPException(status_code=404, detail="Tag not found")
+
+    db.query(ItemTagLink).filter(ItemTagLink.item_id == item_id).delete(synchronize_session=False)
+    for tid in requested_tag_ids:
+        db.add(ItemTagLink(item_id=item_id, tag_id=tid, source="manual"))
+    db.commit()
+    db.refresh(item)
+    return serialize_items([item])[0]
 
 
 @router.patch("/items/{item_id}/folder", response_model=ItemResponse)

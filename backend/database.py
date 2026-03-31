@@ -173,6 +173,9 @@ def ensure_runtime_schema():
         )
         if "parse_retry_count" not in item_columns:
             connection.exec_driver_sql("ALTER TABLE items ADD COLUMN parse_retry_count INTEGER NOT NULL DEFAULT 0")
+        if "last_viewed_at" not in item_columns:
+            connection.exec_driver_sql("ALTER TABLE items ADD COLUMN last_viewed_at DATETIME")
+        connection.exec_driver_sql("CREATE INDEX IF NOT EXISTS idx_items_last_viewed_at ON items(last_viewed_at DESC)")
         connection.exec_driver_sql(
             "UPDATE items SET parse_status = 'idle' WHERE parse_status IS NULL OR trim(parse_status) = ''"
         )
@@ -250,6 +253,11 @@ def ensure_runtime_schema():
             connection.exec_driver_sql(
                 "ALTER TABLE folders ADD COLUMN sort_order INTEGER NOT NULL DEFAULT 0"
             )
+        if "parent_id" not in folder_columns:
+            connection.exec_driver_sql(
+                "ALTER TABLE folders ADD COLUMN parent_id VARCHAR REFERENCES folders(id)"
+            )
+        connection.exec_driver_sql("CREATE INDEX IF NOT EXISTS idx_folders_parent_id ON folders(parent_id)")
         connection.exec_driver_sql(
             "UPDATE folders SET user_id = ? WHERE user_id IS NULL OR trim(user_id) = ''",
             (DEFAULT_USER_ID,),
@@ -356,6 +364,13 @@ def ensure_runtime_schema():
         )
         connection.exec_driver_sql(
             "UPDATE settings SET ai_agent_can_run_computer_commands = 0 WHERE ai_agent_can_run_computer_commands IS NULL"
+        )
+        if "ai_auto_tag_enabled" not in settings_columns:
+            connection.exec_driver_sql(
+                "ALTER TABLE settings ADD COLUMN ai_auto_tag_enabled BOOLEAN NOT NULL DEFAULT 0"
+            )
+        connection.exec_driver_sql(
+            "UPDATE settings SET ai_auto_tag_enabled = 0 WHERE ai_auto_tag_enabled IS NULL"
         )
         connection.exec_driver_sql("DROP INDEX IF EXISTS idx_settings_workspace_id")
         connection.exec_driver_sql("CREATE UNIQUE INDEX IF NOT EXISTS idx_settings_user_id ON settings(user_id)")
@@ -491,6 +506,35 @@ def ensure_runtime_schema():
         )
         connection.exec_driver_sql("CREATE INDEX IF NOT EXISTS idx_highlights_item_id ON highlights(item_id)")
         connection.exec_driver_sql("CREATE INDEX IF NOT EXISTS idx_highlights_user_id ON highlights(user_id)")
+
+        # --- tags ---
+        connection.exec_driver_sql(
+            """
+            CREATE TABLE IF NOT EXISTS tags (
+                id VARCHAR PRIMARY KEY,
+                user_id VARCHAR NOT NULL REFERENCES users(id),
+                name VARCHAR NOT NULL,
+                color VARCHAR,
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+            )
+            """
+        )
+        connection.exec_driver_sql("CREATE INDEX IF NOT EXISTS idx_tags_user_id ON tags(user_id)")
+        connection.exec_driver_sql("CREATE UNIQUE INDEX IF NOT EXISTS idx_tags_user_name ON tags(user_id, name)")
+
+        connection.exec_driver_sql(
+            """
+            CREATE TABLE IF NOT EXISTS item_tag_links (
+                item_id VARCHAR NOT NULL REFERENCES items(id),
+                tag_id VARCHAR NOT NULL REFERENCES tags(id),
+                source VARCHAR NOT NULL DEFAULT 'manual',
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                PRIMARY KEY (item_id, tag_id)
+            )
+            """
+        )
+        connection.exec_driver_sql("CREATE INDEX IF NOT EXISTS idx_item_tag_links_item_id ON item_tag_links(item_id)")
+        connection.exec_driver_sql("CREATE INDEX IF NOT EXISTS idx_item_tag_links_tag_id ON item_tag_links(tag_id)")
 
         # --- ai_memories ---
         connection.exec_driver_sql(

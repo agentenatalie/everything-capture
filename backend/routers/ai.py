@@ -2197,11 +2197,12 @@ def _build_agent_tools(agent_permissions: list[str]) -> list[dict[str, Any]]:
                 "type": "function",
                 "function": {
                     "name": "create_folder",
-                    "description": "Create a new folder in the user's library. Returns the created folder's ID and name.",
+                    "description": "Create a new folder in the user's library. Returns the created folder's ID and name. Supports nesting up to 2 levels by specifying parent_id.",
                     "parameters": {
                         "type": "object",
                         "properties": {
                             "name": {"type": "string", "description": "The folder name to create."},
+                            "parent_id": {"type": "string", "description": "Optional parent folder ID for nesting (max 2 levels)."},
                         },
                         "required": ["name"],
                         "additionalProperties": False,
@@ -2723,6 +2724,7 @@ async def _execute_agent_tool(
                     "folder_id": folder.id,
                     "name": folder.name,
                     "sort_order": folder.sort_order or 0,
+                    "parent_id": folder.parent_id,
                 }
                 for folder in folders
             ],
@@ -3082,15 +3084,20 @@ async def _execute_agent_tool(
             result = {"status": "error", "message": "Permission denied"}
             return result, AiToolEventResponse(name=tool_name, status="failed", summary="没有开放文件夹管理权限"), [], []
         folder_name = _clean_optional_string(arguments.get("name"))
+        parent_id = _clean_optional_string(arguments.get("parent_id"))
         if not folder_name:
             result = {"status": "error", "message": "name is required"}
             return result, AiToolEventResponse(name=tool_name, status="failed", summary="创建文件夹失败：缺少名称"), [], []
-        # Check duplicate
-        existing = (
-            db.query(Folder)
-            .filter(Folder.user_id == user_id, func.lower(Folder.name) == folder_name.strip().lower())
-            .first()
+        # Check duplicate within same parent
+        dup_query = db.query(Folder).filter(
+            Folder.user_id == user_id,
+            func.lower(Folder.name) == folder_name.strip().lower(),
         )
+        if parent_id:
+            dup_query = dup_query.filter(Folder.parent_id == parent_id)
+        else:
+            dup_query = dup_query.filter(Folder.parent_id.is_(None))
+        existing = dup_query.first()
         if existing:
             result = {
                 "status": "ok",
@@ -3099,12 +3106,26 @@ async def _execute_agent_tool(
                 "folder_name": existing.name,
             }
             return result, AiToolEventResponse(name=tool_name, summary=f"文件夹「{existing.name}」已存在"), [], []
+        if parent_id:
+            parent = db.query(Folder).filter(Folder.id == parent_id, Folder.user_id == user_id).first()
+            if not parent:
+                result = {"status": "error", "message": "Parent folder not found"}
+                return result, AiToolEventResponse(name=tool_name, status="failed", summary="父文件夹不存在"), [], []
+            if parent.parent_id:
+                result = {"status": "error", "message": "Maximum nesting depth exceeded"}
+                return result, AiToolEventResponse(name=tool_name, status="failed", summary="超过最大嵌套层级"), [], []
         import datetime as _dt
         now = _dt.datetime.utcnow()
-        max_sort = db.query(func.max(Folder.sort_order)).filter(Folder.user_id == user_id).scalar()
+        sort_q = db.query(func.max(Folder.sort_order)).filter(Folder.user_id == user_id)
+        if parent_id:
+            sort_q = sort_q.filter(Folder.parent_id == parent_id)
+        else:
+            sort_q = sort_q.filter(Folder.parent_id.is_(None))
+        max_sort = sort_q.scalar()
         folder = Folder(
             user_id=user_id,
             name=folder_name.strip(),
+            parent_id=parent_id,
             sort_order=int(max_sort if max_sort is not None else -1) + 1,
             created_at=now,
             updated_at=now,

@@ -17,7 +17,7 @@ ensure_data_dirs()
 migrate_legacy_data()
 
 from database import engine, Base, ensure_runtime_schema, init_search_index
-from routers import ai, connect, folders, ingest, items, phone_webapp, settings
+from routers import ai, connect, folders, ingest, items, phone_webapp, settings, tags
 
 # Create SQLite database tables
 Base.metadata.create_all(bind=engine)
@@ -75,6 +75,7 @@ app.include_router(items.router)
 app.include_router(connect.router)
 app.include_router(folders.router)
 app.include_router(settings.router)
+app.include_router(tags.router)
 app.include_router(ai.router)
 
 

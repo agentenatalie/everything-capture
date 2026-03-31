@@ -148,6 +148,9 @@
                     <div class="toolbar-right">
                         <button id="askAiBtn" class="view-btn" type="button">Ask AI</button>
                         <div class="toolbar-filters">
+                            <select id="tagFilter" class="platform-select" aria-label="筛选标签">
+                                <option value="">全部标签</option>
+                            </select>
                             <select id="platformFilter" class="platform-select" aria-label="筛选平台">
                                 <option value="all">全部</option>
                                 <option value="github">GitHub</option>
@@ -160,6 +163,7 @@
                     </div>
                 </div>
                 <div class="folder-mobile-strip" id="folderMobileStrip"></div>
+                <div id="recentViewsSection" class="recent-views-section" style="display:none;"></div>
                 <div class="grid" id="grid">
                     <!-- Skeletons -->
                     <div class="card skeleton-card"><div class="skeleton skeleton-cover"></div><div class="skeleton-content"><div class="skeleton skeleton-meta"></div><div class="skeleton skeleton-title"></div><div class="skeleton skeleton-title-short"></div><div class="skeleton skeleton-tags"></div></div></div>
@@ -315,6 +319,10 @@
                                                 </label>
                                             </div>
                                             <div class="settings-help">系统命令每次执行前都会弹出确认，你可以逐条批准或拒绝。</div>
+                                            <label class="settings-checkbox-row" style="margin-top: 12px;">
+                                                <input type="checkbox" id="aiAutoTagEnabled" />
+                                                <span>导入内容时自动打标签</span>
+                                            </label>
                                         </div>
                                     </div>
                                 </details>

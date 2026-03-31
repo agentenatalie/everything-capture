@@ -73,6 +73,79 @@ def _seed_extracted_text_from_canonical(item_id: str, user_id: str) -> None:
         db.commit()
 
 
+def background_auto_tag(item_id: str, user_id: str) -> None:
+    try:
+        from models import Tag, ItemTagLink
+        db = SessionLocal()
+        try:
+            settings = db.query(Settings).filter(Settings.user_id == user_id).first()
+            if not settings or not getattr(settings, "ai_auto_tag_enabled", False):
+                return
+            from security import decrypt_secret
+            api_key = decrypt_secret(settings.ai_api_key)
+            if not api_key:
+                return
+
+            item = db.query(Item).filter(Item.id == item_id).first()
+            if not item:
+                return
+
+            text_for_tagging = ((item.title or "") + "\n" + (item.canonical_text or ""))[:2000]
+            if len(text_for_tagging.strip()) < 20:
+                return
+
+            existing_tags = db.query(Tag).filter(Tag.user_id == user_id).all()
+            existing_tag_names = [t.name for t in existing_tags]
+            tag_name_to_id = {t.name.lower(): t.id for t in existing_tags}
+
+            prompt = (
+                "根据以下内容，建议1-3个标签。"
+                "优先从已有标签中选择，必要时才创建新标签。"
+                "只返回标签名，用逗号分隔，不要解释。\n\n"
+                f"已有标签：{', '.join(existing_tag_names) if existing_tag_names else '无'}\n\n"
+                f"内容：\n{text_for_tagging}"
+            )
+
+            from services.ai_client import call_chat_completion
+            base_url = settings.ai_base_url or "https://api.openai.com/v1"
+            model = settings.ai_model or "gpt-4o-mini"
+            response_text = call_chat_completion(
+                api_key=api_key,
+                base_url=base_url,
+                model=model,
+                messages=[{"role": "user", "content": prompt}],
+                max_tokens=100,
+            )
+            if not response_text:
+                return
+
+            suggested_names = [n.strip() for n in response_text.split(",") if n.strip()][:3]
+
+            for tag_name in suggested_names:
+                tag_lower = tag_name.lower()
+                if tag_lower in tag_name_to_id:
+                    tag_id = tag_name_to_id[tag_lower]
+                else:
+                    import uuid
+                    tag_id = str(uuid.uuid4())
+                    new_tag = Tag(id=tag_id, user_id=user_id, name=tag_name)
+                    db.add(new_tag)
+                    db.flush()
+                    tag_name_to_id[tag_lower] = tag_id
+
+                existing_link = db.query(ItemTagLink).filter(
+                    ItemTagLink.item_id == item_id, ItemTagLink.tag_id == tag_id
+                ).first()
+                if not existing_link:
+                    db.add(ItemTagLink(item_id=item_id, tag_id=tag_id, source="ai"))
+
+            db.commit()
+        finally:
+            db.close()
+    except Exception as exc:
+        logger.error("AI 自动标签失败 %s: %s", item_id, exc)
+
+
 def _run_capture_postprocess(item_id: str, user_id: str, *, should_parse: bool) -> None:
     try:
         if should_parse:
@@ -80,6 +153,7 @@ def _run_capture_postprocess(item_id: str, user_id: str, *, should_parse: bool) 
         else:
             _seed_extracted_text_from_canonical(item_id, user_id)
         background_auto_sync(item_id, user_id)
+        background_auto_tag(item_id, user_id)
     except Exception as exc:
         logger.error("后台后处理失败 %s: %s", item_id, exc)
 

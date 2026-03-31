@@ -31,6 +31,8 @@
         const toast = document.getElementById('toast');
         const filterInput = document.getElementById('filterInput');
         const platformFilter = document.getElementById('platformFilter');
+        const tagFilter = document.getElementById('tagFilter');
+        const recentViewsSection = document.getElementById('recentViewsSection');
         const galleryViewBtn = document.getElementById('galleryViewBtn');
         const listViewBtn = document.getElementById('listViewBtn');
         const graphViewBtn = document.getElementById('graphViewBtn');
@@ -175,6 +177,9 @@
         let folderSearchQuery = '';
         let folderPickerContext = 'assign';
         let sidebarExpanded = true;
+        let tagsData = [];
+        let currentTagId = null;
+        let collapsedFolderIds = new Set(JSON.parse(localStorage.getItem('collapsedFolderIds') || '[]'));
         let folderPickerTargetIds = [];
         let folderPickerSelectedIds = new Set();
         let draggedLibraryItemId = null;

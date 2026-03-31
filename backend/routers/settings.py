@@ -63,6 +63,7 @@ def _build_settings_response(settings_obj: Optional[Settings], db: Session) -> S
             ai_agent_can_execute_commands=AI_AGENT_DEFAULT_CAN_EXECUTE_COMMANDS,
             ai_agent_can_web_search=AI_AGENT_DEFAULT_CAN_WEB_SEARCH,
             ai_agent_can_run_computer_commands=AI_AGENT_DEFAULT_CAN_RUN_COMPUTER_COMMANDS,
+            ai_auto_tag_enabled=False,
             ai_knowledge_base_path=ai_knowledge_base_path,
             ai_knowledge_base_available=bool(ai_knowledge_base_path),
         )
@@ -140,6 +141,10 @@ def _build_settings_response(settings_obj: Optional[Settings], db: Session) -> S
             AI_AGENT_DEFAULT_CAN_RUN_COMPUTER_COMMANDS,
         ),
         auto_sync_target=settings_obj.auto_sync_target or "none",
+        ai_auto_tag_enabled=_settings_bool(
+            getattr(settings_obj, "ai_auto_tag_enabled", False),
+            False,
+        ),
         notion_ready=len(notion_missing_fields) == 0,
         notion_missing_fields=notion_missing_fields,
         obsidian_ready=len(obsidian_missing_fields) == 0,
@@ -228,6 +233,8 @@ def update_settings(request: SettingsUpdateRequest, db: Session = Depends(get_db
         settings_obj.ai_agent_can_run_computer_commands = request.ai_agent_can_run_computer_commands
     if request.auto_sync_target is not None:
         settings_obj.auto_sync_target = request.auto_sync_target
+    if request.ai_auto_tag_enabled is not None:
+        settings_obj.ai_auto_tag_enabled = request.ai_auto_tag_enabled
 
     db.commit()
     db.refresh(settings_obj)

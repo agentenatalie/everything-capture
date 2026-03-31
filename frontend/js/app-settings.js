@@ -471,6 +471,8 @@
             if (executeCommands) executeCommands.checked = Boolean(data?.ai_agent_can_execute_commands);
             if (webSearch) webSearch.checked = data?.ai_agent_can_web_search !== false;
             if (runComputerCommands) runComputerCommands.checked = Boolean(data?.ai_agent_can_run_computer_commands);
+            const autoTag = document.getElementById('aiAutoTagEnabled');
+            if (autoTag) autoTag.checked = Boolean(data?.ai_auto_tag_enabled);
         }
 
         function setObsidianTargetHint(data) {
@@ -685,6 +687,7 @@
                 ai_agent_can_execute_commands: document.getElementById('aiAgentCanExecuteCommands').checked,
                 ai_agent_can_web_search: document.getElementById('aiAgentCanWebSearch').checked,
                 ai_agent_can_run_computer_commands: document.getElementById('aiAgentCanRunComputerCommands').checked,
+                ai_auto_tag_enabled: document.getElementById('aiAutoTagEnabled').checked,
                 auto_sync_target: document.getElementById('autoSyncTarget').value
             };
             const notionClientSecret = document.getElementById('notionClientSecret').value.trim();

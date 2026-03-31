@@ -17,7 +17,7 @@ from sqlalchemy import func, or_
 from sqlalchemy.orm import Session
 
 from database import get_db
-from models import AiConversation, AiMemory, Folder, Item, ItemFolderLink, ItemPageNote, Settings
+from models import AiConversation, AiMemory, Folder, Item, ItemFolderLink, ItemPageNote, ItemTagLink, Settings, Tag
 from schemas import (
     AiAskRequest,
     AiAskResponse,
@@ -568,7 +568,7 @@ def _format_memories_for_prompt(memories: list[AiMemory]) -> str:
 def _assistant_agent_system_prompt(agent_permissions: list[str], memories: list[AiMemory] | None = None) -> str:
     permission_lines = {
         "search_library": "搜索收藏库内容",
-        "manage_folders": "管理文件夹（创建、归档、批量整理）",
+        "manage_folders": "管理文件夹与标签（创建、归档、打标签）",
         "parse_content": "触发内容解析",
         "sync_obsidian": "触发同步到 Obsidian",
         "sync_notion": "触发同步到 Notion",
@@ -610,11 +610,17 @@ def _assistant_agent_system_prompt(agent_permissions: list[str], memories: list[
         "【重要：执行操作的通用原则】\n"
         "你拥有多个原子工具，可以自由组合来完成用户的各种请求：\n"
         "- 查看内容：search_library_items / list_recent_notes（支持 scope='unfiled' 筛选未归档）/ get_item_details\n"
+        "- 管理标签：list_tags / create_tag / assign_item_tags / batch_assign_item_tags\n"
         "- 管理文件夹：list_folders / create_folder / assign_item_folders / batch_assign_item_folders\n"
         "- 联网搜索：web_search — 当需要查询收藏库以外的外部信息（事实校验、最新资讯、百科知识等）时使用\n"
         "- 遇到复杂任务时，先用查询工具了解现状，再决定执行什么操作。\n"
+        "- 标签是主题关键词，可多选、可重叠、偏轻量；文件夹是归档位置，偏结构化、偏长期整理。\n"
+        "- 用户提到“标签 / tag / 关键词 / 主题词 / 打标签 / 补标签”时，优先使用标签工具，不要擅自调整文件夹。\n"
+        "- 用户提到“文件夹 / folder / 归档 / 放到哪个目录”时，优先使用文件夹工具。\n"
+        "- 用户只说“分类”但没有说清是标签还是文件夹，而执行会改动数据时，先澄清再操作。\n"
         "- 批量操作优先用 batch_assign_item_folders，不要逐条调用 assign_item_folders。\n"
         "- 需要新文件夹时先用 create_folder 创建，再用 batch_assign_item_folders 归档。\n"
+        "- 批量打标签优先用 batch_assign_item_tags；优先复用已有标签，确实缺少时再创建新标签。\n"
         "\n"
         "【重要：文件夹分配策略】\n"
         "当用户要求整理、分类、归档内容时，你必须先学习用户现有的分类习惯，再动手操作：\n"
@@ -704,6 +710,10 @@ def _coerce_text_list(value: object, *, limit: int = 6) -> list[str]:
         return [entry for entry in cleaned if entry][:limit]
     cleaned = _clean_optional_string(value)
     return [cleaned] if cleaned else []
+
+
+def _clean_tag_name(value: str) -> str:
+    return (value or "").strip()
 
 
 def _strip_code_fence(text: str) -> str:
@@ -2177,6 +2187,88 @@ def _build_agent_tools(agent_permissions: list[str]) -> list[dict[str, Any]]:
             {
                 "type": "function",
                 "function": {
+                    "name": "list_tags",
+                    "description": "List all existing tags in the user's library, including item counts when available.",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {},
+                        "additionalProperties": False,
+                    },
+                },
+            }
+        )
+        tools.append(
+            {
+                "type": "function",
+                "function": {
+                    "name": "assign_item_tags",
+                    "description": "Assign one saved item to one or more tags using tag IDs or tag names. Replaces the item's current tags.",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "item_id": {"type": "string"},
+                            "tag_ids": {"type": "array", "items": {"type": "string"}},
+                            "tag_names": {"type": "array", "items": {"type": "string"}},
+                        },
+                        "required": ["item_id"],
+                        "additionalProperties": False,
+                    },
+                },
+            }
+        )
+        tools.append(
+            {
+                "type": "function",
+                "function": {
+                    "name": "create_tag",
+                    "description": "Create a new tag in the user's library, or return the existing tag if the name already exists.",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "name": {"type": "string", "description": "The tag name to create."},
+                        },
+                        "required": ["name"],
+                        "additionalProperties": False,
+                    },
+                },
+            }
+        )
+        tools.append(
+            {
+                "type": "function",
+                "function": {
+                    "name": "batch_assign_item_tags",
+                    "description": (
+                        "Assign tags to multiple items in one call. "
+                        "Each assignment maps one item_id to one or more tag names. "
+                        "Use this for bulk tagging instead of calling assign_item_tags repeatedly."
+                    ),
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "assignments": {
+                                "type": "array",
+                                "items": {
+                                    "type": "object",
+                                    "properties": {
+                                        "item_id": {"type": "string"},
+                                        "tag_names": {"type": "array", "items": {"type": "string"}},
+                                    },
+                                    "required": ["item_id", "tag_names"],
+                                },
+                                "description": "List of {item_id, tag_names} assignments.",
+                            },
+                        },
+                        "required": ["assignments"],
+                        "additionalProperties": False,
+                    },
+                },
+            }
+        )
+        tools.append(
+            {
+                "type": "function",
+                "function": {
                     "name": "assign_item_folders",
                     "description": "Assign one saved item to one or more folders using folder IDs or folder names.",
                     "parameters": {
@@ -2498,6 +2590,60 @@ def _resolve_tool_target_folders(
     return ordered, missing_names
 
 
+def _resolve_tool_target_tags(
+    db: Session,
+    user_id: str,
+    tag_ids: list[str],
+    tag_names: list[str],
+    *,
+    create_missing: bool = False,
+) -> tuple[list[Tag], list[str]]:
+    ordered: list[Tag] = []
+    seen_ids: set[str] = set()
+    missing_names: list[str] = []
+
+    if tag_ids:
+        tags = db.query(Tag).filter(Tag.user_id == user_id, Tag.id.in_(tag_ids)).all()
+        tags_by_id = {tag.id: tag for tag in tags}
+        for tag_id in tag_ids:
+            tag = tags_by_id.get(tag_id)
+            if tag and tag.id not in seen_ids:
+                ordered.append(tag)
+                seen_ids.add(tag.id)
+
+    tags_by_name = {
+        _clean_tag_name(tag.name).lower(): tag
+        for tag in db.query(Tag).filter(Tag.user_id == user_id).all()
+        if _clean_tag_name(tag.name)
+    }
+    created = False
+
+    for raw_name in tag_names:
+        clean_name = _clean_tag_name(raw_name)
+        lookup = clean_name.lower()
+        if not lookup:
+            continue
+        tag = tags_by_name.get(lookup)
+        if not tag and create_missing:
+            tag = Tag(id=str(uuid.uuid4()), user_id=user_id, name=clean_name)
+            db.add(tag)
+            db.flush()
+            tags_by_name[lookup] = tag
+            created = True
+        if not tag:
+            missing_names.append(raw_name)
+            continue
+        if tag.id in seen_ids:
+            continue
+        ordered.append(tag)
+        seen_ids.add(tag.id)
+
+    if created:
+        db.flush()
+
+    return ordered, missing_names
+
+
 _web_search_logger = logging.getLogger("web_search")
 
 
@@ -2804,6 +2950,65 @@ async def _execute_agent_tool(
         summary = f"已更新《{item.title or item.id}》的文件夹为：{folder_text}"
         ranked: list[tuple[KnowledgeBaseNote, float]] = []
         return result, AiToolEventResponse(name=tool_name, summary=summary), ranked, [updated_item]
+
+    if tool_name == "list_tags":
+        if "manage_folders" not in agent_permissions:
+            result = {"status": "error", "message": "Permission denied"}
+            return result, AiToolEventResponse(name=tool_name, status="failed", summary="没有开放标签管理权限"), [], []
+        rows = (
+            db.query(Tag, func.count(ItemTagLink.item_id))
+            .outerjoin(ItemTagLink, ItemTagLink.tag_id == Tag.id)
+            .filter(Tag.user_id == user_id)
+            .group_by(Tag.id)
+            .order_by(Tag.name.asc())
+            .all()
+        )
+        result = {
+            "status": "ok",
+            "tags": [
+                {
+                    "tag_id": tag.id,
+                    "name": tag.name,
+                    "item_count": int(count or 0),
+                }
+                for tag, count in rows
+            ],
+        }
+        summary = f"已列出 {len(rows)} 个标签"
+        return result, AiToolEventResponse(name=tool_name, summary=summary), [], []
+
+    if tool_name == "assign_item_tags":
+        if "manage_folders" not in agent_permissions:
+            result = {"status": "error", "message": "Permission denied"}
+            return result, AiToolEventResponse(name=tool_name, status="failed", summary="没有开放标签管理权限"), [], []
+        item_id = _clean_optional_string(arguments.get("item_id"))
+        item = _get_user_item(db, user_id, item_id or "")
+        if not item:
+            result = {"status": "error", "message": "Item not found"}
+            return result, AiToolEventResponse(name=tool_name, status="failed", summary="打标签失败：Item not found"), [], []
+        tag_ids = [value for value in _coerce_text_list(arguments.get("tag_ids"), limit=20)]
+        tag_names = [value for value in _coerce_text_list(arguments.get("tag_names"), limit=20)]
+        tags, missing_names = _resolve_tool_target_tags(db, user_id, tag_ids, tag_names, create_missing=True)
+        if missing_names:
+            result = {"status": "error", "message": f"Unknown tags: {', '.join(missing_names)}"}
+            return result, AiToolEventResponse(name=tool_name, status="failed", summary=f"找不到标签：{', '.join(missing_names)}"), [], []
+
+        from routers.items import serialize_items
+
+        db.query(ItemTagLink).filter(ItemTagLink.item_id == item.id).delete(synchronize_session=False)
+        for tag in tags:
+            db.add(ItemTagLink(item_id=item.id, tag_id=tag.id, source="ai"))
+        db.commit()
+        db.refresh(item)
+        updated_item = serialize_items([item])[0].model_dump(mode="json")
+        result = {
+            "status": "ok",
+            "item": _tool_item_result(item),
+            "tags": updated_item.get("tag_names") or [],
+        }
+        tag_text = "、".join(updated_item.get("tag_names") or []) or "无标签"
+        summary = f"已更新《{item.title or item.id}》的标签为：{tag_text}"
+        return result, AiToolEventResponse(name=tool_name, summary=summary), [], [updated_item]
 
     if tool_name == "parse_item_content":
         if "parse_content" not in agent_permissions:
@@ -3140,6 +3345,36 @@ async def _execute_agent_tool(
         }
         return result, AiToolEventResponse(name=tool_name, summary=f"已创建文件夹「{folder.name}」"), [], []
 
+    if tool_name == "create_tag":
+        if "manage_folders" not in agent_permissions:
+            result = {"status": "error", "message": "Permission denied"}
+            return result, AiToolEventResponse(name=tool_name, status="failed", summary="没有开放标签管理权限"), [], []
+        tag_name = _clean_tag_name(_clean_optional_string(arguments.get("name")))
+        if not tag_name:
+            result = {"status": "error", "message": "name is required"}
+            return result, AiToolEventResponse(name=tool_name, status="failed", summary="创建标签失败：缺少名称"), [], []
+
+        existing = db.query(Tag).filter(Tag.user_id == user_id, func.lower(Tag.name) == tag_name.lower()).first()
+        if existing:
+            result = {
+                "status": "ok",
+                "message": "标签已存在",
+                "tag_id": existing.id,
+                "tag_name": existing.name,
+            }
+            return result, AiToolEventResponse(name=tool_name, summary=f"标签「{existing.name}」已存在"), [], []
+
+        tag = Tag(id=str(uuid.uuid4()), user_id=user_id, name=tag_name)
+        db.add(tag)
+        db.commit()
+        db.refresh(tag)
+        result = {
+            "status": "ok",
+            "tag_id": tag.id,
+            "tag_name": tag.name,
+        }
+        return result, AiToolEventResponse(name=tool_name, summary=f"已创建标签「{tag.name}」"), [], []
+
     if tool_name == "batch_assign_item_folders":
         if "manage_folders" not in agent_permissions:
             result = {"status": "error", "message": "Permission denied"}
@@ -3188,6 +3423,59 @@ async def _execute_agent_tool(
             "errors": errors[:20] if errors else [],
         }
         summary = f"已批量归档 {success_count} 条内容"
+        if errors:
+            summary += f"，{len(errors)} 条失败"
+        return result, AiToolEventResponse(name=tool_name, summary=summary), [], updated_items_list
+
+    if tool_name == "batch_assign_item_tags":
+        if "manage_folders" not in agent_permissions:
+            result = {"status": "error", "message": "Permission denied"}
+            return result, AiToolEventResponse(name=tool_name, status="failed", summary="没有开放标签管理权限"), [], []
+        assignments = arguments.get("assignments") or []
+        if not assignments:
+            result = {"status": "error", "message": "assignments is required"}
+            return result, AiToolEventResponse(name=tool_name, status="failed", summary="批量打标签失败：缺少 assignments"), [], []
+
+        from routers.items import serialize_items
+
+        success_count = 0
+        errors: list[str] = []
+        updated_items_list: list[dict[str, Any]] = []
+
+        for assignment in assignments[:50]:
+            item_id = _clean_optional_string(assignment.get("item_id"))
+            tag_names = _coerce_text_list(assignment.get("tag_names"), limit=20)
+            if not item_id or not tag_names:
+                continue
+            item = _get_user_item(db, user_id, item_id)
+            if not item:
+                errors.append(f"Item {item_id} not found")
+                continue
+            tags, missing = _resolve_tool_target_tags(db, user_id, [], tag_names, create_missing=True)
+            if missing:
+                errors.append(f"Unknown tags for {item_id}: {', '.join(missing)}")
+                continue
+            db.query(ItemTagLink).filter(ItemTagLink.item_id == item.id).delete(synchronize_session=False)
+            for tag in tags:
+                db.add(ItemTagLink(item_id=item.id, tag_id=tag.id, source="ai"))
+            success_count += 1
+
+        db.commit()
+
+        for assignment in assignments[:50]:
+            item_id = _clean_optional_string(assignment.get("item_id"))
+            if item_id:
+                item = _get_user_item(db, user_id, item_id)
+                if item:
+                    db.refresh(item)
+                    updated_items_list.append(serialize_items([item])[0].model_dump(mode="json"))
+
+        result = {
+            "status": "ok",
+            "success_count": success_count,
+            "errors": errors[:20] if errors else [],
+        }
+        summary = f"已批量更新 {success_count} 条内容的标签"
         if errors:
             summary += f"，{len(errors)} 条失败"
         return result, AiToolEventResponse(name=tool_name, summary=summary), [], updated_items_list
@@ -3363,6 +3651,7 @@ def _is_organize_request(user_message: str) -> bool:
     organize_keywords = [
         "整理", "归类", "分类", "自动分类", "按主题", "按领域",
         "分到文件夹", "建议文件夹", "检查标签", "重新分类",
+        "打标签", "补标签", "标签整理", "标签分类",
         "organize", "categorize", "classify",
     ]
     lower = user_message.lower()

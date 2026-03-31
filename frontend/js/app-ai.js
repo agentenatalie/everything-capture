@@ -23,6 +23,8 @@
             get_item_details: '读取笔记详情',
             list_recent_notes: '最近笔记',
             get_related_notes: '相关笔记',
+            list_tags: '读取标签',
+            assign_item_tags: '调整标签',
             list_folders: '读取文件夹',
             assign_item_folders: '调整文件夹',
             parse_item_content: '识别内容',
@@ -30,7 +32,9 @@
             sync_item_to_notion: '同步到 Notion',
             execute_sandbox_command: '沙箱命令执行',
             export_items_to_zip: '导出内容打包',
+            create_tag: '创建标签',
             create_folder: '创建文件夹',
+            batch_assign_item_tags: '批量打标签',
             batch_assign_item_folders: '批量归档',
             save_memory: '记住偏好',
             delete_memory: '删除记忆',
@@ -38,13 +42,16 @@
             run_computer_command: '系统命令',
         };
         const AI_MUTATING_TOOLS = new Set([
+            'assign_item_tags',
             'assign_item_folders',
             'parse_item_content',
             'sync_item_to_obsidian',
             'sync_item_to_notion',
             'execute_sandbox_command',
             'export_items_to_zip',
+            'create_tag',
             'create_folder',
+            'batch_assign_item_tags',
             'batch_assign_item_folders',
             'run_computer_command',
         ]);
@@ -52,6 +59,7 @@
             '结合正文和我的笔记，总结核心观点',
             '综合正文内容和笔记，这条为什么值得保存？',
             '基于正文和笔记内容，它和我已有的哪些知识相关？',
+            '基于正文和笔记，给这条内容建议 3-5 个标签，不要建议文件夹',
             '结合正文和笔记，给我 3 个值得继续追问的问题',
         ];
         const READER_AI_SESSION_STORAGE_KEY = 'everything-capture.reader-ai.sidebar.v1';
@@ -1189,7 +1197,8 @@
             if (!welcomeGrid) return;
             const starters = aiAssistantMode === 'agent'
                 ? [
-                    { title: '整理最近保存的内容', description: '自动分类和整理最近的笔记', prompt: '请帮我整理最近保存的所有内容。按主题或领域自动分类，对没有归入文件夹的内容建议合适的文件夹，对已有标签的内容检查标签是否准确，并将分类结果执行到位。' },
+                    { title: '给最近内容补标签', description: '按主题补齐或纠正标签，不调整文件夹', prompt: '请帮我整理最近保存的所有内容的标签。先查看我已有标签，优先复用已有标签；如果确实缺少，再创建少量新标签。这里的目标是“标签”，不是文件夹；除非我明确要求，否则不要调整任何文件夹。' },
+                    { title: '整理最近内容到文件夹', description: '按现有归档逻辑整理文件夹，不改标签', prompt: '请帮我整理最近保存的所有内容到合适的文件夹。先学习我现有文件夹的归档逻辑，再处理未归档内容。这里的目标是“文件夹归档”，不是标签；除非我明确要求，否则不要修改标签。' },
                     { title: '导出为 Markdown', description: '按主题打包内容为 MD 文件', prompt: '请搜索我收藏库中的所有内容，按主题分类整理后导出为一个合并的 Markdown 文件。每条内容保留完整正文、来源链接和保存时间，用清晰的标题层级组织。' },
                     { title: '生成主题摘要报告', description: '围绕某个主题汇总并输出结构化文档', prompt: '请在我的收藏库中搜索与以下主题相关的所有内容，生成一份结构化的摘要报告，包括核心观点、关键数据、不同来源的观点对比，最后导出为 Markdown 文件。主题是：' },
                     { title: '识别全部内容', description: '识别图片文字和视频语音', prompt: '请检查我的知识库，找出所有尚未解析（parse_status 不是 done）的内容，逐一触发内容解析。完成后汇报一共解析了多少条、有哪些解析失败需要注意。' },

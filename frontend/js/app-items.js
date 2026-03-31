@@ -837,12 +837,26 @@
             }
         }
 
+        function syncRecentViewsSectionState(options = {}) {
+            if (!recentViewsSection) return;
+            const hasKeyword = !!filterInput.value.trim();
+            const hasFolderFilter = currentFolderScope !== 'all';
+            const hasTagFilter = !!currentTagId;
+            const hasViews = typeof options.hasViews === 'boolean'
+                ? options.hasViews
+                : Boolean(recentViewsSection.innerHTML.trim());
+            const shouldHide = currentView === 'graph' || hasKeyword || hasFolderFilter || hasTagFilter || !hasViews;
+
+            recentViewsSection.classList.toggle('is-list-view', currentView === 'list');
+            recentViewsSection.style.display = shouldHide ? 'none' : '';
+        }
+
         async function fetchRecentViews() {
             const hasKeyword = !!filterInput.value.trim();
             const hasFolderFilter = currentFolderScope !== 'all';
             const hasTagFilter = !!currentTagId;
-            if (hasKeyword || hasFolderFilter || hasTagFilter) {
-                recentViewsSection.style.display = 'none';
+            if (currentView === 'graph' || hasKeyword || hasFolderFilter || hasTagFilter) {
+                syncRecentViewsSectionState({ hasViews: false });
                 return;
             }
             try {
@@ -855,10 +869,10 @@
 
         function renderRecentViews(views) {
             if (!views || !views.length) {
-                recentViewsSection.style.display = 'none';
+                recentViewsSection.innerHTML = '';
+                syncRecentViewsSectionState({ hasViews: false });
                 return;
             }
-            recentViewsSection.style.display = '';
             const cards = views.map((item) => {
                 const thumbMedia = getItemThumbnail(item);
                 const viewedTime = escapeHtml(formatRelativeTime(item.last_viewed_at || item.created_at));
@@ -879,6 +893,7 @@
                 </div>`;
             }).join('');
             recentViewsSection.innerHTML = `<div class="rv-header">最近查看</div><div class="rv-scroll">${cards}</div>`;
+            syncRecentViewsSectionState({ hasViews: true });
         }
 
         async function fetchTags() {
@@ -1333,6 +1348,7 @@
             galleryViewBtn.classList.toggle('active', view === 'gallery');
             listViewBtn.classList.toggle('active', view === 'list');
             graphViewBtn.classList.toggle('active', view === 'graph');
+            syncRecentViewsSectionState();
 
             if (view === 'graph') {
                 grid.style.display = 'none';
@@ -1343,6 +1359,7 @@
                 graphContainer.style.display = 'none';
                 if (typeof destroyGraph === 'function') destroyGraph();
                 renderItems(filteredEntries);
+                fetchRecentViews();
             }
         }
 
@@ -1601,16 +1618,12 @@
         }
 
         function renderReaderTags(item) {
-            let container = document.getElementById('readerTagsBar');
-            if (!container) {
-                container = document.createElement('div');
-                container.id = 'readerTagsBar';
-                container.className = 'reader-tags-bar';
-                if (readerMetaLine && readerMetaLine.parentNode) {
-                    readerMetaLine.parentNode.insertBefore(container, readerMetaLine.nextSibling);
-                }
+            const container = readerStatusDots;
+            if (!container) return;
+            if (!item) {
+                container.innerHTML = '';
+                return;
             }
-            if (!item) { container.innerHTML = ''; return; }
             const tagNames = item.tag_names || [];
             const pills = tagNames.map(n => `<span class="reader-tag-pill">${escapeHtml(n)}</span>`).join('');
             const addBtn = `<button class="reader-tag-add" type="button" onclick="openReaderTagPicker('${item.id}')" title="管理标签">+</button>`;
@@ -1771,7 +1784,7 @@
             if (readerMetaLine) {
                 readerMetaLine.textContent = buildReaderMeta(item);
             }
-            readerStatusDots.innerHTML = renderKnowledgeDotMarkup(item);
+            renderReaderTags(item);
             if (toggleNoteBtn) {
                 const parsedContentReady = hasParsedContent(item);
                 toggleNoteBtn.classList.toggle('is-available', parsedContentReady);
@@ -2028,8 +2041,8 @@
             // If this item is already open and content was edited, skip background re-renders
             // to prevent overwriting user edits. Only user-initiated mode switches bypass this.
             if (currentOpenItemId === item.id && (contentWasEdited || contentViewMode === 'edit') && !options._contentModeSwitch) {
-                // Still update non-content UI (status dots, footer buttons, sidebar)
-                readerStatusDots.innerHTML = renderKnowledgeDotMarkup(item);
+                // Still update non-content UI (reader tags, footer buttons, sidebar)
+                renderReaderTags(item);
                 patchRenderedItemsById(item.id);
                 return;
             }
@@ -2071,7 +2084,6 @@
                 readerMetaLine.textContent = buildReaderMeta(item);
             }
             renderReaderTags(item);
-            readerStatusDots.innerHTML = renderKnowledgeDotMarkup(item);
             if (toggleNoteBtn) {
                 const parsedContentReady = hasParsedContent(item);
                 toggleNoteBtn.classList.toggle('is-available', parsedContentReady);

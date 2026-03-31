@@ -11,7 +11,7 @@ from sqlalchemy.orm import sessionmaker
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
-from models import Folder, Item, Settings  # noqa: E402
+from models import Folder, Item, ItemTagLink, Settings, Tag  # noqa: E402
 from routers import ai as ai_router  # noqa: E402
 from schemas import (  # noqa: E402
     AiAskRequest,
@@ -546,6 +546,69 @@ class AiRouteTests(unittest.TestCase):
         self.assertEqual(len(response.updated_items), 1)
         self.assertEqual(response.updated_items[0].id, "item-ai")
         self.assertEqual(response.updated_items[0].folder_names, ["AI 设计"])
+
+    def test_assistant_agent_returns_updated_items_for_tag_mutations(self) -> None:
+        request = AiAssistantRequest(
+            mode="agent",
+            messages=[AiConversationMessage(role="user", content="给这条内容打上 UI设计 和 VibeCoding 标签")],
+        )
+        tool_payload = {
+            "choices": [
+                {
+                    "message": {
+                        "role": "assistant",
+                        "content": "",
+                        "tool_calls": [
+                            {
+                                "id": "tool-tag",
+                                "type": "function",
+                                "function": {
+                                    "name": "assign_item_tags",
+                                    "arguments": '{"item_id":"item-ai","tag_names":["UI设计","VibeCoding"]}',
+                                },
+                            }
+                        ],
+                    }
+                }
+            ]
+        }
+        final_payload = {
+            "choices": [
+                {
+                    "message": {
+                        "role": "assistant",
+                        "content": "已经补好标签。",
+                    }
+                }
+            ]
+        }
+
+        with self.Session() as db:
+            with patch.object(ai_router, "get_current_user_id", return_value="local-default-user"), patch.object(
+                ai_router,
+                _SNAPSHOT_FUNC,
+                return_value=self._make_snapshot(),
+            ), patch.object(
+                ai_router,
+                "create_chat_completion",
+                side_effect=[tool_payload, final_payload],
+            ):
+                response = asyncio.run(ai_router.assistant(request, db=db))
+
+        self.assertEqual(response.mode, "agent")
+        self.assertEqual(len(response.updated_items), 1)
+        self.assertEqual(response.updated_items[0].id, "item-ai")
+        self.assertEqual(sorted(response.updated_items[0].tag_names), ["UI设计", "VibeCoding"])
+
+        with self.Session() as db:
+            tag_names = sorted(
+                tag.name
+                for tag in db.query(Tag)
+                .join(ItemTagLink, ItemTagLink.tag_id == Tag.id)
+                .filter(ItemTagLink.item_id == "item-ai")
+                .all()
+            )
+        self.assertEqual(tag_names, ["UI设计", "VibeCoding"])
 
     def test_related_notes_uses_local_knowledge_base_even_without_ai_call(self) -> None:
         with self.Session() as db:

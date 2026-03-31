@@ -9718,6 +9718,11 @@ mark[class*="highlight-"]:hover {
 .recent-views-section {
     padding: 22px 32px 0;
 }
+
+.recent-views-section.is-list-view {
+    background: #ffffff;
+}
+
 .rv-header {
     font-size: 11px;
     font-weight: 700;
@@ -9753,6 +9758,17 @@ mark[class*="highlight-"]:hover {
     border-color: rgba(203, 213, 225, 0.98);
     background: linear-gradient(180deg, #ffffff 0%, #f8fafc 100%);
     box-shadow: 0 10px 18px -18px rgba(15, 23, 42, 0.3);
+}
+
+.recent-views-section.is-list-view .rv-card {
+    background: #ffffff;
+    border-color: #ebecef;
+}
+
+.recent-views-section.is-list-view .rv-card:hover {
+    background: #ffffff;
+    border-color: #d9dde3;
+    box-shadow: none;
 }
 .rv-card-thumb {
     width: 54px;
@@ -9915,22 +9931,27 @@ body.sidebar-collapsed .sidebar-tags-section {
 }
 
 /* ── Reader Tags Bar ─────────────────────────── */
-.reader-tags-bar {
+.reader-tags-bar,
+#readerStatusDots {
     display: flex;
     flex-wrap: wrap;
     gap: 5px;
     align-items: center;
     padding: 2px 0 4px;
     min-height: 20px;
+    border: 0;
+    border-radius: 0;
+    background: transparent;
+    box-shadow: none;
 }
 .reader-tag-pill {
     display: inline-flex;
     align-items: center;
-    padding: 2px 10px;
-    border-radius: 4px;
+    padding: 0;
+    border-radius: 0;
     font-size: 12px;
     font-weight: 500;
-    background: #f3f4f6;
+    background: transparent;
     color: var(--text-secondary);
 }
 .reader-tag-add {

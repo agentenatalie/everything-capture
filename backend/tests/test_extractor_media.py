@@ -21,6 +21,7 @@ from services.extractor import (  # noqa: E402
     _extract_page_media,
     _extract_syndication_media,
     _extract_twitter_media,
+    _parse_wechat_share_page,
     _parse_zhihu_api_article,
     _parse_zhihu_page_html,
     _parse_douyin_slides_response,
@@ -90,6 +91,61 @@ class _InterruptingBinaryHandler(BaseHTTPRequestHandler):
 
 
 class ExtractorMediaTests(unittest.IsolatedAsyncioTestCase):
+    def test_parse_wechat_share_page_uses_cgi_data_and_picture_list(self) -> None:
+        html = """
+        <html>
+          <head>
+            <meta property="og:title" content="OG fallback title" />
+          </head>
+          <body>
+            <div id="js_article" class="share_content_page"></div>
+            <script>
+              window.cgiDataNew = {
+                title: JsDecode('Wendi AI：专为人员管理者打造的 AI 操作系'),
+                desc: JsDecode('专为人员管理者打造的 AI 操作系统\\x0a\\x0a\\x26amp;gt; 描述'),
+                content_noencode: JsDecode('第一段\\x0a\\x0a第二段\\x0a\\x0a\\x26amp;gt; 引用'),
+                cdn_url: JsDecode('https://mmbiz.qpic.cn/example-cover.jpg'),
+                item_show_type: '8' * 1
+              };
+              window.picture_page_info_list = [
+                {
+                  width: '760' * 1,
+                  height: '428' * 1,
+                  cdn_url: 'https://mmbiz.qpic.cn/example-1.jpg'
+                },
+                {
+                  width: '760' * 1,
+                  height: '428' * 1,
+                  cdn_url: 'https://mmbiz.qpic.cn/example-2.jpg'
+                }
+              ].slice(0, 20);
+            </script>
+          </body>
+        </html>
+        """
+
+        result = _parse_wechat_share_page(html, "https://mp.weixin.qq.com/s/example")
+
+        self.assertIsNotNone(result)
+        assert result is not None
+        self.assertEqual(result.platform, "wechat")
+        self.assertEqual(result.title, "Wendi AI：专为人员管理者打造的 AI 操作系")
+        self.assertIn("第一段", result.text)
+        self.assertIn("第二段", result.text)
+        self.assertIn("> 引用", result.text)
+        self.assertEqual(
+            [entry["url"] for entry in result.media_urls or []],
+            [
+                "https://mmbiz.qpic.cn/example-1.jpg",
+                "https://mmbiz.qpic.cn/example-2.jpg",
+                "https://mmbiz.qpic.cn/example-cover.jpg",
+            ],
+        )
+        self.assertEqual((result.content_blocks or [])[0], {"type": "image", "url": "https://mmbiz.qpic.cn/example-1.jpg"})
+        self.assertEqual((result.content_blocks or [])[-1], {"type": "text", "content": result.text})
+        self.assertIn("example-1.jpg", result.content_html or "")
+        self.assertIn("<p>第一段</p>", result.content_html or "")
+
     def test_parse_xhs_initial_state_uses_desc_first_line_when_title_missing(self) -> None:
         html = """
         <html><body><script>

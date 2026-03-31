@@ -32,6 +32,8 @@
         const filterInput = document.getElementById('filterInput');
         const platformFilter = document.getElementById('platformFilter');
         const tagFilter = document.getElementById('tagFilter');
+        const platformFilterValue = document.getElementById('platformFilterValue');
+        const tagFilterValue = document.getElementById('tagFilterValue');
         const recentViewsSection = document.getElementById('recentViewsSection');
         const galleryViewBtn = document.getElementById('galleryViewBtn');
         const listViewBtn = document.getElementById('listViewBtn');
@@ -99,6 +101,37 @@
             'macos', 'mac', 'windows', 'linux', 'ios', 'android', 'python', 'javascript',
             'web', 'api', 'app', 'sdk', 'cli',
         ]);
+
+        function getCompactToolbarFilterLabel(selectEl) {
+            if (!selectEl) return '';
+            const selectedOption = selectEl.options?.[selectEl.selectedIndex];
+            const label = (selectedOption?.textContent || '').trim();
+            if (selectEl === tagFilter) {
+                if (!selectEl.value) return '标签';
+                return label.replace(/\s*\(\d+\)\s*$/, '') || '标签';
+            }
+            if (selectEl === platformFilter) {
+                return selectEl.value === 'all' ? '平台' : (label || '平台');
+            }
+            return label;
+        }
+
+        function syncToolbarFilterLabels() {
+            if (tagFilterValue && tagFilter) {
+                const fullTagLabel = (tagFilter.options?.[tagFilter.selectedIndex]?.textContent || '全部标签').trim();
+                tagFilterValue.textContent = getCompactToolbarFilterLabel(tagFilter);
+                tagFilterValue.title = fullTagLabel;
+                tagFilter.title = fullTagLabel;
+            }
+            if (platformFilterValue && platformFilter) {
+                const fullPlatformLabel = (platformFilter.options?.[platformFilter.selectedIndex]?.textContent || '全部').trim();
+                platformFilterValue.textContent = getCompactToolbarFilterLabel(platformFilter);
+                platformFilterValue.title = fullPlatformLabel;
+                platformFilter.title = fullPlatformLabel;
+            }
+        }
+
+        syncToolbarFilterLabels();
 
         async function loadAiMemories() {
             try {

@@ -829,6 +829,54 @@
             return `<div class="modal-media"><video controls preload="metadata"><source src="${safeUrl}" type="video/mp4"></video></div>`;
         }
 
+        function renderImageCarouselMedia(images) {
+            const normalizedImages = Array.isArray(images)
+                ? images.filter((image) => image?.url)
+                : [];
+            if (!normalizedImages.length) return '';
+
+            return `<div class="modal-media modal-media--carousel${normalizedImages.length > 1 ? ' is-multi' : ''}"><div class="media-gallery">${normalizedImages.map((image, index) => `<img src="${escapeAttribute(resolveMediaUrl(image.url || ''))}" alt=""${index > 0 ? ' loading="lazy" decoding="async"' : ' decoding="async"'}>`).join('')}</div>${normalizedImages.length > 1 ? '<div class="gallery-hint">← 左右滑动查看更多图片 →</div>' : ''}</div>`;
+        }
+
+        function isWechatSwipeGalleryItem(item, blocks, mediaImages) {
+            if (normalizePlatform(item?.platform || '', item?.source_url || '') !== 'wechat') {
+                return false;
+            }
+            if (!Array.isArray(mediaImages) || mediaImages.length < 2) {
+                return false;
+            }
+            if (!Array.isArray(blocks) || !blocks.length) {
+                return false;
+            }
+
+            let imageCount = 0;
+            let textCount = 0;
+            let seenText = false;
+
+            for (const block of blocks) {
+                const type = String(block?.type || '');
+                const content = String(block?.markdown || block?.content || '').trim();
+
+                if (type === 'image' && block?.url) {
+                    if (seenText) return false;
+                    imageCount += 1;
+                    continue;
+                }
+
+                if ((type === 'text' || type === 'paragraph') && content) {
+                    seenText = true;
+                    textCount += 1;
+                    continue;
+                }
+
+                if (type) {
+                    return false;
+                }
+            }
+
+            return imageCount >= 2 && textCount >= 1;
+        }
+
         function renderStructuredBlocks(blocks) {
             const htmlParts = [];
             let index = 0;
@@ -994,9 +1042,26 @@
         }
 
         function renderWebArticle(item, videos) {
-            const mediaImageUrls = getItemImages(item).map((image) => image.url);
+            const mediaImages = getItemImages(item);
+            const mediaImageUrls = mediaImages.map((image) => image.url);
             const blocks = parseContentBlocks(item);
             let bodyHtml = '';
+
+            if (isWechatSwipeGalleryItem(item, blocks, mediaImages)) {
+                const textBlocks = blocks.filter((block) => block?.type !== 'image');
+                bodyHtml = renderStructuredBlocks(textBlocks);
+                if (!bodyHtml) {
+                    bodyHtml = renderPlainTextArticle(item);
+                }
+
+                let html = '';
+                if (videos.length > 0 && !/<(video|iframe)\b/i.test(bodyHtml)) {
+                    html += renderVideoMedia(resolveMediaUrl(videos[0].url));
+                }
+                html += renderImageCarouselMedia(mediaImages);
+                html += bodyHtml;
+                return html;
+            }
 
             if (blocks && blocks.length > 0 && !shouldPreferCanonicalHtml(item, blocks, mediaImageUrls)) {
                 const blockImageUrls = blocks

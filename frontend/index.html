@@ -148,17 +148,23 @@
                     <div class="toolbar-right">
                         <button id="askAiBtn" class="view-btn" type="button">Ask AI</button>
                         <div class="toolbar-filters">
-                            <select id="tagFilter" class="platform-select" aria-label="筛选标签">
-                                <option value="">全部标签</option>
-                            </select>
-                            <select id="platformFilter" class="platform-select" aria-label="筛选平台">
-                                <option value="all">全部</option>
-                                <option value="github">GitHub</option>
-                                <option value="wechat">公众号</option>
-                                <option value="douyin">抖音</option>
-                                <option value="xiaohongshu">小红书</option>
-                                <option value="web">网页</option>
-                            </select>
+                            <div class="toolbar-filter-shell toolbar-filter-shell-tag">
+                                <span class="toolbar-filter-value" id="tagFilterValue">标签</span>
+                                <select id="tagFilter" class="platform-select" aria-label="筛选标签">
+                                    <option value="">全部标签</option>
+                                </select>
+                            </div>
+                            <div class="toolbar-filter-shell toolbar-filter-shell-platform">
+                                <span class="toolbar-filter-value" id="platformFilterValue">平台</span>
+                                <select id="platformFilter" class="platform-select" aria-label="筛选平台">
+                                    <option value="all">全部</option>
+                                    <option value="github">GitHub</option>
+                                    <option value="wechat">公众号</option>
+                                    <option value="douyin">抖音</option>
+                                    <option value="xiaohongshu">小红书</option>
+                                    <option value="web">网页</option>
+                                </select>
+                            </div>
                         </div>
                     </div>
                 </div>

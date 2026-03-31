@@ -911,6 +911,7 @@
             const current = tagFilter.value;
             tagFilter.innerHTML = '<option value="">全部标签</option>' +
                 tagsData.map(t => `<option value="${t.id}"${t.id === current ? ' selected' : ''}>${escapeHtml(t.name)}${t.item_count ? ' (' + t.item_count + ')' : ''}</option>`).join('');
+            if (typeof syncToolbarFilterLabels === 'function') syncToolbarFilterLabels();
         }
 
         async function refreshRemoteSyncStatus(itemIds, requestId) {
@@ -1365,11 +1366,13 @@
 
         filterInput.addEventListener('input', scheduleLibrarySearch);
         platformFilter.addEventListener('change', () => {
+            if (typeof syncToolbarFilterLabels === 'function') syncToolbarFilterLabels();
             updateCommandPaletteState();
             fetchItems();
         });
         tagFilter.addEventListener('change', () => {
             currentTagId = tagFilter.value || null;
+            if (typeof syncToolbarFilterLabels === 'function') syncToolbarFilterLabels();
             fetchItems();
         });
         galleryViewBtn.addEventListener('click', () => setView('gallery'));

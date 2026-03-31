@@ -4,6 +4,7 @@
 """
 
 import asyncio
+import html as html_lib
 import os
 import re
 import json
@@ -126,6 +127,19 @@ def _is_wechat_interstitial_url(url: str | None) -> bool:
 
     path = (parsed.path or "").lower()
     return path.startswith("/mp/") and "captcha" in path
+
+
+_WECHAT_SHARE_PAGE_MARKERS = (
+    "share_content_page",
+    "window.picture_page_info_list",
+    "item_show_type: '8' * 1",
+    "window.item_show_type = '8'",
+)
+_WECHAT_SHELL_TEXT_MARKERS = (
+    "向上滑动看下一个",
+    "微信扫一扫可打开此内容",
+    "使用完整服务",
+)
 
 
 _ZHIHU_ARTICLE_PATH_PATTERN = re.compile(r"^/p/(?P<id>\d+)/?$", re.IGNORECASE)
@@ -1184,6 +1198,23 @@ async def _extract_twitter_article(url: str, article_id: str) -> ExtractResult |
 
 
 # ---------------------------------------------------------------------------
+# 微信提取器
+# ---------------------------------------------------------------------------
+
+async def extract_wechat(url: str) -> ExtractResult | None:
+    """微信：优先解析新版 share_content_page / 图文流页面，普通文章回退通用提取器"""
+    async with _build_client(ua=_MOBILE_UA) as client:
+        try:
+            resp = await client.get(url)
+            resp.raise_for_status()
+        except Exception as exc:
+            logger.warning("微信 HTTP 请求失败: %s", exc)
+            return None
+
+    return _parse_wechat_share_page(resp.text, str(resp.url))
+
+
+# ---------------------------------------------------------------------------
 # 知乎提取器
 # ---------------------------------------------------------------------------
 
@@ -1596,6 +1627,188 @@ def _extract_balanced_json(html: str, start: int) -> str | None:
     if depth != 0:
         return None
     return html[start:end]
+
+
+def _extract_balanced_js_literal(source: str, start: int, open_char: str, close_char: str) -> str | None:
+    depth = 0
+    in_str = False
+    quote_char = ""
+    prev = " "
+    end = start
+
+    for i in range(start, min(start + 1_000_000, len(source))):
+        ch = source[i]
+        if in_str:
+            if ch == quote_char and prev != "\\":
+                in_str = False
+                quote_char = ""
+        else:
+            if ch in {"'", '"'}:
+                in_str = True
+                quote_char = ch
+            elif ch == open_char:
+                depth += 1
+            elif ch == close_char:
+                depth -= 1
+                if depth == 0:
+                    end = i + 1
+                    break
+        prev = ch
+
+    if depth != 0:
+        return None
+    return source[start:end]
+
+
+def _decode_wechat_js_string(value: str | None) -> str:
+    text = str(value or "")
+    if not text:
+        return ""
+
+    text = re.sub(
+        r"\\x([0-9A-Fa-f]{2})",
+        lambda match: bytes.fromhex(match.group(1)).decode("latin1"),
+        text,
+    )
+    text = re.sub(
+        r"\\u([0-9A-Fa-f]{4})",
+        lambda match: chr(int(match.group(1), 16)),
+        text,
+    )
+    text = re.sub(r"\\([\\'\"/])", lambda match: match.group(1), text)
+
+    for _ in range(2):
+        text = html_lib.unescape(text)
+
+    return text.replace("\xa0", " ").strip()
+
+
+def _extract_wechat_jsdecode_field(html: str, field_name: str) -> str:
+    patterns = (
+        rf"\b{re.escape(field_name)}\s*:\s*JsDecode\('((?:\\.|[^'])*)'\)",
+        rf"window\.{re.escape(field_name)}\s*=\s*\"((?:\\.|[^\"])*)\"",
+        rf"window\.{re.escape(field_name)}\s*=\s*'((?:\\.|[^'])*)'",
+    )
+
+    for pattern in patterns:
+        match = re.search(pattern, html, re.S)
+        if match:
+            return _decode_wechat_js_string(match.group(1))
+    return ""
+
+
+def _extract_wechat_picture_page_urls(html: str) -> list[str]:
+    marker = "window.picture_page_info_list"
+    start = html.find(marker)
+    if start == -1:
+        return []
+
+    array_start = html.find("[", start)
+    if array_start == -1:
+        return []
+
+    array_literal = _extract_balanced_js_literal(html, array_start, "[", "]")
+    if not array_literal:
+        return []
+
+    urls: list[str] = []
+    seen: set[str] = set()
+    pattern = re.compile(
+        r"{\s*width:\s*'[^']+'\s*\*\s*1,\s*height:\s*'[^']+'\s*\*\s*1,\s*cdn_url:\s*'([^']+)'",
+        re.S,
+    )
+
+    for match in pattern.finditer(array_literal):
+        normalized = _normalize_media_url(_decode_wechat_js_string(match.group(1)))
+        if normalized and normalized not in seen:
+            seen.add(normalized)
+            urls.append(normalized)
+
+    return urls
+
+
+def _build_wechat_content_html(content_blocks: list[dict]) -> str | None:
+    if not content_blocks:
+        return None
+
+    parts: list[str] = []
+    for block in content_blocks:
+        block_type = block.get("type")
+        if block_type == "image":
+            url = str(block.get("url") or "").strip()
+            if url:
+                parts.append(f'<p><img src="{html_lib.escape(url, quote=True)}" alt="" /></p>')
+            continue
+
+        if block_type == "text":
+            raw_text = str(block.get("content") or "").strip()
+            if not raw_text:
+                continue
+            for paragraph in [segment.strip() for segment in re.split(r"\n{2,}", raw_text) if segment.strip()]:
+                safe_text = html_lib.escape(paragraph).replace("\n", "<br />")
+                parts.append(f"<p>{safe_text}</p>")
+
+    html_fragment = "".join(parts).strip()
+    return html_fragment or None
+
+
+def _parse_wechat_share_page(html: str, final_url: str) -> ExtractResult | None:
+    body = str(html or "")
+    if not body or not any(marker in body for marker in _WECHAT_SHARE_PAGE_MARKERS):
+        return None
+
+    soup = BeautifulSoup(body, "lxml")
+
+    title = (
+        _extract_wechat_jsdecode_field(body, "title")
+        or _html_meta(soup, "og:title")
+        or (soup.title.string.strip() if soup.title and soup.title.string else "")
+        or "Unknown"
+    )
+    text = _clean_text(
+        _extract_wechat_jsdecode_field(body, "content_noencode")
+        or _extract_wechat_jsdecode_field(body, "desc")
+        or _html_meta(soup, "og:description")
+        or _html_meta(soup, "description")
+        or title
+    )
+    if not text or any(marker in text for marker in _WECHAT_SHELL_TEXT_MARKERS):
+        return None
+
+    media_urls: list[dict] = []
+    seen_media: set[str] = set()
+
+    for order, media_url in enumerate(_extract_wechat_picture_page_urls(body)):
+        if media_url in seen_media:
+            continue
+        seen_media.add(media_url)
+        media_urls.append({"type": "image", "url": media_url, "order": order, "inline_position": -1.0})
+
+    cover_url = _normalize_media_url(
+        _extract_wechat_jsdecode_field(body, "cdn_url") or _html_meta(soup, "og:image")
+    )
+    if cover_url and cover_url not in seen_media:
+        media_urls.append(
+            {
+                "type": "image",
+                "url": cover_url,
+                "order": len(media_urls),
+                "inline_position": -1.0,
+            }
+        )
+
+    content_blocks = [{"type": "image", "url": entry["url"]} for entry in media_urls]
+    content_blocks.append({"type": "text", "content": text})
+
+    return ExtractResult(
+        title=title[:200],
+        text=text,
+        platform="wechat",
+        final_url=final_url,
+        media_urls=media_urls or None,
+        content_blocks=content_blocks,
+        content_html=_build_wechat_content_html(content_blocks),
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -2837,6 +3050,7 @@ _EXTRACTORS = {
     "xiaohongshu": extract_xiaohongshu,
     "douyin": extract_douyin,
     "zhihu": extract_zhihu,
+    "wechat": extract_wechat,
     "twitter": extract_twitter,
     "generic": extract_generic,
 }

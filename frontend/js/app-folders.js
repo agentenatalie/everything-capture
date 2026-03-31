@@ -267,7 +267,7 @@
             if (!tagsData || !tagsData.length) return '';
             const pills = tagsData.map(t => {
                 const active = currentTagId === t.id;
-                return `<span class="sidebar-tag-pill${active ? ' active' : ''}" onclick="event.stopPropagation();setActiveTag('${t.id}')" title="${escapeAttribute(t.name)}">${escapeHtml(t.name)}<span class="sidebar-tag-count">${t.item_count || 0}</span></span>`;
+                return `<span class="sidebar-tag-pill${active ? ' active' : ''}" onclick="event.stopPropagation();setActiveTag('${t.id}')" title="${escapeAttribute(t.name)}"><span class="sidebar-tag-label">${escapeHtml(t.name)}</span><span class="sidebar-tag-count">${t.item_count || 0}</span></span>`;
             }).join('');
             return `<div class="sidebar-tags-section"><div class="sidebar-tags-header">标签</div><div class="sidebar-tags-cloud">${pills}</div></div>`;
         }
@@ -283,6 +283,7 @@
                 currentTagId = tagId;
             }
             tagFilter.value = currentTagId || '';
+            if (typeof syncToolbarFilterLabels === 'function') syncToolbarFilterLabels();
             renderFolderNavigation();
             fetchItems();
         }

@@ -483,7 +483,13 @@
                     <input type="text" id="folderCreateInput" class="folder-picker-input" placeholder="输入新文件夹名称，回车创建" />
                     <button id="folderCreateConfirmBtn" class="folder-picker-create-btn" type="button">新建</button>
                 </div>
-                <div class="folder-picker-section-title">现有文件夹</div>
+                <div class="folder-picker-parent-row" id="folderPickerParentRow" style="display:none;">
+                    <label class="folder-picker-parent-label">放入</label>
+                    <select id="folderPickerParentSelect" class="platform-select">
+                        <option value="">顶层文件夹</option>
+                    </select>
+                </div>
+                <div class="folder-picker-section-title" id="folderPickerSectionTitle">现有文件夹</div>
                 <div class="folder-picker-list" id="folderPickerList"></div>
             </div>
             <div class="modal-footer folder-picker-footer">

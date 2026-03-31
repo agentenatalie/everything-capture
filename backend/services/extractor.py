@@ -1,6 +1,6 @@
 """
 全平台内容提取服务
-支持：小红书、抖音、X/Twitter、通用网站
+支持：小红书、抖音、知乎、X/Twitter、通用网站
 """
 
 import asyncio
@@ -89,6 +89,7 @@ def _build_client(ua: str = _DESKTOP_UA, timeout: float = 20) -> httpx.AsyncClie
 _PLATFORM_RULES: list[tuple[str, list[str]]] = [
     ("xiaohongshu", ["xiaohongshu.com", "xhslink.com", "xhs.cn"]),
     ("douyin", ["douyin.com", "iesdouyin.com"]),
+    ("zhihu", ["zhuanlan.zhihu.com"]),
     ("wechat", ["mp.weixin.qq.com", "weixin.qq.com"]),
     ("twitter", ["twitter.com", "x.com", "t.co"]),
 ]
@@ -125,6 +126,143 @@ def _is_wechat_interstitial_url(url: str | None) -> bool:
 
     path = (parsed.path or "").lower()
     return path.startswith("/mp/") and "captcha" in path
+
+
+_ZHIHU_ARTICLE_PATH_PATTERN = re.compile(r"^/p/(?P<id>\d+)/?$", re.IGNORECASE)
+_ZHIHU_GUARD_TEXT_MARKERS = (
+    "您当前请求存在异常",
+    "暂时限制本次访问",
+    "安全验证 - 知乎",
+    "请您登录后查看更多专业优质内容",
+    "登录知乎",
+)
+_ZHIHU_ARTICLE_SELECTORS = (
+    ".Post-RichText",
+    ".Post-RichTextContainer",
+    ".RichText.ztext",
+    ".RichContent-inner",
+    ".Post-content",
+    "article",
+)
+
+
+def _extract_zhihu_article_id(url: str | None) -> str:
+    value = str(url or "").strip()
+    if not value:
+        return ""
+    try:
+        path = urlparse(value).path or ""
+    except Exception:
+        return ""
+    match = _ZHIHU_ARTICLE_PATH_PATTERN.match(path)
+    return match.group("id") if match else ""
+
+
+def _normalize_zhihu_title(value: str | None) -> str:
+    candidate = re.sub(r"\s+", " ", str(value or "")).strip()
+    candidate = re.sub(r"\s*[-|｜]\s*知乎$", "", candidate)
+    return candidate[:200]
+
+
+def _is_zhihu_guard_html(html: str | None, final_url: str | None = None) -> bool:
+    body = str(html or "")
+    if not body:
+        return False
+
+    if 'id="zh-zse-ck"' in body or "zh-zse-ck" in body:
+        return True
+
+    normalized_url = str(final_url or "").strip().lower()
+    if normalized_url:
+        if "/account/unhuman" in normalized_url or "/account/verify" in normalized_url:
+            return True
+
+    return any(marker in body for marker in _ZHIHU_GUARD_TEXT_MARKERS)
+
+
+def _looks_like_zhihu_guard_result(result: ExtractResult | None) -> bool:
+    if not result:
+        return False
+    return _is_zhihu_guard_html(
+        f"{result.title}\n{result.text}",
+        result.final_url,
+    )
+
+
+def _load_zhihu_cookie_map() -> dict[str, str]:
+    cookie_map: dict[str, str] = {}
+
+    header = os.getenv("ZHIHU_COOKIE_HEADER", "").strip()
+    if header:
+        cookie_map.update(_parse_cookie_header(header))
+    if cookie_map:
+        return cookie_map
+
+    load_from_browser = os.getenv("ZHIHU_COOKIE_FROM_BROWSER", "1").strip().lower()
+    if load_from_browser in {"0", "false", "no", "off"}:
+        return {}
+
+    if yt_dlp is None:
+        return {}
+
+    try:
+        from yt_dlp.cookies import extract_cookies_from_browser
+    except Exception as exc:
+        logger.debug("知乎 cookies 浏览器提取器不可用: %s", exc)
+        return {}
+
+    browser_order_raw = os.getenv(
+        "ZHIHU_COOKIE_BROWSER_ORDER",
+        "chrome,safari,edge,firefox",
+    )
+    browser_order = [item.strip().lower() for item in browser_order_raw.split(",") if item.strip()]
+    browser_profile = os.getenv("ZHIHU_COOKIE_BROWSER_PROFILE", "").strip() or None
+
+    for browser_name in browser_order:
+        try:
+            jar = extract_cookies_from_browser(browser_name, profile=browser_profile)
+        except Exception as exc:
+            logger.debug("读取知乎浏览器 cookies 失败 (%s): %s", browser_name, exc)
+            continue
+
+        extracted: dict[str, str] = {}
+        for cookie in jar:
+            domain = (getattr(cookie, "domain", "") or "").lstrip(".").lower()
+            if domain != "zhihu.com" and not domain.endswith(".zhihu.com"):
+                continue
+            name = getattr(cookie, "name", "") or ""
+            value = getattr(cookie, "value", "") or ""
+            if name and value:
+                extracted[name] = value
+        if extracted:
+            logger.info("已加载知乎浏览器 cookies: %s (%d)", browser_name, len(extracted))
+            return extracted
+
+    return {}
+
+
+def _build_zhihu_headers(cookie_map: dict[str, str] | None = None, api: bool = False) -> dict[str, str]:
+    headers = {
+        "User-Agent": _DESKTOP_UA,
+        "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
+        "Referer": "https://www.zhihu.com/",
+        "Accept": (
+            "application/json, text/plain, */*"
+            if api
+            else "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8"
+        ),
+    }
+
+    if api:
+        headers["x-api-version"] = os.getenv("ZHIHU_API_VERSION", "3.0.91")
+        headers["x-requested-with"] = "fetch"
+
+    if cookie_map:
+        headers["Cookie"] = "; ".join(
+            f"{key}={value}" for key, value in cookie_map.items() if key and value
+        )
+
+    return headers
 
 
 # ---------------------------------------------------------------------------
@@ -1043,6 +1181,195 @@ async def _extract_twitter_article(url: str, article_id: str) -> ExtractResult |
         or ((root.get("article_entity_result") or {}).get("result"))
     )
     return _parse_x_article_result(article, url)
+
+
+# ---------------------------------------------------------------------------
+# 知乎提取器
+# ---------------------------------------------------------------------------
+
+def _build_structured_result_from_html_fragment(
+    title: str,
+    html_fragment: str,
+    excerpt: str,
+    final_url: str,
+) -> ExtractResult | None:
+    fragment = str(html_fragment or "").strip()
+    if not fragment:
+        return None
+
+    wrapped_soup = BeautifulSoup(f"<article>{fragment}</article>", "lxml")
+    content_blocks = _extract_article_blocks(wrapped_soup, base_url=final_url)
+    blocks_text = "\n\n".join(
+        block["content"]
+        for block in content_blocks
+        if block.get("type") == "text" and str(block.get("content") or "").strip()
+    )
+
+    block_media = [
+        {
+            "type": block["type"],
+            "url": block["url"],
+            "order": index,
+            "inline_position": -1.0,
+        }
+        for index, block in enumerate(
+            block for block in content_blocks if block.get("type") in {"image", "video"}
+        )
+    ]
+    page_media = _extract_page_media(wrapped_soup, base_url=final_url)
+    block_urls = {entry["url"] for entry in block_media}
+    extra_media = [entry for entry in page_media if entry["url"] not in block_urls]
+    media_urls = block_media + extra_media if (block_media or extra_media) else None
+
+    visible_text = _extract_visible_text(wrapped_soup)
+    canonical_text = _clean_text(blocks_text or excerpt or visible_text or title)
+    content_html = _extract_article_html(wrapped_soup, base_url=final_url)
+    if not canonical_text and not media_urls:
+        return None
+
+    return ExtractResult(
+        title=_normalize_zhihu_title(title) or "Unknown",
+        text=canonical_text,
+        platform="zhihu",
+        final_url=final_url,
+        media_urls=media_urls,
+        content_blocks=content_blocks or None,
+        content_html=content_html or None,
+    )
+
+
+def _parse_zhihu_api_article(payload: dict | None, final_url: str) -> ExtractResult | None:
+    if not isinstance(payload, dict) or payload.get("error"):
+        return None
+
+    title = _normalize_zhihu_title(payload.get("title")) or "Unknown"
+    content_html = str(payload.get("content") or "").strip()
+    excerpt = str(payload.get("excerpt") or "").strip()
+
+    if content_html:
+        result = _build_structured_result_from_html_fragment(title, content_html, excerpt, final_url)
+        if result:
+            return result
+
+    if excerpt:
+        return ExtractResult(
+            title=title,
+            text=_clean_text(excerpt),
+            platform="zhihu",
+            final_url=final_url,
+        )
+
+    return None
+
+
+def _parse_zhihu_page_html(html: str | None, final_url: str) -> ExtractResult | None:
+    body = str(html or "")
+    if not body or _is_zhihu_guard_html(body, final_url):
+        return None
+
+    soup = BeautifulSoup(body, "lxml")
+    title = (
+        _normalize_zhihu_title(_html_meta(soup, "og:title"))
+        or _normalize_zhihu_title(soup.title.string if soup.title and soup.title.string else "")
+        or "Unknown"
+    )
+    excerpt = _html_meta(soup, "og:description") or _html_meta(soup, "description") or ""
+
+    for selector in _ZHIHU_ARTICLE_SELECTORS:
+        node = soup.select_one(selector)
+        if not node:
+            continue
+        result = _build_structured_result_from_html_fragment(title, str(node), excerpt, final_url)
+        if result:
+            return result
+
+    if excerpt:
+        return ExtractResult(
+            title=title,
+            text=_clean_text(excerpt),
+            platform="zhihu",
+            final_url=final_url,
+        )
+
+    return None
+
+
+async def _request_zhihu_api_article(article_id: str, cookie_map: dict[str, str]) -> dict | None:
+    if not article_id:
+        return None
+
+    include = ",".join(
+        [
+            "content",
+            "excerpt",
+            "author.name",
+            "author.url_token",
+            "image_url",
+            "created",
+            "updated",
+            "comment_count",
+            "voteup_count",
+        ]
+    )
+    api_url = f"https://www.zhihu.com/api/v4/articles/{article_id}"
+    headers = _build_zhihu_headers(cookie_map=cookie_map, api=True)
+
+    async with httpx.AsyncClient(
+        headers=headers,
+        timeout=20,
+        follow_redirects=True,
+        limits=httpx.Limits(max_connections=10),
+    ) as client:
+        try:
+            resp = await client.get(api_url, params={"include": include})
+        except Exception as exc:
+            logger.debug("知乎 article API 请求失败: %s", exc)
+            return None
+
+    if resp.status_code >= 400:
+        logger.debug("知乎 article API 返回状态异常: %s", resp.status_code)
+        return None
+
+    try:
+        return resp.json()
+    except Exception as exc:
+        logger.debug("知乎 article API JSON 解析失败: %s", exc)
+        return None
+
+
+async def _request_zhihu_page_html(url: str, cookie_map: dict[str, str]) -> tuple[str, str]:
+    headers = _build_zhihu_headers(cookie_map=cookie_map, api=False)
+    async with httpx.AsyncClient(
+        headers=headers,
+        timeout=20,
+        follow_redirects=True,
+        limits=httpx.Limits(max_connections=10),
+    ) as client:
+        try:
+            resp = await client.get(url)
+            resp.raise_for_status()
+            return resp.text, str(resp.url)
+        except Exception as exc:
+            logger.warning("知乎页面请求失败: %s", exc)
+            return "", url
+
+
+async def extract_zhihu(url: str) -> ExtractResult | None:
+    article_id = _extract_zhihu_article_id(url)
+    cookie_map = _load_zhihu_cookie_map()
+
+    if article_id:
+        api_payload = await _request_zhihu_api_article(article_id, cookie_map)
+        api_result = _parse_zhihu_api_article(api_payload, url)
+        if api_result and not _looks_like_zhihu_guard_result(api_result):
+            return api_result
+
+    html, final_url = await _request_zhihu_page_html(url, cookie_map)
+    page_result = _parse_zhihu_page_html(html, final_url or url)
+    if page_result and not _looks_like_zhihu_guard_result(page_result):
+        return page_result
+
+    return None
 
 
 # ---------------------------------------------------------------------------
@@ -2509,6 +2836,7 @@ def _extract_visible_text(soup: BeautifulSoup) -> str:
 _EXTRACTORS = {
     "xiaohongshu": extract_xiaohongshu,
     "douyin": extract_douyin,
+    "zhihu": extract_zhihu,
     "twitter": extract_twitter,
     "generic": extract_generic,
 }
@@ -2535,6 +2863,9 @@ async def extract_content(url: str) -> ExtractResult:
         if platform == "wechat" and result and _is_wechat_interstitial_url(result.final_url):
             logger.warning("微信提取命中验证码页: %s -> %s", url, result.final_url)
             result = None
+        if platform == "zhihu" and _looks_like_zhihu_guard_result(result):
+            logger.warning("知乎提取命中安全验证页: %s -> %s", url, result.final_url)
+            result = None
         if result and (len(result.text) > 20 or result.media_urls):
             return result
         logger.info("平台 %s 提取失败，回退到通用提取器", platform)
@@ -2550,6 +2881,9 @@ async def extract_content(url: str) -> ExtractResult:
         result = None
     if platform == "wechat" and result and _is_wechat_interstitial_url(result.final_url):
         logger.warning("微信通用提取命中验证码页: %s -> %s", url, result.final_url)
+        result = None
+    if platform == "zhihu" and _looks_like_zhihu_guard_result(result):
+        logger.warning("知乎通用提取命中安全验证页: %s -> %s", url, result.final_url)
         result = None
     if result and (len(result.text) > 20 or result.media_urls):
         if platform != "generic":

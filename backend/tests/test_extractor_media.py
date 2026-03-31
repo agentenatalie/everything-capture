@@ -21,6 +21,8 @@ from services.extractor import (  # noqa: E402
     _extract_page_media,
     _extract_syndication_media,
     _extract_twitter_media,
+    _parse_zhihu_api_article,
+    _parse_zhihu_page_html,
     _parse_douyin_slides_response,
     _parse_xhs_initial_state,
     _parse_douyin_router_data,
@@ -262,6 +264,51 @@ class ExtractorMediaTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertIsNotNone(result)
         self.assertEqual(result["title"], "#洛克王国世界 #洛克王国世界正式上线")
+
+    def test_parse_zhihu_api_article_extracts_rich_text_and_media(self) -> None:
+        result = _parse_zhihu_api_article(
+            {
+                "title": "开源版稍后读 + AI 知识库 - 知乎",
+                "excerpt": "Everything Capture 的简介",
+                "content": """
+                <div class="Post-RichText">
+                  <p>Everything Capture 可以一站式收集网页、视频和图片。</p>
+                  <figure><img src="https://picx.zhimg.com/example-image.png" alt="cover"></figure>
+                  <p>还支持后续 AI 整理。</p>
+                </div>
+                """,
+            },
+            "https://zhuanlan.zhihu.com/p/2022246152867686214",
+        )
+
+        self.assertIsNotNone(result)
+        self.assertEqual(result.title, "开源版稍后读 + AI 知识库")
+        self.assertIn("Everything Capture 可以一站式收集网页、视频和图片。", result.text)
+        self.assertIn("还支持后续 AI 整理。", result.text)
+        self.assertIsNotNone(result.media_urls)
+        self.assertEqual(result.media_urls[0]["type"], "image")
+        self.assertEqual(result.media_urls[0]["url"], "https://picx.zhimg.com/example-image.png")
+        self.assertIsNotNone(result.content_html)
+        self.assertIn("<img", result.content_html)
+
+    def test_parse_zhihu_page_html_rejects_guard_page(self) -> None:
+        html = """
+        <!DOCTYPE html>
+        <html lang="zh">
+          <head>
+            <title>安全验证 - 知乎</title>
+            <meta id="zh-zse-ck" charset="UTF-8" content="token">
+          </head>
+          <body>请您登录后查看更多专业优质内容。</body>
+        </html>
+        """
+
+        result = _parse_zhihu_page_html(
+            html,
+            "https://www.zhihu.com/account/unhuman?need_login=true",
+        )
+
+        self.assertIsNone(result)
 
     def test_build_douyin_page_media_reference_returns_video_entry(self) -> None:
         self.assertEqual(
@@ -652,6 +699,30 @@ class ExtractorMediaTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result.text, "")
         self.assertEqual(result.platform, "xiaohongshu")
         self.assertEqual(result.final_url, "http://xhslink.com/o/test123")
+
+    async def test_extract_content_rejects_zhihu_guard_page(self) -> None:
+        interstitial = ExtractResult(
+            title="安全验证 - 知乎",
+            text="请您登录后查看更多专业优质内容。",
+            platform="generic",
+            final_url="https://www.zhihu.com/account/unhuman?need_login=true",
+        )
+
+        with patch.dict(
+            "services.extractor._EXTRACTORS",
+            {"zhihu": AsyncMock(return_value=None)},
+            clear=False,
+        ):
+            with patch(
+                "services.extractor.extract_generic",
+                new=AsyncMock(return_value=interstitial),
+            ):
+                result = await extract_content("https://zhuanlan.zhihu.com/p/2022246152867686214")
+
+        self.assertEqual(result.title, "提取失败")
+        self.assertEqual(result.text, "")
+        self.assertEqual(result.platform, "zhihu")
+        self.assertEqual(result.final_url, "https://zhuanlan.zhihu.com/p/2022246152867686214")
 
     def test_parse_twitter_oembed_html_extracts_text(self) -> None:
         result = _parse_twitter_oembed_html(

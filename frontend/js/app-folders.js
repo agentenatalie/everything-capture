@@ -85,6 +85,9 @@
         }
 
         function setActiveFolder(scope, folderId = null) {
+            if (scope === 'folder' && folderId) {
+                expandFolderAncestors(folderId);
+            }
             currentFolderScope = scope;
             currentFolderId = scope === 'folder' ? folderId : null;
             renderFolderNavigation();
@@ -96,6 +99,63 @@
             }
         }
 
+        function persistCollapsedFolderIds() {
+            localStorage.setItem('collapsedFolderIds', JSON.stringify([...collapsedFolderIds]));
+        }
+
+        function hasFolderChildren(folderId) {
+            return foldersData.some((entry) => entry.parent_id === folderId);
+        }
+
+        function expandFolderAncestors(folderId) {
+            let current = getFolderById(folderId);
+            let changed = false;
+            while (current && current.parent_id) {
+                if (collapsedFolderIds.has(current.parent_id)) {
+                    collapsedFolderIds.delete(current.parent_id);
+                    changed = true;
+                }
+                current = getFolderById(current.parent_id);
+            }
+            if (changed) {
+                persistCollapsedFolderIds();
+            }
+            return changed;
+        }
+
+        function handleFolderNavActivate(scope, folderId = null) {
+            if (scope !== 'folder' || !folderId) {
+                setActiveFolder(scope, folderId);
+                return;
+            }
+
+            const folder = getFolderById(folderId);
+            if (!folder) {
+                setActiveFolder(scope, folderId);
+                return;
+            }
+
+            const isActive = currentFolderScope === 'folder' && currentFolderId === folderId;
+            const isMainFolder = !folder.parent_id;
+            const hasChildren = hasFolderChildren(folderId);
+            const isCollapsed = collapsedFolderIds.has(folderId);
+            if (isMainFolder && hasChildren) {
+                if (isCollapsed) {
+                    collapsedFolderIds.delete(folderId);
+                    persistCollapsedFolderIds();
+                    setActiveFolder(scope, folderId);
+                    return;
+                }
+                collapsedFolderIds.add(folderId);
+                persistCollapsedFolderIds();
+                setActiveFolder(scope, folderId);
+                return;
+            }
+
+            if (isActive) return;
+            setActiveFolder(scope, folderId);
+        }
+
         function renderFolderNavItem(label, scope, count, folderId = null, options = {}) {
             const active = currentFolderScope === scope && (scope !== 'folder' || currentFolderId === folderId);
             const menuButton = options.menu
@@ -104,18 +164,12 @@
             const glyph = getFolderGlyph(label, scope);
             const level = options.level || 0;
             const indent = level * 20;
-            const hasChildren = options.hasChildren || false;
-            const isCollapsed = hasChildren && collapsedFolderIds.has(folderId);
-            const chevron = hasChildren
-                ? `<span class="folder-chevron${isCollapsed ? '' : ' folder-chevron-open'}" onclick="event.stopPropagation();toggleFolderCollapse('${folderId}')" aria-hidden="true">›</span>`
-                : (level > 0 ? '<span class="folder-chevron-placeholder"></span>' : '');
             const contextMenuAttr = scope === 'folder' ? ` oncontextmenu="event.preventDefault();openFolderContextMenu('${folderId}', event)"` : '';
             const dragAttrs = scope === 'folder'
                 ? ` draggable="true" data-folder-id="${folderId}" data-folder-scope="${scope}" ondragstart="handleFolderDragStart(event, '${folderId}')" ondragend="handleFolderDragEnd()" ondragover="handleFolderDragOver(event, '${folderId}')" ondragleave="handleFolderDragLeave(event, '${folderId}')" ondrop="handleFolderDrop(event, '${folderId}')"`
                 : ` data-folder-scope="${scope}"`;
             return `
-                <div class="folder-item${active ? ' active' : ''}" role="button" tabindex="0" title="${escapeAttribute(label)}" style="${indent ? `padding-left:${12 + indent}px` : ''}" onclick="setActiveFolder('${scope}', ${folderId ? `'${folderId}'` : 'null'})" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();setActiveFolder('${scope}', ${folderId ? `'${folderId}'` : 'null'});}"${dragAttrs}${contextMenuAttr}>
-                    ${chevron}
+                <div class="folder-item${active ? ' active' : ''}" role="button" tabindex="0" title="${escapeAttribute(label)}" style="${indent ? `padding-left:${12 + indent}px` : ''}" onclick="handleFolderNavActivate('${scope}', ${folderId ? `'${folderId}'` : 'null'})" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();handleFolderNavActivate('${scope}', ${folderId ? `'${folderId}'` : 'null'});}"${dragAttrs}${contextMenuAttr}>
                     <span class="folder-item-glyph" aria-hidden="true">${escapeHtml(glyph)}</span>
                     <span class="folder-item-name">${escapeHtml(label)}</span>
                     <span class="folder-item-count">${count}</span>
@@ -130,7 +184,7 @@
             } else {
                 collapsedFolderIds.add(folderId);
             }
-            localStorage.setItem('collapsedFolderIds', JSON.stringify([...collapsedFolderIds]));
+            persistCollapsedFolderIds();
             renderFolderNavigation();
         }
 
@@ -273,9 +327,60 @@
             return Array.from(dragTypes).includes(dataType);
         }
 
+        function getFolderById(folderId) {
+            return foldersData.find((entry) => entry.id === folderId) || null;
+        }
+
+        function normalizeFolderParentId(parentId) {
+            return parentId ? String(parentId).trim() || null : null;
+        }
+
+        function getSiblingFolderIds(parentId = null) {
+            const normalizedParentId = normalizeFolderParentId(parentId);
+            return foldersData
+                .filter((folder) => normalizeFolderParentId(folder.parent_id) === normalizedParentId)
+                .map((folder) => folder.id);
+        }
+
+        function isFolderDescendant(folderId, ancestorId) {
+            let current = getFolderById(folderId);
+            const visited = new Set();
+            while (current && current.parent_id) {
+                if (current.parent_id === ancestorId) return true;
+                if (visited.has(current.parent_id)) break;
+                visited.add(current.parent_id);
+                current = getFolderById(current.parent_id);
+            }
+            return false;
+        }
+
+        function canDropFolderInside(sourceFolderId, targetFolderId) {
+            const targetFolder = getFolderById(targetFolderId);
+            if (!targetFolder) return false;
+            if (sourceFolderId === targetFolderId) return false;
+            if (sourceFolderId && isFolderDescendant(targetFolderId, sourceFolderId)) return false;
+            return true;
+        }
+
+        function resolveFolderDropMode(event, sourceFolderId, targetFolderId) {
+            const targetElement = event?.currentTarget;
+            if (!targetElement) return 'inside';
+
+            const targetRect = targetElement.getBoundingClientRect();
+            const relY = targetRect.height > 0 ? (event.clientY - targetRect.top) / targetRect.height : 0.5;
+            const allowInside = canDropFolderInside(sourceFolderId, targetFolderId);
+
+            if (!allowInside) {
+                return relY >= 0.5 ? 'after' : 'before';
+            }
+            if (relY <= 0.34) return 'before';
+            if (relY >= 0.66) return 'after';
+            return 'inside';
+        }
+
         async function moveItemToFolder(itemId, folderId) {
             const item = getItemById(itemId);
-            const folder = foldersData.find((entry) => entry.id === folderId);
+            const folder = getFolderById(folderId);
             if (!item || !folder) return;
 
             const existingFolderIds = Array.isArray(item.folder_ids) ? item.folder_ids.filter(Boolean) : [];
@@ -299,46 +404,94 @@
             await Promise.all([fetchFolders(), fetchItems()]);
         }
 
-        function buildReorderedFolderIds(sourceFolderId, targetFolderId, dropMode) {
-            const orderedFolderIds = foldersData.map((folder) => folder.id);
+        function buildReorderedFolderIds(sourceFolderId, targetFolderId, dropMode, parentId = null) {
+            const orderedFolderIds = getSiblingFolderIds(parentId);
             const sourceIndex = orderedFolderIds.indexOf(sourceFolderId);
             const targetIndex = orderedFolderIds.indexOf(targetFolderId);
-            if (sourceIndex === -1 || targetIndex === -1 || sourceFolderId === targetFolderId) {
+            if (targetIndex === -1 || sourceFolderId === targetFolderId) {
                 return orderedFolderIds;
             }
 
-            orderedFolderIds.splice(sourceIndex, 1);
+            if (sourceIndex !== -1) {
+                orderedFolderIds.splice(sourceIndex, 1);
+            }
             const adjustedTargetIndex = orderedFolderIds.indexOf(targetFolderId);
             const insertionIndex = dropMode === 'after' ? adjustedTargetIndex + 1 : adjustedTargetIndex;
             orderedFolderIds.splice(Math.max(0, insertionIndex), 0, sourceFolderId);
             return orderedFolderIds;
         }
 
+        async function moveFolderToParent(folderId, parentId = null, options = {}) {
+            const { silent = false } = options;
+            const folder = getFolderById(folderId);
+            const normalizedParentId = normalizeFolderParentId(parentId);
+            if (!folder) return false;
+            if (normalizeFolderParentId(folder.parent_id) === normalizedParentId) {
+                return false;
+            }
+
+            const response = await fetch(`/api/folders/${folderId}/parent`, {
+                method: 'PATCH',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ parent_id: normalizedParentId }),
+            });
+            const data = await response.json().catch(() => ({}));
+            if (!response.ok) {
+                throw new Error(data.detail || '移动文件夹失败');
+            }
+
+            if (!silent) {
+                const parentFolder = normalizedParentId ? getFolderById(normalizedParentId) : null;
+                showToast(parentFolder ? `已放入「${parentFolder.name}」` : '已移到顶层', 'success');
+            }
+            return true;
+        }
+
+        async function moveFolderInside(sourceFolderId, targetFolderId) {
+            const targetFolder = getFolderById(targetFolderId);
+            if (!targetFolder) return;
+            const moved = await moveFolderToParent(sourceFolderId, targetFolderId, { silent: true });
+            if (!moved) {
+                showToast(`已在「${targetFolder.name}」下`, 'info');
+                return;
+            }
+            showToast(`已放入「${targetFolder.name}」`, 'success');
+            await fetchFolders();
+        }
+
         async function reorderFolderPosition(sourceFolderId, targetFolderId, dropMode) {
-            const nextFolderIds = buildReorderedFolderIds(sourceFolderId, targetFolderId, dropMode);
-            const currentFolderIds = foldersData.map((folder) => folder.id);
-            if (JSON.stringify(nextFolderIds) === JSON.stringify(currentFolderIds)) return;
+            const targetFolder = getFolderById(targetFolderId);
+            const sourceFolder = getFolderById(sourceFolderId);
+            if (!targetFolder || !sourceFolder) return;
+
+            const targetParentId = normalizeFolderParentId(targetFolder.parent_id);
+            const movedParent = await moveFolderToParent(sourceFolderId, targetParentId, { silent: true });
+            const nextFolderIds = buildReorderedFolderIds(sourceFolderId, targetFolderId, dropMode, targetParentId);
+            const currentFolderIds = getSiblingFolderIds(targetParentId);
+            if (!movedParent && JSON.stringify(nextFolderIds) === JSON.stringify(currentFolderIds)) return;
 
             const response = await fetch('/api/folders/reorder', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ folder_ids: nextFolderIds }),
+                body: JSON.stringify({ folder_ids: nextFolderIds, parent_id: targetParentId }),
             });
             if (!response.ok) {
                 const data = await response.json().catch(() => ({}));
                 throw new Error(data.detail || '文件夹排序失败');
             }
 
-            showToast('文件夹顺序已更新', 'success');
+            const parentFolder = targetParentId ? getFolderById(targetParentId) : null;
+            showToast(
+                movedParent
+                    ? (parentFolder ? `已移到「${parentFolder.name}」下` : '已移到顶层')
+                    : '文件夹顺序已更新',
+                'success'
+            );
             await fetchFolders();
         }
 
         function handleFolderDragStart(event, folderId) {
             if (!event.dataTransfer) return;
-            if (!(event.metaKey || folderReorderArmed)) {
-                event.preventDefault();
-                return;
-            }
             draggedFolderId = folderId;
             document.body.classList.add('folder-reordering');
             event.dataTransfer.effectAllowed = 'move';
@@ -361,8 +514,8 @@
             event.preventDefault();
             const targetElement = event.currentTarget;
             if (hasFolderDrag) {
-                const targetRect = targetElement.getBoundingClientRect();
-                const dropMode = event.clientY > targetRect.top + targetRect.height / 2 ? 'after' : 'before';
+                const sourceFolderId = draggedFolderId || event.dataTransfer?.getData(FOLDER_DRAG_DATA_TYPE) || '';
+                const dropMode = resolveFolderDropMode(event, sourceFolderId, folderId);
                 updateFolderDropIndicator(folderId, dropMode, targetElement);
                 event.dataTransfer.dropEffect = 'move';
                 return;
@@ -384,7 +537,9 @@
             event.preventDefault();
             const droppedItemId = event.dataTransfer?.getData(ITEM_DRAG_DATA_TYPE) || draggedLibraryItemId;
             const droppedFolderId = event.dataTransfer?.getData(FOLDER_DRAG_DATA_TYPE) || draggedFolderId;
-            const dropMode = currentFolderDropMode || 'inside';
+            const dropMode = droppedFolderId
+                ? resolveFolderDropMode(event, droppedFolderId, folderId)
+                : (currentFolderDropMode || 'inside');
             clearFolderDropIndicator();
 
             try {
@@ -393,6 +548,10 @@
                     return;
                 }
                 if (droppedFolderId && droppedFolderId !== folderId) {
+                    if (dropMode === 'inside') {
+                        await moveFolderInside(droppedFolderId, folderId);
+                        return;
+                    }
                     await reorderFolderPosition(droppedFolderId, folderId, dropMode === 'after' ? 'after' : 'before');
                 }
             } catch (error) {
@@ -452,13 +611,27 @@
             return data;
         }
 
-        function openCreateFolderPrompt() {
+        function populateParentFolderSelect(preselectId) {
+            let html = '<option value="">顶层文件夹</option>';
+            const orderedFolders = buildFolderTree(foldersData);
+            for (const f of orderedFolders) {
+                const selected = f.id === preselectId ? ' selected' : '';
+                const prefix = f._level > 0 ? `${'　'.repeat(f._level)}└ ` : '';
+                html += `<option value="${f.id}"${selected}>${escapeHtml(prefix + f.name)}</option>`;
+            }
+            folderPickerParentSelect.innerHTML = html;
+        }
+
+        function openCreateFolderPrompt(preselectParentId) {
             folderPickerContext = 'create';
             folderCreateInput.value = '';
             folderPickerTargetIds = [];
             folderPickerSelectedIds = new Set(currentFolderScope === 'folder' && currentFolderId ? [currentFolderId] : []);
             folderPickerTitle.textContent = '新建文件夹';
             folderCreateConfirmBtn.textContent = '立即新建';
+            populateParentFolderSelect(preselectParentId || null);
+            folderPickerParentRow.style.display = '';
+            folderPickerSectionTitle.style.display = '';
             renderFolderPickerOptions();
             folderPickerOverlay.classList.add('active');
             requestAnimationFrame(() => folderCreateInput.focus());
@@ -490,6 +663,8 @@
             folderPickerTitle.textContent = title;
             folderCreateInput.value = '';
             folderCreateConfirmBtn.textContent = folderPickerTargetIds.length > 0 ? '新建并选中' : '立即新建';
+            folderPickerParentRow.style.display = 'none';
+            folderPickerSectionTitle.style.display = '';
             renderFolderPickerOptions();
             folderPickerOverlay.classList.add('active');
             requestAnimationFrame(() => folderCreateInput.focus());
@@ -531,6 +706,8 @@
             folderPickerTitle.textContent = submitAfterSelection ? '选择收录文件夹' : '手机端存入文件夹';
             folderCreateInput.value = '';
             folderCreateConfirmBtn.textContent = submitAfterSelection ? '新建并收录' : '新建并使用';
+            folderPickerParentRow.style.display = 'none';
+            folderPickerSectionTitle.style.display = '';
             folderPickerOverlay.classList.add('active');
             requestAnimationFrame(() => folderCreateInput.focus());
 
@@ -556,6 +733,9 @@
             folderPickerApplyBtn.disabled = false;
             folderPickerClearBtn.disabled = false;
             folderCreateConfirmBtn.disabled = false;
+            folderPickerParentRow.style.display = 'none';
+            folderPickerSectionTitle.style.display = '';
+            folderPickerHint.textContent = '选择文件夹后完成保存';
         }
 
         function setFolderPickerActionState(isBusy) {
@@ -760,12 +940,17 @@
             try {
                 setFolderPickerActionState(true);
                 const mode = getFolderPickerMode();
-                const folder = await createFolder(folderCreateInput.value);
+                const parentId = mode === 'create' ? (folderPickerParentSelect.value || null) : null;
+                const folder = await createFolder(folderCreateInput.value, parentId);
                 if (!folder) {
                     setFolderPickerActionState(false);
                     return;
                 }
                 folderCreateInput.value = '';
+                if (parentId && collapsedFolderIds.has(parentId)) {
+                    collapsedFolderIds.delete(parentId);
+                    localStorage.setItem('collapsedFolderIds', JSON.stringify([...collapsedFolderIds]));
+                }
                 if (mode === 'mobile-capture') {
                     folderPickerSelectedIds.add(folder.id);
                     mobileCaptureSelectedFolderIds = Array.from(folderPickerSelectedIds);
@@ -814,30 +999,16 @@
             return depth;
         }
 
-        async function createSubfolderPrompt(parentId) {
+        function createSubfolderPrompt(parentId) {
             closeFolderContextMenu();
-            const parent = foldersData.find(f => f.id === parentId);
-            if (!parent) return;
-            const name = window.prompt(`在「${parent.name}」下创建子文件夹`);
-            if (!name) return;
-            try {
-                await createFolder(name, parentId);
-                if (collapsedFolderIds.has(parentId)) {
-                    collapsedFolderIds.delete(parentId);
-                    localStorage.setItem('collapsedFolderIds', JSON.stringify([...collapsedFolderIds]));
-                }
-                showToast(`已创建子文件夹：${name}`, 'success');
-            } catch (error) {
-                showToast(error.message, 'error');
-            }
+            openCreateFolderPrompt(parentId);
         }
 
         function openFolderContextMenu(folderId, event) {
             event.stopPropagation();
             const folder = foldersData.find((entry) => entry.id === folderId);
             if (!folder) return;
-            const depth = getFolderDepth(folderId);
-            const canNest = depth < 1;
+            const canNest = true;
             const subfolderBtn = canNest ? `
                 <button type="button" onclick="createSubfolderPrompt('${folderId}')">
                     <span class="folder-context-menu-icon" aria-hidden="true">

@@ -63,6 +63,9 @@
         const closeFolderPicker = document.getElementById('closeFolderPicker');
         const folderCreateInput = document.getElementById('folderCreateInput');
         const folderCreateConfirmBtn = document.getElementById('folderCreateConfirmBtn');
+        const folderPickerParentRow = document.getElementById('folderPickerParentRow');
+        const folderPickerParentSelect = document.getElementById('folderPickerParentSelect');
+        const folderPickerSectionTitle = document.getElementById('folderPickerSectionTitle');
         const folderContextMenu = document.getElementById('folderContextMenu');
         const sidebarUserName = document.getElementById('sidebarUserName');
         const sidebarUserSubtitle = document.getElementById('sidebarUserSubtitle');

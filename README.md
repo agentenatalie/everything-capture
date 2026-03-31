@@ -32,7 +32,7 @@ Most "read-it-later" services store your data on their servers. Everything Captu
 | 📄 | **Smart extraction** | Articles, social posts (Xiaohongshu, Douyin, Twitter/X, WeChat), images, videos |
 | 💾 | **Local media storage** | All media (images, videos, covers) downloaded to your disk |
 | 🔍 | **Full-text search** | SQLite FTS5 trigram index for fast Chinese + English search |
-| 🗂️ | **Folder organization** | Drag-and-drop folders, multi-folder assignment, batch operations |
+| 🗂️ | **Folder organization** | Nested folders, drag-to-nest/reorder, multi-folder assignment, rollup counts |
 | 🤖 | **AI assistant** | Chat & agent mode with knowledge base Q&A, content analysis, auto-organization |
 | 🎙️ | **Local transcription** | On-device speech-to-text via mlx-whisper (Apple Silicon) |
 | 👁️ | **OCR** | Image text extraction + QR code detection via macOS Vision framework |
@@ -126,6 +126,14 @@ All data lives **outside** the repo in a sibling directory:
 ```
 
 Override with env vars: `DATA_DIR`, `SQLITE_PATH`, `MEDIA_DIR`, `EXPORTS_DIR`.
+
+## Folder Hierarchy
+
+- Folders support multi-level nesting.
+- Drag a folder onto another folder to make it a subfolder.
+- Drag near the top or bottom edge of a folder row to reorder siblings.
+- Parent folders show the unique content count of the whole subtree, not just directly linked items.
+- Clicking a top-level folder toggles its subfolder list immediately and focuses the parent folder itself, without adding extra chevron UI.
 
 ## Mobile / Cloud Capture (Optional, Self-hosted)
 

@@ -2549,6 +2549,25 @@
             color: #94a3b8;
         }
 
+        .folder-picker-parent-row {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .folder-picker-parent-label {
+            font-size: 0.82rem;
+            font-weight: 600;
+            color: #64748b;
+            white-space: nowrap;
+            flex-shrink: 0;
+        }
+
+        .folder-picker-parent-row .platform-select {
+            flex: 1;
+            width: auto;
+        }
+
         .folder-picker-create-btn {
             border: none;
             border-radius: 999px;

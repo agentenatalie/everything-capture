@@ -40,7 +40,7 @@ def _find_folder_by_name(
     return query.first()
 
 
-def _serialize_folder_rows(rows: list[tuple[Folder, int]]) -> list[FolderResponse]:
+def _serialize_folders(folders: list[Folder], item_counts: dict[str, int] | None = None) -> list[FolderResponse]:
     return [
         FolderResponse(
             id=folder.id,
@@ -49,9 +49,9 @@ def _serialize_folder_rows(rows: list[tuple[Folder, int]]) -> list[FolderRespons
             parent_id=folder.parent_id,
             created_at=folder.created_at,
             updated_at=folder.updated_at,
-            item_count=item_count,
+            item_count=(item_counts or {}).get(folder.id, 0),
         )
-        for folder, item_count in rows
+        for folder in folders
     ]
 
 
@@ -65,18 +65,50 @@ def _next_folder_sort_order(db: Session, user_id: str, parent_id: str | None = N
     return int(current_max if current_max is not None else -1) + 1
 
 
+def _build_folder_aggregate_counts(db: Session, user_id: str, folders: list[Folder]) -> dict[str, int]:
+    if not folders:
+        return {}
+
+    folder_ids = [folder.id for folder in folders]
+    direct_item_ids: dict[str, set[str]] = {folder_id: set() for folder_id in folder_ids}
+    children_by_parent: dict[str | None, list[str]] = {}
+    for folder in folders:
+        children_by_parent.setdefault(folder.parent_id, []).append(folder.id)
+
+    link_rows = (
+        db.query(ItemFolderLink.folder_id, ItemFolderLink.item_id)
+        .join(Folder, Folder.id == ItemFolderLink.folder_id)
+        .join(Item, (Item.id == ItemFolderLink.item_id) & (Item.user_id == user_id))
+        .filter(Folder.user_id == user_id, ItemFolderLink.folder_id.in_(folder_ids))
+        .all()
+    )
+    for folder_id, item_id in link_rows:
+        direct_item_ids.setdefault(folder_id, set()).add(item_id)
+
+    aggregate_cache: dict[str, set[str]] = {}
+
+    def collect(folder_id: str) -> set[str]:
+        if folder_id in aggregate_cache:
+            return aggregate_cache[folder_id]
+        item_ids = set(direct_item_ids.get(folder_id, set()))
+        for child_id in children_by_parent.get(folder_id, []):
+            item_ids.update(collect(child_id))
+        aggregate_cache[folder_id] = item_ids
+        return item_ids
+
+    return {folder_id: len(collect(folder_id)) for folder_id in folder_ids}
+
+
 @router.get("", response_model=FolderListResponse)
 def get_folders(db: Session = Depends(get_db)):
     user_id = get_current_user_id()
-    folder_rows = (
-        db.query(Folder, func.count(Item.id))
-        .outerjoin(ItemFolderLink, ItemFolderLink.folder_id == Folder.id)
-        .outerjoin(Item, (Item.id == ItemFolderLink.item_id) & (Item.user_id == user_id))
+    folders = (
+        db.query(Folder)
         .filter(Folder.user_id == user_id)
-        .group_by(Folder.id)
         .order_by(Folder.sort_order.asc(), Folder.created_at.asc(), Folder.name.asc(), Folder.id.asc())
         .all()
     )
+    aggregate_counts = _build_folder_aggregate_counts(db, user_id, folders)
     total_count = db.query(func.count(Item.id)).filter(Item.user_id == user_id).scalar() or 0
     unfiled_count = (
         db.query(func.count(Item.id))
@@ -86,7 +118,7 @@ def get_folders(db: Session = Depends(get_db)):
         or 0
     )
     return FolderListResponse(
-        folders=_serialize_folder_rows(folder_rows),
+        folders=_serialize_folders(folders, aggregate_counts),
         total_count=total_count,
         unfiled_count=unfiled_count,
     )
@@ -104,9 +136,6 @@ def create_folder(request: FolderCreateRequest, db: Session = Depends(get_db)):
         parent = db.query(Folder).filter(Folder.id == parent_id, Folder.user_id == user_id).first()
         if not parent:
             raise HTTPException(status_code=404, detail="Parent folder not found")
-        # Limit nesting to 2 levels
-        if parent.parent_id:
-            raise HTTPException(status_code=400, detail="Maximum nesting depth (2 levels) exceeded")
 
     if _find_folder_by_name(db, user_id, name, parent_id=parent_id):
         raise HTTPException(status_code=409, detail="Folder name already exists")
@@ -227,6 +256,25 @@ def move_folder(folder_id: str, request: FolderMoveRequest, db: Session = Depend
         raise HTTPException(status_code=404, detail="Folder not found")
 
     new_parent_id = (request.parent_id or "").strip() or None
+    current_parent_id = (folder.parent_id or "").strip() or None
+
+    if new_parent_id == current_parent_id:
+        item_count = (
+            db.query(func.count(Item.id))
+            .join(ItemFolderLink, ItemFolderLink.item_id == Item.id)
+            .filter(Item.user_id == user_id, ItemFolderLink.folder_id == folder.id)
+            .scalar()
+            or 0
+        )
+        return FolderResponse(
+            id=folder.id,
+            name=folder.name,
+            sort_order=folder.sort_order or 0,
+            parent_id=folder.parent_id,
+            created_at=folder.created_at,
+            updated_at=folder.updated_at,
+            item_count=item_count,
+        )
 
     if new_parent_id:
         if new_parent_id == folder_id:
@@ -234,10 +282,11 @@ def move_folder(folder_id: str, request: FolderMoveRequest, db: Session = Depend
         parent = db.query(Folder).filter(Folder.id == new_parent_id, Folder.user_id == user_id).first()
         if not parent:
             raise HTTPException(status_code=404, detail="Parent folder not found")
-        if parent.parent_id:
-            raise HTTPException(status_code=400, detail="Maximum nesting depth (2 levels) exceeded")
         if _is_descendant_of(db, new_parent_id, folder_id):
             raise HTTPException(status_code=400, detail="Circular reference detected")
+
+    if _find_folder_by_name(db, user_id, folder.name, parent_id=new_parent_id, exclude_folder_id=folder.id):
+        raise HTTPException(status_code=409, detail="Folder name already exists")
 
     folder.parent_id = new_parent_id
     folder.sort_order = _next_folder_sort_order(db, user_id, new_parent_id)

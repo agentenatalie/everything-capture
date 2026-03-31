@@ -861,12 +861,21 @@
             recentViewsSection.style.display = '';
             const cards = views.map((item) => {
                 const thumbMedia = getItemThumbnail(item);
+                const viewedTime = escapeHtml(formatRelativeTime(item.last_viewed_at || item.created_at));
+                const platformLabel = escapeHtml(platformDisplayLabel(item));
                 const thumb = thumbMedia
                     ? `<div class="rv-card-thumb"><img src="${escapeAttribute(resolveMediaUrl(thumbMedia.url))}" alt="" loading="lazy" decoding="async"></div>`
                     : `<div class="rv-card-thumb rv-card-thumb-empty"><span>${escapeHtml((item.platform || '').slice(0, 2).toUpperCase() || '📄')}</span></div>`;
                 return `<div class="rv-card" onclick="handleItemPrimaryAction('${item.id}')" title="${escapeAttribute(item.title || '')}">
                     ${thumb}
-                    <div class="rv-card-title">${escapeHtml(item.title || '无标题')}</div>
+                    <div class="rv-card-body">
+                        <div class="rv-card-meta">
+                            <span>${platformLabel}</span>
+                            <span class="rv-card-meta-separator">•</span>
+                            <span>${viewedTime}</span>
+                        </div>
+                        <div class="rv-card-title">${escapeHtml(item.title || '无标题')}</div>
+                    </div>
                 </div>`;
             }).join('');
             recentViewsSection.innerHTML = `<div class="rv-header">最近查看</div><div class="rv-scroll">${cards}</div>`;

@@ -129,12 +129,6 @@ def _is_wechat_interstitial_url(url: str | None) -> bool:
     return path.startswith("/mp/") and "captcha" in path
 
 
-_WECHAT_SHARE_PAGE_MARKERS = (
-    "share_content_page",
-    "window.picture_page_info_list",
-    "item_show_type: '8' * 1",
-    "window.item_show_type = '8'",
-)
 _WECHAT_SHELL_TEXT_MARKERS = (
     "向上滑动看下一个",
     "微信扫一扫可打开此内容",
@@ -1683,6 +1677,30 @@ def _decode_wechat_js_string(value: str | None) -> str:
     return text.replace("\xa0", " ").strip()
 
 
+def _looks_like_html_fragment(value: str | None) -> bool:
+    text = str(value or "").strip()
+    if not text:
+        return False
+    return bool(re.search(r"</?(?:p|div|section|span|img|br|article|figure|h[1-6]|blockquote|ul|ol|li)\b", text, re.I))
+
+
+def _is_wechat_share_gallery_page(html: str) -> bool:
+    body = str(html or "")
+    if not body:
+        return False
+
+    if re.search(r"\bitem_show_type\s*:\s*['\"]8['\"]\s*\*\s*1", body):
+        return True
+    if re.search(r"window\.item_show_type\s*=\s*['\"]8['\"]", body):
+        return True
+
+    return (
+        "share_content_page" in body
+        and 'id="js_content"' not in body
+        and "rich_media_content" not in body
+    )
+
+
 def _extract_wechat_jsdecode_field(html: str, field_name: str) -> str:
     patterns = (
         rf"\b{re.escape(field_name)}\s*:\s*JsDecode\('((?:\\.|[^'])*)'\)",
@@ -1754,7 +1772,7 @@ def _build_wechat_content_html(content_blocks: list[dict]) -> str | None:
 
 def _parse_wechat_share_page(html: str, final_url: str) -> ExtractResult | None:
     body = str(html or "")
-    if not body or not any(marker in body for marker in _WECHAT_SHARE_PAGE_MARKERS):
+    if not body or not _is_wechat_share_gallery_page(body):
         return None
 
     soup = BeautifulSoup(body, "lxml")
@@ -1772,7 +1790,11 @@ def _parse_wechat_share_page(html: str, final_url: str) -> ExtractResult | None:
         or _html_meta(soup, "description")
         or title
     )
-    if not text or any(marker in text for marker in _WECHAT_SHELL_TEXT_MARKERS):
+    if (
+        not text
+        or _looks_like_html_fragment(text)
+        or any(marker in text for marker in _WECHAT_SHELL_TEXT_MARKERS)
+    ):
         return None
 
     media_urls: list[dict] = []

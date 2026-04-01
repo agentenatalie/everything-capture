@@ -146,6 +146,37 @@ class ExtractorMediaTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("example-1.jpg", result.content_html or "")
         self.assertIn("<p>第一段</p>", result.content_html or "")
 
+    def test_parse_wechat_share_page_ignores_normal_article_html(self) -> None:
+        html = """
+        <html>
+          <body>
+            <div id="img-content">
+              <div id="js_content" class="rich_media_content">
+                <p>普通正文段落</p>
+              </div>
+            </div>
+            <script>
+              window.cgiDataNew = {
+                title: JsDecode('普通公众号文章'),
+                content_noencode: JsDecode('<p>普通正文段落</p>'),
+                item_show_type: '0' * 1
+              };
+              window.picture_page_info_list = [
+                {
+                  width: '760' * 1,
+                  height: '428' * 1,
+                  cdn_url: 'https://mmbiz.qpic.cn/example-1.jpg'
+                }
+              ];
+            </script>
+          </body>
+        </html>
+        """
+
+        result = _parse_wechat_share_page(html, "https://mp.weixin.qq.com/s/example-normal")
+
+        self.assertIsNone(result)
+
     def test_parse_xhs_initial_state_uses_desc_first_line_when_title_missing(self) -> None:
         html = """
         <html><body><script>

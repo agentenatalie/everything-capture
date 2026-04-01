@@ -742,6 +742,30 @@
                 .sort((a, b) => a.display_order - b.display_order);
         }
 
+        function normalizeMediaLookupUrl(url) {
+            return String(url || '').trim().replaceAll('&amp;', '&');
+        }
+
+        function resolveItemMediaUrl(item, url) {
+            const normalizedUrl = normalizeMediaLookupUrl(url);
+            if (!normalizedUrl) return '';
+            if (normalizedUrl.startsWith('/static/')) {
+                return resolveMediaUrl(normalizedUrl);
+            }
+
+            const mediaList = Array.isArray(item?.media) ? item.media : [];
+            const matchedMedia = mediaList.find((media) => {
+                const originalUrl = normalizeMediaLookupUrl(media?.original_url);
+                return originalUrl && originalUrl === normalizedUrl && media?.url;
+            });
+
+            if (matchedMedia?.url) {
+                return resolveMediaUrl(matchedMedia.url);
+            }
+
+            return resolveMediaUrl(normalizedUrl);
+        }
+
         function extractImageUrlsFromHtml(html) {
             return Array.from(
                 String(html || '').matchAll(/<img[^>]+src=["']([^"']+)["'][^>]*>/gi),
@@ -764,6 +788,33 @@
             } catch (error) {
                 return null;
             }
+        }
+
+        function looksLikeHtmlFragment(value) {
+            const source = String(value || '').trim();
+            if (!source) return false;
+            return /<\/?(?:p|div|section|span|img|br|article|figure|h[1-6]|blockquote|ul|ol|li)\b/i.test(source);
+        }
+
+        function getEmbeddedWechatHtmlSource(item, blocks) {
+            if (normalizePlatform(item?.platform || '', item?.source_url || '') !== 'wechat') {
+                return '';
+            }
+
+            const canonicalText = String(item?.canonical_text || '').trim();
+            if (looksLikeHtmlFragment(canonicalText)) {
+                return canonicalText;
+            }
+
+            for (const block of blocks || []) {
+                if (block?.type !== 'text' && block?.type !== 'paragraph') continue;
+                const content = String(block?.markdown || block?.content || '').trim();
+                if (looksLikeHtmlFragment(content)) {
+                    return content;
+                }
+            }
+
+            return '';
         }
 
         function summarizeStructuredBlocks(blocks) {
@@ -864,6 +915,7 @@
                 }
 
                 if ((type === 'text' || type === 'paragraph') && content) {
+                    if (looksLikeHtmlFragment(content)) return false;
                     seenText = true;
                     textCount += 1;
                     continue;
@@ -877,7 +929,7 @@
             return imageCount >= 2 && textCount >= 1;
         }
 
-        function renderStructuredBlocks(blocks) {
+        function renderStructuredBlocks(blocks, item = null) {
             const htmlParts = [];
             let index = 0;
 
@@ -933,11 +985,11 @@
                     continue;
                 }
                 if (block.type === 'image' && block.url) {
-                    htmlParts.push(`<div class="inline-img-wrap"><img src="${escapeAttribute(resolveMediaUrl(block.url))}" alt="" class="inline-img" loading="lazy" decoding="async"></div>`);
+                    htmlParts.push(`<div class="inline-img-wrap"><img src="${escapeAttribute(resolveItemMediaUrl(item, block.url))}" alt="" class="inline-img" loading="lazy" decoding="async"></div>`);
                     continue;
                 }
                 if (block.type === 'video' && block.url) {
-                    htmlParts.push(renderVideoMedia(resolveMediaUrl(block.url)));
+                    htmlParts.push(renderVideoMedia(resolveItemMediaUrl(item, block.url)));
                 }
             }
 
@@ -1005,32 +1057,44 @@
             return html;
         }
 
-        function resolveHtmlMediaUrls(html) {
+        function resolveHtmlMediaUrls(html, item = null) {
             if (!html) return '';
             const template = document.createElement('template');
             template.innerHTML = html;
 
-            template.content.querySelectorAll('[src], [poster], [href], [srcset]').forEach((node) => {
+            template.content.querySelectorAll('[src], [poster], [href], [srcset], [data-src], [data-srcset]').forEach((node) => {
+                const dataSrc = node.getAttribute('data-src');
+                if (dataSrc && !node.getAttribute('src')) {
+                    node.setAttribute('src', dataSrc);
+                }
+                if (dataSrc) {
+                    node.removeAttribute('data-src');
+                }
                 if (node.tagName === 'IMG') {
                     node.setAttribute('loading', 'lazy');
                     node.setAttribute('decoding', 'async');
                 }
-                ['src', 'poster', 'href'].forEach((attr) => {
+                ['src', 'poster'].forEach((attr) => {
                     const value = node.getAttribute(attr);
-                    if (value && value.startsWith('/static/')) {
-                        node.setAttribute(attr, resolveMediaUrl(value));
+                    if (value) {
+                        node.setAttribute(attr, resolveItemMediaUrl(item, value));
                     }
                 });
 
+                const href = node.getAttribute('href');
+                if (href && href.startsWith('/static/')) {
+                    node.setAttribute('href', resolveMediaUrl(href));
+                }
+
                 const srcset = node.getAttribute('srcset');
-                if (srcset && srcset.includes('/static/')) {
+                if (srcset) {
                     const normalized = srcset
                         .split(',')
                         .map((entry) => {
                             const trimmed = entry.trim();
                             if (!trimmed) return trimmed;
                             const parts = trimmed.split(/\s+/, 2);
-                            parts[0] = resolveMediaUrl(parts[0]);
+                            parts[0] = resolveItemMediaUrl(item, parts[0]);
                             return parts.filter(Boolean).join(' ');
                         })
                         .join(', ');
@@ -1041,15 +1105,61 @@
             return template.innerHTML;
         }
 
+        function renderEmbeddedWechatHtmlArticle(item, blocks, videos) {
+            const htmlSource = getEmbeddedWechatHtmlSource(item, blocks);
+            if (!htmlSource) return '';
+
+            const template = document.createElement('template');
+            template.innerHTML = htmlSource;
+
+            template.content.querySelectorAll('[data-lark-record-data], [data-lark-record-format]').forEach((node) => {
+                node.removeAttribute('data-lark-record-data');
+                node.removeAttribute('data-lark-record-format');
+                if (!node.textContent.trim() && !node.querySelector('img,video,iframe,a,br')) {
+                    node.remove();
+                }
+            });
+
+            template.content.querySelectorAll('[data-pm-slice], [leaf], [textstyle], [nodeleaf]').forEach((node) => {
+                node.removeAttribute('data-pm-slice');
+                node.removeAttribute('leaf');
+                node.removeAttribute('textstyle');
+                node.removeAttribute('nodeleaf');
+            });
+
+            Array.from(template.content.querySelectorAll('section, p, div, span')).reverse().forEach((node) => {
+                if (!node.textContent.trim() && !node.querySelector('img,video,iframe,a,br,hr')) {
+                    node.remove();
+                }
+            });
+
+            const normalizedHtml = resolveHtmlMediaUrls(template.innerHTML, item);
+            if (!normalizedHtml.trim()) {
+                return '';
+            }
+
+            let html = '';
+            if (videos.length > 0 && !/<(video|iframe)\b/i.test(normalizedHtml)) {
+                html += renderVideoMedia(resolveMediaUrl(videos[0].url));
+            }
+            html += `<div class="article-html" style="margin-top: 0;">${normalizedHtml}</div>`;
+            return html;
+        }
+
         function renderWebArticle(item, videos) {
             const mediaImages = getItemImages(item);
             const mediaImageUrls = mediaImages.map((image) => image.url);
             const blocks = parseContentBlocks(item);
             let bodyHtml = '';
 
+            const embeddedWechatHtmlArticle = renderEmbeddedWechatHtmlArticle(item, blocks, videos);
+            if (embeddedWechatHtmlArticle) {
+                return embeddedWechatHtmlArticle;
+            }
+
             if (isWechatSwipeGalleryItem(item, blocks, mediaImages)) {
                 const textBlocks = blocks.filter((block) => block?.type !== 'image');
-                bodyHtml = renderStructuredBlocks(textBlocks);
+                bodyHtml = renderStructuredBlocks(textBlocks, item);
                 if (!bodyHtml) {
                     bodyHtml = renderPlainTextArticle(item);
                 }
@@ -1069,14 +1179,14 @@
                     .map((block) => block.url);
                 const summary = summarizeStructuredBlocks(blocks);
                 if (summary.hasText && !hasSuspiciousRepeatedImages(blockImageUrls, mediaImageUrls)) {
-                    bodyHtml = renderStructuredBlocks(blocks);
+                    bodyHtml = renderStructuredBlocks(blocks, item);
                 }
             }
 
             if (!bodyHtml && item.canonical_html) {
                 const htmlImageUrls = extractImageUrlsFromHtml(item.canonical_html);
                 if (!hasSuspiciousRepeatedImages(htmlImageUrls, mediaImageUrls)) {
-                    bodyHtml = `<div class="article-html" style="margin-top: 0;">${resolveHtmlMediaUrls(item.canonical_html)}</div>`;
+                    bodyHtml = `<div class="article-html" style="margin-top: 0;">${resolveHtmlMediaUrls(item.canonical_html, item)}</div>`;
                 }
             }
 

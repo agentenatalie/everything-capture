@@ -9,7 +9,7 @@
     <link
         href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&family=Manrope:wght@500;600;700&family=Noto+Sans+SC:wght@400;500;600;700&display=swap"
         rel="stylesheet">
-    <link rel="stylesheet" href="css/index.css?v=20260325v1">
+    <link rel="stylesheet" href="css/index.css?v=20260401sidebaroriginalfixed2">
 </head>
 
 <body>
@@ -95,7 +95,12 @@
                 <div class="folder-panel">
                     <div class="folder-panel-header">
                         <div class="folder-panel-title-row">
-                            <div class="folder-panel-title">文件夹</div>
+                            <div class="folder-panel-title" aria-label="Everything Capture" title="Everything Capture">
+                                <span class="folder-panel-title-text">文件夹</span>
+                                <svg class="folder-panel-logo" viewBox="0 0 128 128" fill="none" aria-hidden="true">
+                                    <path d="M64 20 L73 50 L105 45 L82 66 L94 96 L64 78 L34 96 L46 66 L23 45 L55 50 Z" stroke="currentColor" stroke-width="8" stroke-linejoin="round" stroke-linecap="round"></path>
+                                </svg>
+                            </div>
                             <div class="folder-panel-actions">
                                 <button id="createFolderBtn" class="view-btn folder-create-btn" type="button">+ 新建</button>
                             </div>

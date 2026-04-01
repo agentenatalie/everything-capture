@@ -3298,6 +3298,17 @@
             transition: opacity 0.2s ease;
         }
 
+        .folder-panel-title-text {
+            display: inline-block;
+            line-height: 1;
+        }
+
+        .folder-panel-logo {
+            display: none;
+            width: 22px;
+            height: 22px;
+        }
+
         .folder-panel-actions {
             gap: 8px;
         }
@@ -3381,14 +3392,31 @@
             padding: 20px 12px 16px;
         }
 
-        body.sidebar-collapsed .folder-panel-title,
+        body.sidebar-collapsed .folder-panel-title-row {
+            justify-content: center;
+        }
+
+        body.sidebar-collapsed .folder-panel-title {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            width: 22px;
+            height: 22px;
+            color: #111827;
+            flex-shrink: 0;
+        }
+
+        body.sidebar-collapsed .folder-panel-title-text {
+            display: none;
+        }
+
+        body.sidebar-collapsed .folder-panel-logo {
+            display: block;
+        }
+
+        body.sidebar-collapsed .folder-panel-actions,
         body.sidebar-collapsed .folder-create-btn {
-            opacity: 0;
-            visibility: hidden;
-            max-width: 0;
-            overflow: hidden;
-            pointer-events: none;
-            transition: opacity 0.18s ease, visibility 0s 0.18s, max-width 0s 0.18s;
+            display: none;
         }
 
 
@@ -3520,6 +3548,7 @@
             justify-content: center;
             padding: 8px;
             gap: 0;
+            padding-left: 8px !important;
         }
 
         body.sidebar-collapsed .folder-item-name,
@@ -7348,7 +7377,7 @@
                 padding: 20px 12px 16px;
             }
 
-            body.reader-is-fullscreen .folder-panel-title,
+            body.reader-is-fullscreen .folder-panel-actions,
             body.reader-is-fullscreen .folder-create-btn,
             body.reader-is-fullscreen .sidebar-user-copy,
             body.reader-is-fullscreen .sidebar-user-meta,
@@ -7357,6 +7386,28 @@
             body.reader-is-fullscreen .folder-item-menu,
             body.reader-is-fullscreen .folder-sidebar-toggle {
                 display: none;
+            }
+
+            body.reader-is-fullscreen .folder-panel-title-row {
+                justify-content: center;
+            }
+
+            body.reader-is-fullscreen .folder-panel-title {
+                display: inline-flex;
+                align-items: center;
+                justify-content: center;
+                width: 22px;
+                height: 22px;
+                color: #111827;
+                flex-shrink: 0;
+            }
+
+            body.reader-is-fullscreen .folder-panel-title-text {
+                display: none;
+            }
+
+            body.reader-is-fullscreen .folder-panel-logo {
+                display: block;
             }
 
             body.reader-is-fullscreen .folder-search {
@@ -7375,6 +7426,11 @@
             body.reader-is-fullscreen .folder-item {
                 justify-content: center;
                 padding: 8px;
+                padding-left: 8px !important;
+            }
+
+            body.reader-is-fullscreen .sidebar-tags-section {
+                display: none;
             }
 
             body.reader-is-fullscreen .sidebar-user {

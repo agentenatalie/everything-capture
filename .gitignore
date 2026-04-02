@@ -55,6 +55,8 @@ md-docs/
 # Temporary debug artifacts
 tmp-*
 tmp_*
+.tmp-*
+.tmp_*
 
 # Editor / OS
 .DS_Store

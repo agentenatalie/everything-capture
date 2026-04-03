@@ -76,7 +76,7 @@
         `;
 
         let askAiRequestInFlight = false;
-        let readerAiRequestInFlight = false;
+        const readerAiRequestsInFlight = new Set();
         let aiAssistantMode = 'chat';
         // Chat 和 Agent 分别维护独立的对话
         let aiChatConversation = [];
@@ -2459,7 +2459,7 @@
             ensureReaderAiConversationLoaded(itemKey);
             const conversation = getReaderAiConversation(itemKey);
             const draft = readerAiDraftByItem.get(itemKey) || '';
-            const isBusy = readerAiRequestInFlight && normalizeReaderAiItemKey(currentOpenItemId) === itemKey;
+            const isBusy = readerAiRequestsInFlight.has(itemKey);
 
             if (!isAiConfigured()) {
                 return `
@@ -2582,10 +2582,11 @@
                 showToast('无法初始化本地会话。', 'error');
                 return;
             }
-            if (!currentOpenItemId || readerAiRequestInFlight) return;
+            if (!currentOpenItemId) return;
+            const itemKey = normalizeReaderAiItemKey(currentOpenItemId);
+            if (readerAiRequestsInFlight.has(itemKey)) return;
             const item = typeof getItemById === 'function' ? getItemById(currentOpenItemId) : null;
             if (!item) return;
-            const itemKey = normalizeReaderAiItemKey(item.id);
 
             await ensureAiSettingsLoaded();
             if (!isAiConfigured()) {
@@ -2609,7 +2610,7 @@
             if (input) {
                 input.value = '';
             }
-            readerAiRequestInFlight = true;
+            readerAiRequestsInFlight.add(itemKey);
             rerenderReaderAiSidebar(itemKey);
 
             try {
@@ -2656,7 +2657,7 @@
                 }
                 showToast(`AI 失败：${error.message}`, 'error');
             } finally {
-                readerAiRequestInFlight = false;
+                readerAiRequestsInFlight.delete(itemKey);
                 rerenderReaderAiSidebar(itemKey);
             }
         }
@@ -2704,7 +2705,7 @@
 
                 // Auto-continue: let the agent interpret the result
                 try {
-                    readerAiRequestInFlight = true;
+                    readerAiRequestsInFlight.add(itemKey);
                     rerenderReaderAiSidebar(itemKey);
                     const followUp = await requestAiAssistant(
                         buildReaderAiRequestMessages(item),
@@ -2735,7 +2736,7 @@
                     rerenderReaderAiSidebar(itemKey);
                     try { await persistReaderAiConversation(itemKey); } catch (_) {}
                 } finally {
-                    readerAiRequestInFlight = false;
+                    readerAiRequestsInFlight.delete(itemKey);
                     rerenderReaderAiSidebar(itemKey);
                 }
             } catch (error) {

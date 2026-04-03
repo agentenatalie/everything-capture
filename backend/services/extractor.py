@@ -2518,15 +2518,14 @@ def _extract_page_media(soup: BeautifulSoup, base_url: str = "") -> list[dict]:
             return -1.0
         return round(idx / _body_len, 4)
 
-    # 1. OG/meta 图片（这些不在正文内，inline_position = -1）
+    # 1. OG/meta 图片 → 标记为 cover，确保 getItemThumbnail 优先选用
     for prop in ("og:image", "og:image:url", "twitter:image"):
         val = _html_meta(soup, prop)
         if val:
             url = _normalize_media_url(val, base_url=base_url)
             if url and url not in seen_urls:
                 seen_urls.add(url)
-                media.append({"type": "image", "url": url, "order": img_order, "inline_position": -1.0})
-                img_order += 1
+                media.append({"type": "cover", "url": url, "order": 0, "inline_position": -1.0})
 
     for prop in ("og:video", "og:video:url", "twitter:player:stream"):
         val = _html_meta(soup, prop)

@@ -589,7 +589,8 @@ def _assistant_agent_system_prompt(agent_permissions: list[str], memories: list[
         "如果某个权限没有开放，或某个工具执行失败，必须直接说明。"
         "只有在工具结果明确成功时，才能说操作已经完成。"
         "回答请使用中文，保持清楚直接。"
-        "提到任何收藏内容时，必须使用 [1] [2] 引用编号，不要用「笔记1」「（笔记51）」等其他格式。"
+        "提到任何收藏内容时，必须使用工具返回结果中 ref 字段的编号作为引用标记（如 [3] [7]），不要自己按顺序编号。"
+        "如果工具结果没有 ref 字段，就不要输出引用编号。"
         "如果没有直接引用具体内容，就不要输出引用编号。"
         "\n\n"
         "【重要：智能检索策略】\n"
@@ -1999,6 +2000,41 @@ def _append_unique_ranked_notes(
         seen.add(note.note_id)
 
 
+def _annotate_result_with_citation_refs(
+    result: dict[str, Any],
+    ranked_notes: list[tuple[KnowledgeBaseNote, float]],
+    collected_notes: list[tuple[KnowledgeBaseNote, float]],
+) -> dict[str, Any]:
+    """Add citation ref numbers to tool result items based on their position in collected_notes.
+
+    This ensures the LLM uses the same [N] numbers that _filter_ranked_notes_by_citation_markers
+    will resolve, preventing mismatched citations.
+    """
+    if not ranked_notes or "results" not in result:
+        return result
+    # Build note_id → 1-based position in collected_notes
+    note_id_to_pos: dict[str, int] = {
+        note.note_id: idx + 1 for idx, (note, _) in enumerate(collected_notes)
+    }
+    # Build item_id → note_id from ranked_notes for lookup
+    item_id_to_note_id: dict[str, str] = {}
+    for note, _ in ranked_notes:
+        if note.item_id:
+            item_id_to_note_id[note.item_id] = note.note_id
+    items = result.get("results")
+    if not isinstance(items, list):
+        return result
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        item_id = item.get("item_id") or ""
+        note_id = item_id_to_note_id.get(item_id) or f"item::{item_id}"
+        pos = note_id_to_pos.get(note_id)
+        if pos is not None:
+            item["ref"] = pos
+    return result
+
+
 def _append_unique_updated_items(
     bucket: list[dict[str, Any]],
     updated_items: list[dict[str, Any]],
@@ -2871,10 +2907,15 @@ async def _execute_agent_tool(
 
         items = q.order_by(Item.created_at.desc()).limit(list_limit).all()
 
+        ranked_notes: list[tuple[KnowledgeBaseNote, float]] = []
+        for item in items:
+            virtual = _item_to_virtual_note(item)
+            virtual = prepare_note_for_similarity(virtual)
+            ranked_notes.append((virtual, 1.0))
         scope_label = "未归档" if scope == "unfiled" else "最近"
         result = {"status": "ok", "results": [_tool_item_result(item) for item in items]}
         summary = f"已列出{scope_label} {len(items)} 条收藏内容"
-        return result, AiToolEventResponse(name=tool_name, summary=summary), [], []
+        return result, AiToolEventResponse(name=tool_name, summary=summary), ranked_notes, []
 
     if tool_name == "get_related_notes":
         item_id = _clean_optional_string(arguments.get("item_id"))
@@ -3872,6 +3913,8 @@ async def _run_plan_and_execute(
         tool_events.append(event)
         _append_unique_ranked_notes(collected_notes, ranked_notes)
         _append_unique_updated_items(updated_items, changed_items)
+        if isinstance(result, dict) and ranked_notes:
+            _annotate_result_with_citation_refs(result, ranked_notes, collected_notes)
         execution_results.append({"tool": tool_name, "result": result})
 
         if event.download_url:
@@ -3921,6 +3964,7 @@ async def _run_plan_and_execute(
             "content": (
                 f"以下是工具执行结果，请基于结果给用户简洁的回答。"
                 f"不要重复粘贴完整内容，只需说明执行情况和提供下载链接。"
+                f"引用内容时，必须使用结果中每条 item 的 ref 字段编号（如 [3] [7]），不要自己按顺序重新编号。"
                 f"{download_hint}\n\n"
                 f"执行结果：{results_text[:3000]}"
             ),
@@ -4080,6 +4124,8 @@ async def _run_agent_loop(
             tool_events.append(event)
             _append_unique_ranked_notes(collected_notes, ranked_notes)
             _append_unique_updated_items(updated_items, changed_items)
+            if isinstance(result, dict) and ranked_notes:
+                _annotate_result_with_citation_refs(result, ranked_notes, collected_notes)
             model_messages.append(
                 {
                     "role": "tool",

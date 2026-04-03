@@ -221,12 +221,14 @@ class ShortcutCompatibilityTests(unittest.TestCase):
             self.assertEqual(response.status, "ready")
             self.assertEqual(response.media_count, 2)
             self.assertEqual(item.parse_status, "processing")
+            self.assertIsNotNone(item.parse_started_at)
             self.assertEqual(len(background_tasks.calls), 1)
             self.assertEqual(background_tasks.calls[0][0].__name__, "_spawn_capture_postprocess")
 
             saved_item = db.query(Item).filter(Item.id == response.item_id).first()
             self.assertIsNotNone(saved_item)
             self.assertEqual(saved_item.parse_status, "processing")
+            self.assertIsNotNone(saved_item.parse_started_at)
 
 
 if __name__ == "__main__":

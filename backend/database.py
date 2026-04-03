@@ -157,6 +157,8 @@ def ensure_runtime_schema():
             connection.exec_driver_sql("ALTER TABLE items ADD COLUMN parse_status VARCHAR NOT NULL DEFAULT 'idle'")
         if "parse_error" not in item_columns:
             connection.exec_driver_sql("ALTER TABLE items ADD COLUMN parse_error VARCHAR")
+        if "parse_started_at" not in item_columns:
+            connection.exec_driver_sql("ALTER TABLE items ADD COLUMN parse_started_at DATETIME")
         if "parsed_at" not in item_columns:
             connection.exec_driver_sql("ALTER TABLE items ADD COLUMN parsed_at DATETIME")
         if "obsidian_last_synced_hash" not in item_columns:
@@ -183,6 +185,7 @@ def ensure_runtime_schema():
         connection.exec_driver_sql("CREATE INDEX IF NOT EXISTS idx_items_workspace_id ON items(workspace_id)")
         connection.exec_driver_sql("CREATE INDEX IF NOT EXISTS idx_items_folder_id ON items(folder_id)")
         connection.exec_driver_sql("CREATE INDEX IF NOT EXISTS idx_items_parse_status ON items(parse_status)")
+        connection.exec_driver_sql("CREATE INDEX IF NOT EXISTS idx_items_parse_started_at ON items(parse_started_at)")
         connection.exec_driver_sql("CREATE INDEX IF NOT EXISTS idx_items_parsed_at ON items(parsed_at)")
 
         connection.exec_driver_sql(

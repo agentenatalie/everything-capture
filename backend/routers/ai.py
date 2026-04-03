@@ -3612,11 +3612,10 @@ async def _execute_agent_tool(
             result = {"status": "error", "message": "Item not found"}
             return result, AiToolEventResponse(name=tool_name, status="failed", summary="内容解析失败：Item not found"), [], []
 
-        from routers.items import _store_item_parse_failure, parse_item_content_for_item, serialize_items
+        from routers.items import _mark_item_parse_processing, _store_item_parse_failure, parse_item_content_for_item, serialize_items
 
         try:
-            item.parse_status = "processing"
-            item.parse_error = None
+            _mark_item_parse_processing(item)
             db.commit()
             db.refresh(item)
             parse_item_content_for_item(item)

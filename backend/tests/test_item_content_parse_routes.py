@@ -141,6 +141,7 @@ class ItemContentParseRouteTests(unittest.TestCase):
         with self.TestSession() as db:
             item = db.query(Item).filter(Item.id == "item-parse-route").one()
             item.parse_status = "processing"
+            item.parse_started_at = datetime.datetime.utcnow() - datetime.timedelta(hours=1)
             db.commit()
 
         calls: list[tuple[str, str]] = []
@@ -154,6 +155,28 @@ class ItemContentParseRouteTests(unittest.TestCase):
 
         self.assertEqual(recovered, 1)
         self.assertEqual(calls, [("item-parse-route", "local-default-user")])
+
+    def test_recover_processing_item_parsing_skips_recent_jobs(self) -> None:
+        with self.TestSession() as db:
+            item = db.query(Item).filter(Item.id == "item-parse-route").one()
+            item.parse_status = "processing"
+            item.parse_started_at = datetime.datetime.utcnow()
+            db.commit()
+
+        calls: list[tuple[str, str]] = []
+        with patch.object(items_router, "SessionLocal", self.TestSession):
+            with patch.object(
+                items_router,
+                "background_parse_item_content",
+                side_effect=lambda item_id, user_id: calls.append((item_id, user_id)),
+            ):
+                recovered = items_router.recover_processing_item_parsing(
+                    limit=5,
+                    stale_after=datetime.timedelta(minutes=30),
+                )
+
+        self.assertEqual(recovered, 0)
+        self.assertEqual(calls, [])
 
 
 if __name__ == "__main__":

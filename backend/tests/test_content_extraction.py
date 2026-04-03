@@ -1,3 +1,4 @@
+import json
 import os
 import sys
 import tempfile
@@ -265,8 +266,8 @@ class RuntimeBinaryResolutionTests(unittest.TestCase):
             with patch.dict(os.environ, {"EC_FFMPEG_PATH": ffmpeg_path}, clear=False):
                 self.assertEqual(_find_ffmpeg(), os.path.realpath(ffmpeg_path))
 
-    @patch("services.content_extraction.activate_component_runtime")
-    def test_transcription_attempts_to_activate_local_component(self, mock_activate_component_runtime) -> None:
+    @patch("services.content_extraction.subprocess.run")
+    def test_transcription_attempts_to_activate_local_component(self, mock_subprocess_run) -> None:
         from services.content_extraction import _transcribe_video_with_mlx_whisper
 
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -274,13 +275,13 @@ class RuntimeBinaryResolutionTests(unittest.TestCase):
             with open(video_path, "wb") as handle:
                 handle.write(b"")
 
-            fake_mlx_whisper = types.SimpleNamespace(
-                transcribe=lambda *args, **kwargs: {"text": "", "segments": []}
+            mock_subprocess_run.return_value = types.SimpleNamespace(
+                returncode=0,
+                stdout=json.dumps({"text": "", "segments": []}, ensure_ascii=False),
+                stderr="",
             )
-            with patch.dict(sys.modules, {"mlx_whisper": fake_mlx_whisper}, clear=False):
-                self.assertEqual(_transcribe_video_with_mlx_whisper(Path(video_path)), "")
-
-        mock_activate_component_runtime.assert_called_once()
+            self.assertEqual(_transcribe_video_with_mlx_whisper(Path(video_path)), "")
+            self.assertEqual(mock_subprocess_run.call_count, 1)
 
 
 class SwiftFailureSummaryTests(unittest.TestCase):

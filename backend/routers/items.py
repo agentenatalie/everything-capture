@@ -3,11 +3,12 @@ import os
 import json
 import re
 import threading
+import time
 import logging
 import zipfile
 from collections import OrderedDict
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import List, Optional
 
@@ -209,6 +210,11 @@ EXACT_QUERY_WEIGHTS = {
 INTENT_MATCH_BONUS = 2.4
 MIN_SEARCH_SCORE = 2.5
 PROCESSING_PARSE_RECOVERY_LIMIT = 32
+PROCESSING_PARSE_STALE_AFTER = timedelta(minutes=max(5, int(os.getenv("EC_PARSE_STALE_MINUTES", "30"))))
+PROCESSING_PARSE_RECOVERY_INTERVAL_SECONDS = max(60, int(os.getenv("EC_PARSE_RECOVERY_INTERVAL_SECONDS", "300")))
+
+_PROCESSING_PARSE_RECOVERY_LOOP_LOCK = threading.Lock()
+_PROCESSING_PARSE_RECOVERY_LOOP_STARTED = False
 PARSE_MAX_RETRY_COUNT = 3
 
 logger = logging.getLogger(__name__)
@@ -505,12 +511,22 @@ def _store_item_parse_result(item: Item, parse_result) -> None:
     item.qr_links_json = json.dumps(parse_result.qr_links or [], ensure_ascii=False)
     item.parse_status = parse_result.parse_status or "completed"
     item.parse_error = parse_result.parse_error
+    item.parse_started_at = None
     item.parsed_at = parse_result.parsed_at
 
 
 def _store_item_parse_failure(item: Item, message: str) -> None:
     item.parse_status = "failed"
     item.parse_error = str(message or "Content parsing failed")
+    item.parse_started_at = None
+
+
+def _mark_item_parse_processing(item: Item, *, started_at: datetime | None = None) -> datetime:
+    parse_started_at = started_at or datetime.utcnow()
+    item.parse_status = "processing"
+    item.parse_error = None
+    item.parse_started_at = parse_started_at
+    return parse_started_at
 
 
 def parse_item_content_for_item(item: Item) -> None:
@@ -524,8 +540,7 @@ def background_parse_item_content(item_id: str, user_id: str) -> None:
         if not item:
             return
 
-        item.parse_status = "processing"
-        item.parse_error = None
+        _mark_item_parse_processing(item)
         db.commit()
         db.refresh(item)
 
@@ -542,20 +557,35 @@ def background_parse_item_content(item_id: str, user_id: str) -> None:
             db.commit()
 
 
-def _list_processing_parse_jobs(db: Session, *, limit: int = PROCESSING_PARSE_RECOVERY_LIMIT) -> list[tuple[str, str]]:
-    rows = (
-        db.query(Item.id, Item.user_id)
-        .filter(Item.parse_status == "processing")
-        .order_by(Item.created_at.asc())
-        .limit(max(1, int(limit)))
-        .all()
-    )
+def _list_processing_parse_jobs(
+    db: Session,
+    *,
+    limit: int = PROCESSING_PARSE_RECOVERY_LIMIT,
+    stale_before: datetime | None = None,
+) -> list[tuple[str, str]]:
+    query = db.query(Item.id, Item.user_id).filter(Item.parse_status == "processing")
+    if stale_before is not None:
+        query = query.filter(
+            or_(
+                Item.parse_started_at.is_(None),
+                Item.parse_started_at <= stale_before,
+            )
+        )
+    rows = query.order_by(Item.created_at.asc()).limit(max(1, int(limit))).all()
     return [(str(item_id), str(user_id)) for item_id, user_id in rows if item_id and user_id]
 
 
-def recover_processing_item_parsing(*, limit: int = PROCESSING_PARSE_RECOVERY_LIMIT) -> int:
+def recover_processing_item_parsing(
+    *,
+    limit: int = PROCESSING_PARSE_RECOVERY_LIMIT,
+    stale_after: timedelta | None = PROCESSING_PARSE_STALE_AFTER,
+) -> int:
+    stale_before = None
+    if stale_after is not None:
+        stale_before = datetime.utcnow() - stale_after
+
     with SessionLocal() as db:
-        jobs = _list_processing_parse_jobs(db, limit=limit)
+        jobs = _list_processing_parse_jobs(db, limit=limit, stale_before=stale_before)
 
     if not jobs:
         return 0
@@ -589,12 +619,45 @@ def recover_processing_item_parsing(*, limit: int = PROCESSING_PARSE_RECOVERY_LI
     return recovered
 
 
-def schedule_processing_item_parsing_recovery(*, limit: int = PROCESSING_PARSE_RECOVERY_LIMIT) -> None:
+def schedule_processing_item_parsing_recovery(
+    *,
+    limit: int = PROCESSING_PARSE_RECOVERY_LIMIT,
+    stale_after: timedelta | None = PROCESSING_PARSE_STALE_AFTER,
+) -> None:
     thread = threading.Thread(
         target=recover_processing_item_parsing,
-        kwargs={"limit": limit},
+        kwargs={"limit": limit, "stale_after": stale_after},
         daemon=True,
         name="item-parse-recovery",
+    )
+    thread.start()
+
+
+def start_processing_item_parsing_recovery_loop(
+    *,
+    limit: int = PROCESSING_PARSE_RECOVERY_LIMIT,
+    stale_after: timedelta | None = PROCESSING_PARSE_STALE_AFTER,
+    interval_seconds: int = PROCESSING_PARSE_RECOVERY_INTERVAL_SECONDS,
+) -> None:
+    global _PROCESSING_PARSE_RECOVERY_LOOP_STARTED
+
+    with _PROCESSING_PARSE_RECOVERY_LOOP_LOCK:
+        if _PROCESSING_PARSE_RECOVERY_LOOP_STARTED:
+            return
+        _PROCESSING_PARSE_RECOVERY_LOOP_STARTED = True
+
+    def _loop() -> None:
+        while True:
+            try:
+                recover_processing_item_parsing(limit=limit, stale_after=stale_after)
+            except Exception:
+                logger.exception("周期性内容解析恢复失败")
+            time.sleep(max(60, int(interval_seconds)))
+
+    thread = threading.Thread(
+        target=_loop,
+        daemon=True,
+        name="item-parse-recovery-loop",
     )
     thread.start()
 
@@ -1344,8 +1407,7 @@ def parse_item_content_endpoint(item_id: str, db: Session = Depends(get_db)):
     if not item:
         raise HTTPException(status_code=404, detail="Item not found")
 
-    item.parse_status = "processing"
-    item.parse_error = None
+    _mark_item_parse_processing(item)
     item.parse_retry_count = 0  # 用户手动重试，重置计数
     db.commit()
     db.refresh(item)

@@ -76,6 +76,7 @@ class Item(Base):
     qr_links_json = Column(String, nullable=True)
     parse_status = Column(String, nullable=False, default="idle")
     parse_error = Column(String, nullable=True)
+    parse_started_at = Column(DateTime, nullable=True)
     parsed_at = Column(DateTime, nullable=True)
     parse_retry_count = Column(Integer, nullable=False, default=0)
     last_viewed_at = Column(DateTime, nullable=True)
@@ -275,5 +276,4 @@ class AiMemory(Base):
     updated_at = Column(DateTime, default=datetime.datetime.utcnow)
 
     user = relationship("User")
-
 

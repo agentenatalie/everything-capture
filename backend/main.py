@@ -92,6 +92,7 @@ def healthz() -> JSONResponse:
 @app.on_event("startup")
 def startup_recover_processing_items() -> None:
     items.schedule_processing_item_parsing_recovery()
+    items.start_processing_item_parsing_recovery_loop()
 
 
 # Mount external media directory — keeps frontend URLs unchanged (/static/media/...)

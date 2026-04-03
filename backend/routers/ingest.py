@@ -11,7 +11,7 @@ from sqlalchemy.orm import Session
 from database import get_db, SessionLocal
 from models import Item, Media, Settings
 from schemas import IngestRequest, IngestResponse, ExtractRequest, ExtractResponse
-from routers.items import background_parse_item_content
+from routers.items import _mark_item_parse_processing, background_parse_item_content
 from services.extractor import _SAFE_ATTRS, _SAFE_TAGS, extract_content
 from services.downloader import download_media_list, probe_video_duration_seconds
 from tenant import get_current_user_id
@@ -203,8 +203,7 @@ def _queue_capture_postprocess(
     *,
     should_parse: bool,
 ) -> None:
-    item.parse_status = "processing"
-    item.parse_error = None
+    _mark_item_parse_processing(item)
     _schedule_background_task(
         background_tasks,
         _spawn_capture_postprocess,
@@ -429,8 +428,7 @@ def background_finalize_extracted_media(
 
         should_parse = _has_parseable_media(media_list)
         if should_parse:
-            item.parse_status = "processing"
-            item.parse_error = None
+            _mark_item_parse_processing(item)
             db.add(item)
             db.commit()
         _spawn_capture_postprocess(item_id, user_id, should_parse=should_parse)

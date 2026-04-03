@@ -5,6 +5,7 @@ import logging
 import os
 import re
 import subprocess
+import sys
 import tempfile
 from dataclasses import dataclass
 from datetime import datetime
@@ -12,12 +13,13 @@ from pathlib import Path
 from typing import Any
 
 from paths import RUNTIME_BIN_DIR, STATIC_DIR
-from services.components import LOCAL_TRANSCRIPTION_COMPONENT_ID, activate_component_runtime
 
 logger = logging.getLogger(__name__)
 
 _ffmpeg_path: str | None = None
 _ocr_helper_path: str | None = None
+SWIFT_MEDIA_EXTRACT_TIMEOUT_SECONDS = max(30, int(os.getenv("EC_SWIFT_MEDIA_EXTRACT_TIMEOUT_SECONDS", "120")))
+MLX_WHISPER_TRANSCRIBE_TIMEOUT_SECONDS = max(30, int(os.getenv("EC_MLX_WHISPER_TIMEOUT_SECONDS", "180")))
 
 _TRADITIONAL_PHRASE_REPLACEMENTS: tuple[tuple[str, str], ...] = (
     ("融資融券", "融资融券"),
@@ -751,35 +753,78 @@ def _transcribe_video_with_mlx_whisper(video_path: Path) -> str:
     Requires the optional local-transcription component to provide mlx-whisper.
     Model weights are downloaded by mlx-whisper on first use (~244 MB for small).
     """
-    activate_component_runtime(LOCAL_TRANSCRIPTION_COMPONENT_ID)
-    try:
-        import mlx_whisper  # type: ignore[import]
-    except ImportError:
-        return ""
     # mlx-whisper shells out to ffmpeg internally; ensure it can be found.
     ffmpeg = _find_ffmpeg()
     ffmpeg_dir = str(Path(ffmpeg).parent)
-    if ffmpeg_dir not in os.environ.get("PATH", ""):
-        os.environ["PATH"] = ffmpeg_dir + ":" + os.environ.get("PATH", "")
+    env = os.environ.copy()
+    if ffmpeg_dir not in env.get("PATH", ""):
+        env["PATH"] = ffmpeg_dir + ":" + env.get("PATH", "")
+
+    script = """
+import json
+import os
+import sys
+from pathlib import Path
+
+from services.components import LOCAL_TRANSCRIPTION_COMPONENT_ID, activate_component_runtime
+from services.content_extraction import _find_ffmpeg
+
+activate_component_runtime(LOCAL_TRANSCRIPTION_COMPONENT_ID)
+try:
+    import mlx_whisper  # type: ignore[import]
+except ImportError:
+    print(json.dumps({"text": "", "segments": []}, ensure_ascii=False))
+    raise SystemExit(0)
+
+ffmpeg = _find_ffmpeg()
+ffmpeg_dir = str(Path(ffmpeg).parent)
+if ffmpeg_dir not in os.environ.get("PATH", ""):
+    os.environ["PATH"] = ffmpeg_dir + ":" + os.environ.get("PATH", "")
+
+result = mlx_whisper.transcribe(
+    sys.argv[1],
+    path_or_hf_repo="mlx-community/whisper-small-mlx",
+    language="zh",
+    condition_on_previous_text=False,
+    initial_prompt="以下是普通话视频内容，请使用简体中文输出，并补充自然的中文标点。",
+)
+segments = [
+    str(entry.get("text", "")).strip()
+    for entry in (result.get("segments") or [])
+    if str(entry.get("text", "")).strip()
+]
+print(json.dumps({"text": str(result.get("text", "")).strip(), "segments": segments}, ensure_ascii=False))
+""".strip()
+
     try:
-        result = mlx_whisper.transcribe(
-            str(video_path),
-            path_or_hf_repo="mlx-community/whisper-small-mlx",
-            language="zh",
-            condition_on_previous_text=False,
-            initial_prompt="以下是普通话视频内容，请使用简体中文输出，并补充自然的中文标点。",
+        completed = subprocess.run(
+            [sys.executable, "-c", script, str(video_path)],
+            capture_output=True,
+            text=True,
+            check=False,
+            env=env,
+            timeout=MLX_WHISPER_TRANSCRIBE_TIMEOUT_SECONDS,
         )
+        if completed.returncode != 0:
+            logger.debug(
+                "mlx-whisper transcription failed for %s: %s",
+                video_path.name,
+                (completed.stderr or completed.stdout or f"exit {completed.returncode}").strip(),
+            )
+            return ""
+
+        payload = json.loads((completed.stdout or "").strip() or "{}")
         segments = [
-            str(entry.get("text", "")).strip()
-            for entry in (result.get("segments") or [])
-            if str(entry.get("text", "")).strip()
+            str(entry).strip()
+            for entry in (payload.get("segments") or [])
+            if str(entry).strip()
         ]
         return _format_video_text_block(
-            str(result.get("text", "")).strip(),
+            str(payload.get("text", "")).strip(),
             source="transcript",
             segments=segments or None,
         )
-    except Exception as exc:
+    except (json.JSONDecodeError, subprocess.TimeoutExpired) as exc:
         logger.debug("mlx-whisper transcription failed for %s: %s", video_path.name, exc)
         return ""
 
@@ -884,6 +929,7 @@ def _run_swift_media_extractor(*, images: list[dict[str, str]], videos: list[dic
             text=True,
             check=False,
             env=env,
+            timeout=SWIFT_MEDIA_EXTRACT_TIMEOUT_SECONDS,
         )
         if completed.returncode != 0:
             raise ContentExtractionError(_summarize_swift_failure(completed.stderr, completed.stdout))
@@ -894,6 +940,10 @@ def _run_swift_media_extractor(*, images: list[dict[str, str]], videos: list[dic
         return json.loads(output)
     except json.JSONDecodeError as exc:
         raise ContentExtractionError("Swift extractor returned invalid JSON.") from exc
+    except subprocess.TimeoutExpired as exc:
+        raise ContentExtractionError(
+            f"Swift extractor timed out after {SWIFT_MEDIA_EXTRACT_TIMEOUT_SECONDS}s."
+        ) from exc
     finally:
         if request_path:
             try:

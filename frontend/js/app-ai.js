@@ -1582,11 +1582,19 @@
         }
 
         function _buildCitationRefMap(content, citations) {
-            // Build a map from [N] index → library_item_id
-            // Backend returns citations in the order [N] markers appear in the text
-            // So we parse the unique [N] values from text and pair with citations in order
             const refMap = {};
             if (!Array.isArray(citations) || !citations.length) return refMap;
+            citations.forEach((citation) => {
+                const referenceIndex = Number.parseInt(citation?.reference_index, 10);
+                if (Number.isInteger(referenceIndex) && referenceIndex > 0 && !refMap[referenceIndex]) {
+                    refMap[referenceIndex] = citation;
+                }
+            });
+            if (Object.keys(refMap).length) {
+                return refMap;
+            }
+
+            // Fallback for older stored conversations that only persisted citation order.
             const raw = String(content || '');
             const seen = new Set();
             const ordered = [];

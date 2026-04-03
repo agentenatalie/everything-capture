@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import difflib
 import hashlib
 import json
 import math
@@ -10,6 +11,7 @@ import uuid
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any, Optional
+from urllib.parse import urlparse
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import StreamingResponse
@@ -78,6 +80,17 @@ router = APIRouter(prefix="/api/ai", tags=["ai"])
 _JSON_FENCE_PATTERN = re.compile(r"^```(?:json)?\s*|\s*```$", re.IGNORECASE)
 _NOTION_ID_RE = re.compile(r"([0-9a-fA-F]{32}|[0-9a-fA-F]{8}(?:-[0-9a-fA-F]{4}){3}-[0-9a-fA-F]{12})")
 _CITATION_INDEX_PATTERN = re.compile(r"\[(\d{1,3})\]")
+_TITLE_ALIAS_SPLIT_PATTERN = re.compile(r"[：:|｜—\-·•/]+")
+_TITLE_LEADING_LATIN_ALIAS_PATTERN = re.compile(r"^[A-Za-z][A-Za-z0-9 .+#_-]{2,}")
+_TITLE_NORMALIZE_PATTERN = re.compile(r"[\s\u3000`*_~\"'“”‘’「」『』《》【】\[\]\(\)（）:：;；,，.!！？?、\-—_|/·•]+")
+_URL_PATTERN = re.compile(r"https?://[^\s<>\]\)）,，]+", re.IGNORECASE)
+_CONTEXT_ALIAS_LINE_PATTERN = re.compile(r"(?im)^(?:[#>*\-\s]+)?([A-Za-z][A-Za-z0-9]*(?:[- ][A-Za-z0-9]+){0,3})\s*[：:]\s*")
+_ALIAS_STOP_WORDS = {
+    "github", "git", "star", "stars", "agent", "agents", "rag", "react",
+    "openai", "claude", "deepseek", "gemini", "qwen", "ollama", "llm",
+    "python", "typescript", "javascript", "technical lead", "research mode",
+}
+_URL_HOST_STOP_WORDS = {"www", "app", "docs", "github", "localhost", "com", "org", "net", "dev", "ai"}
 _CHAT_HISTORY_LIMIT = 10
 _SAVED_CHAT_HISTORY_LIMIT = 120
 _AGENT_TOOL_STEP_LIMIT = 10
@@ -291,6 +304,7 @@ def _serialize_citations(
         citations.append(
             AiCitationResponse(
                 note_id=note.note_id,
+                reference_index=None,
                 library_item_id=note.item_id if note.item_id in library_item_ids else None,
                 title=note.title,
                 summary=note.summary or None,
@@ -306,11 +320,42 @@ def _serialize_citations(
     return citations
 
 
-def _filter_ranked_notes_by_citation_markers(
-    answer_text: str | None,
-    ranked_notes: list[tuple[KnowledgeBaseNote, float]],
-) -> list[tuple[KnowledgeBaseNote, float]]:
-    if not ranked_notes:
+def _serialize_citation_matches(
+    db: Session,
+    user_id: str,
+    citation_matches: list[tuple[int, KnowledgeBaseNote, float]],
+) -> list[AiCitationResponse]:
+    item_ids = [note.item_id for _, note, _ in citation_matches if note.item_id]
+    library_item_ids = {
+        row[0]
+        for row in db.query(Item.id)
+        .filter(Item.user_id == user_id, Item.id.in_(item_ids))
+        .all()
+    } if item_ids else set()
+
+    citations: list[AiCitationResponse] = []
+    for reference_index, note, score in citation_matches:
+        citations.append(
+            AiCitationResponse(
+                reference_index=reference_index,
+                note_id=note.note_id,
+                library_item_id=note.item_id if note.item_id in library_item_ids else None,
+                title=note.title,
+                summary=note.summary or None,
+                folder=note.folder or None,
+                tags=note.tags or [],
+                source=note.source,
+                relative_path=note.relative_path,
+                created_at=note.created_at,
+                score=score,
+                excerpt=note.excerpt or None,
+            )
+        )
+    return citations
+
+
+def _extract_citation_positions(answer_text: str | None, ranked_note_count: int) -> list[int]:
+    if ranked_note_count <= 0:
         return []
 
     referenced_positions: list[int] = []
@@ -320,11 +365,412 @@ def _filter_ranked_notes_by_citation_markers(
             index = int(raw_index)
         except ValueError:
             continue
-        if index < 1 or index > len(ranked_notes) or index in seen_positions:
+        if index < 1 or index > ranked_note_count or index in seen_positions:
             continue
         referenced_positions.append(index)
         seen_positions.add(index)
+    return referenced_positions
 
+
+def _collect_citation_matches(
+    answer_text: str | None,
+    ranked_notes: list[tuple[KnowledgeBaseNote, float]],
+    directory_notes: list[KnowledgeBaseNote] | None = None,
+) -> list[tuple[int, KnowledgeBaseNote, float]]:
+    referenced_positions = _extract_citation_positions(answer_text, len(ranked_notes))
+    return [(index, *ranked_notes[index - 1]) for index in referenced_positions]
+
+
+def _has_invalid_citation_markers(answer_text: str | None, ranked_note_count: int) -> bool:
+    for raw_index in _CITATION_INDEX_PATTERN.findall(str(answer_text or "")):
+        try:
+            index = int(raw_index)
+        except ValueError:
+            continue
+        if index < 1 or index > ranked_note_count:
+            return True
+    return False
+
+
+def _normalize_title_for_citation_match(value: str | None) -> str:
+    return _TITLE_NORMALIZE_PATTERN.sub("", str(value or "")).strip().lower()
+
+
+def _note_identity(note: KnowledgeBaseNote) -> str:
+    return note.item_id or note.note_id
+
+
+def _build_note_title_aliases(note: KnowledgeBaseNote) -> list[str]:
+    raw_title = _clean_optional_string(note.title) or ""
+    if not raw_title:
+        return []
+
+    aliases: list[str] = [raw_title]
+    seen: set[str] = {_normalize_title_for_citation_match(raw_title)}
+
+    for part in _TITLE_ALIAS_SPLIT_PATTERN.split(raw_title):
+        candidate = _clean_optional_string(part)
+        normalized = _normalize_title_for_citation_match(candidate)
+        if candidate and len(normalized) >= 4 and normalized not in seen:
+            aliases.append(candidate)
+            seen.add(normalized)
+
+    leading_match = _TITLE_LEADING_LATIN_ALIAS_PATTERN.match(raw_title)
+    if leading_match:
+        candidate = _clean_optional_string(leading_match.group(0))
+        normalized = _normalize_title_for_citation_match(candidate)
+        if candidate and len(normalized) >= 4 and normalized not in seen:
+            aliases.append(candidate)
+            seen.add(normalized)
+
+    for candidate in _build_note_context_aliases(note):
+        normalized = _normalize_title_for_citation_match(candidate)
+        if candidate and len(normalized) >= 4 and normalized not in seen:
+            aliases.append(candidate)
+            seen.add(normalized)
+
+    return aliases
+
+
+def _is_useful_alias(candidate: str | None) -> bool:
+    value = _clean_optional_string(candidate)
+    if not value:
+        return False
+    normalized = _normalize_title_for_citation_match(value)
+    if len(normalized) < 4:
+        return False
+    if normalized in _ALIAS_STOP_WORDS:
+        return False
+    return True
+
+
+def _extract_aliases_from_urls(text: str | None) -> list[str]:
+    aliases: list[str] = []
+    seen: set[str] = set()
+    for raw_url in _URL_PATTERN.findall(str(text or "")):
+        parsed = urlparse(raw_url)
+        host = (parsed.hostname or "").strip().lower()
+        if not host:
+            continue
+
+        if host.endswith("github.com"):
+            segments = [segment for segment in parsed.path.split("/") if segment]
+            if len(segments) >= 2:
+                repo = re.sub(r"\.git$", "", segments[1]).strip()
+                repo_normalized = _normalize_title_for_citation_match(repo)
+                if _is_useful_alias(repo) and repo_normalized not in seen:
+                    aliases.append(repo)
+                    seen.add(repo_normalized)
+
+        for label in host.split("."):
+            if label in _URL_HOST_STOP_WORDS or len(label) < 4:
+                continue
+            normalized = _normalize_title_for_citation_match(label)
+            if _is_useful_alias(label) and normalized not in seen:
+                aliases.append(label)
+                seen.add(normalized)
+                break
+    return aliases
+
+
+def _build_note_context_aliases(note: KnowledgeBaseNote) -> list[str]:
+    aliases: list[str] = []
+    seen: set[str] = set()
+    context_text = "\n".join(
+        part
+        for part in [
+            _clean_optional_string(note.source),
+            _clean_optional_string(note.excerpt),
+            _clean_optional_string(note.extracted_text),
+        ]
+        if part
+    )
+    if not context_text:
+        return aliases
+
+    for candidate in _extract_aliases_from_urls(context_text):
+        normalized = _normalize_title_for_citation_match(candidate)
+        if normalized not in seen:
+            aliases.append(candidate)
+            seen.add(normalized)
+
+    for match in _CONTEXT_ALIAS_LINE_PATTERN.finditer(context_text):
+        candidate = _clean_optional_string(match.group(1))
+        normalized = _normalize_title_for_citation_match(candidate)
+        if _is_useful_alias(candidate) and normalized not in seen:
+            aliases.append(candidate)
+            seen.add(normalized)
+
+    return aliases
+
+
+def _extract_answer_candidate_labels(answer_text: str | None) -> list[tuple[int, str]]:
+    text = str(answer_text or "")
+    if not text:
+        return []
+
+    labels: list[tuple[int, str]] = []
+    seen_positions: set[int] = set()
+
+    for match in re.finditer(r"(?m)^\|(.+?)\|$", text):
+        raw_line = match.group(0)
+        cells = [cell.strip() for cell in raw_line.strip().strip("|").split("|")]
+        if len(cells) < 3:
+            continue
+        if all(re.fullmatch(r":?-{3,}:?", cell or "") for cell in cells):
+            continue
+        first_cell = re.sub(r"\s*\[\d{1,3}\]\s*$", "", cells[0]).strip()
+        if first_cell in {"内容", "条目", "标题", "名称"}:
+            continue
+        label_pos = text.find(first_cell, match.start())
+        if label_pos >= 0 and label_pos not in seen_positions:
+            labels.append((label_pos, first_cell))
+            seen_positions.add(label_pos)
+
+    for match in re.finditer(r"(?m)^\s*[-*]\s+(.+?)(?:\s+[—\-:：]\s+.*)?$", text):
+        label = re.sub(r"\s*\[\d{1,3}\]\s*$", "", match.group(1)).strip()
+        label = re.sub(r"\s+[（(][^)）]{0,24}[)）]\s*$", "", label).strip()
+        if len(_normalize_title_for_citation_match(label)) < 4:
+            continue
+        label_pos = text.find(label, match.start())
+        if label_pos >= 0 and label_pos not in seen_positions:
+            labels.append((label_pos, label))
+            seen_positions.add(label_pos)
+
+    for match in re.finditer(r"(?m)^(?!\s*[\-|*#|>])\s*(.+?)\s+[—\-:：]\s+.+$", text):
+        label = _clean_optional_string(match.group(1))
+        label = re.sub(r"\s*\[\d{1,3}\]\s*$", "", label).strip()
+        if label in {"内容", "条目", "标题", "名称", "核心主题", "主题"}:
+            continue
+        if len(_normalize_title_for_citation_match(label)) < 4:
+            continue
+        label_pos = text.find(label, match.start())
+        if label_pos >= 0 and label_pos not in seen_positions:
+            labels.append((label_pos, label))
+            seen_positions.add(label_pos)
+
+    labels.sort(key=lambda entry: entry[0])
+    return labels
+
+
+def _extract_answer_alias_mentions(
+    answer_text: str | None,
+    candidate_notes: list[tuple[KnowledgeBaseNote, float]],
+    used_note_ids: set[str],
+) -> list[tuple[int, str, KnowledgeBaseNote, float]]:
+    text = str(answer_text or "")
+    if not text:
+        return []
+
+    mention_candidates: list[tuple[int, int, str, KnowledgeBaseNote, float]] = []
+    for note, score in candidate_notes:
+        if _note_identity(note) in used_note_ids:
+            continue
+        for alias in _build_note_title_aliases(note):
+            alias_text = _clean_optional_string(alias)
+            alias_normalized = _normalize_title_for_citation_match(alias_text)
+            if not alias_text or len(alias_normalized) < 4:
+                continue
+            position = text.find(alias_text)
+            if position < 0:
+                continue
+            mention_candidates.append((position, -len(alias_text), alias_text, note, score))
+
+    mention_candidates.sort(key=lambda entry: (entry[0], entry[1]))
+    mentions: list[tuple[int, str, KnowledgeBaseNote, float]] = []
+    seen_note_ids: set[str] = set()
+    occupied_ranges: list[tuple[int, int]] = []
+    for position, _, alias_text, note, score in mention_candidates:
+        identity = _note_identity(note)
+        if identity in seen_note_ids:
+            continue
+        span = (position, position + len(alias_text))
+        if any(not (span[1] <= start or span[0] >= end) for start, end in occupied_ranges):
+            continue
+        mentions.append((position, alias_text, note, score))
+        seen_note_ids.add(identity)
+        occupied_ranges.append(span)
+
+    mentions.sort(key=lambda entry: entry[0])
+    return mentions
+
+
+def _resolve_answer_label_matches(
+    answer_text: str,
+    candidate_notes: list[tuple[KnowledgeBaseNote, float]],
+) -> list[tuple[int, str, KnowledgeBaseNote, float]]:
+    used_note_ids: set[str] = set()
+    resolved_matches: list[tuple[int, str, KnowledgeBaseNote, float]] = []
+    for position, label in _extract_answer_candidate_labels(answer_text):
+        match_result = _best_label_note_match(label, candidate_notes, used_note_ids)
+        if match_result is None:
+            continue
+        note, score = match_result
+        resolved_matches.append((position, label, note, score))
+        used_note_ids.add(_note_identity(note))
+    return resolved_matches
+
+
+def _best_label_note_match(
+    label: str,
+    candidate_notes: list[tuple[KnowledgeBaseNote, float]],
+    used_note_ids: set[str],
+) -> tuple[KnowledgeBaseNote, float] | None:
+    label_normalized = _normalize_title_for_citation_match(label)
+    if len(label_normalized) < 4:
+        return None
+
+    best_note: KnowledgeBaseNote | None = None
+    best_score = 0.0
+    best_weight = 0.0
+
+    for note, weight in candidate_notes:
+        if _note_identity(note) in used_note_ids:
+            continue
+        alias_scores: list[float] = []
+        for alias in _build_note_title_aliases(note):
+            alias_normalized = _normalize_title_for_citation_match(alias)
+            if len(alias_normalized) < 4:
+                continue
+            if label_normalized == alias_normalized:
+                alias_scores.append(1.0)
+                continue
+            if label_normalized in alias_normalized or alias_normalized in label_normalized:
+                overlap = min(len(label_normalized), len(alias_normalized)) / max(len(label_normalized), len(alias_normalized))
+                alias_scores.append(0.88 + overlap * 0.12)
+                continue
+            alias_scores.append(difflib.SequenceMatcher(None, label_normalized, alias_normalized).ratio())
+
+        if not alias_scores:
+            continue
+        score = max(alias_scores)
+        if score > best_score or (math.isclose(score, best_score) and weight > best_weight):
+            best_note = note
+            best_score = score
+            best_weight = weight
+
+    if best_note is None:
+        return None
+
+    threshold = 0.6 if len(label_normalized) >= 8 else 0.72
+    if best_score < threshold:
+        return None
+    return best_note, best_weight
+
+
+def _candidate_notes_for_answer_matching(
+    ranked_notes: list[tuple[KnowledgeBaseNote, float]],
+    directory_notes: list[KnowledgeBaseNote] | None = None,
+) -> list[tuple[KnowledgeBaseNote, float]]:
+    candidates: list[tuple[KnowledgeBaseNote, float]] = list(ranked_notes)
+    seen_note_ids = {_note_identity(note) for note, _ in ranked_notes}
+    for note in directory_notes or []:
+        identity = _note_identity(note)
+        if identity in seen_note_ids:
+            continue
+        candidates.append((note, 0.0))
+        seen_note_ids.add(identity)
+    return candidates
+
+
+def _strip_answer_citation_markers(answer_text: str | None) -> str:
+    text = str(answer_text or "")
+    if not text:
+        return ""
+
+    cleaned_lines: list[str] = []
+    for raw_line in text.splitlines():
+        cleaned_line = re.sub(r"\s*\[\d{1,3}\]\s*", " ", raw_line)
+        cleaned_line = re.sub(r"[ \t]{2,}", " ", cleaned_line)
+        cleaned_line = re.sub(r"\s+([,，.。!！?？:：;；、])", r"\1", cleaned_line)
+        cleaned_line = re.sub(r"([(\[【（])\s+", r"\1", cleaned_line)
+        cleaned_line = re.sub(r"\s+([)\]】）])", r"\1", cleaned_line)
+        cleaned_lines.append(cleaned_line.strip())
+
+    return re.sub(r"\n{3,}", "\n\n", "\n".join(cleaned_lines)).strip()
+
+
+def _inject_citations_for_matches(
+    answer_text: str,
+    matches: list[tuple[int, str, KnowledgeBaseNote, float]],
+) -> tuple[str, list[tuple[int, KnowledgeBaseNote, float]]]:
+    if not answer_text or not matches:
+        return "", []
+
+    augmented_answer = answer_text
+    offset = 0
+    citation_matches: list[tuple[int, KnowledgeBaseNote, float]] = []
+    next_index = 1
+
+    for position, label, note, score in matches:
+        actual_start = position + offset
+        actual_end = actual_start + len(label)
+        if augmented_answer[actual_start:actual_end] != label:
+            relocated = augmented_answer.find(label, max(0, actual_start - 24))
+            if relocated < 0:
+                continue
+            actual_start = relocated
+            actual_end = relocated + len(label)
+
+        augmented_answer = (
+            augmented_answer[:actual_end]
+            + f" [{next_index}]"
+            + augmented_answer[actual_end:]
+        )
+        offset += len(f" [{next_index}]")
+        citation_matches.append((next_index, note, score))
+        next_index += 1
+
+    return augmented_answer, citation_matches
+
+
+def _repair_answer_citations(
+    answer_text: str,
+    candidate_notes: list[tuple[KnowledgeBaseNote, float]],
+) -> tuple[str, list[tuple[int, KnowledgeBaseNote, float]]]:
+    cleaned_answer = _strip_answer_citation_markers(answer_text)
+    label_matches = _resolve_answer_label_matches(cleaned_answer, candidate_notes)
+    if label_matches:
+        return _inject_citations_for_matches(cleaned_answer, label_matches)
+
+    alias_matches = _extract_answer_alias_mentions(cleaned_answer, candidate_notes, set())
+    return _inject_citations_for_matches(cleaned_answer, alias_matches)
+
+
+def _annotate_answer_with_citations(
+    answer_text: str | None,
+    ranked_notes: list[tuple[KnowledgeBaseNote, float]],
+    directory_notes: list[KnowledgeBaseNote] | None = None,
+) -> tuple[str, list[tuple[int, KnowledgeBaseNote, float]]]:
+    visible_answer = _strip_reasoning_blocks(answer_text).strip()
+    if not visible_answer:
+        return "", []
+
+    explicit_matches = _collect_citation_matches(visible_answer, ranked_notes)
+    candidate_notes = _candidate_notes_for_answer_matching(ranked_notes, directory_notes)
+    cleaned_answer = _strip_answer_citation_markers(visible_answer)
+    resolved_labels = _resolve_answer_label_matches(cleaned_answer, candidate_notes)
+    needs_repair = (
+        _has_invalid_citation_markers(visible_answer, len(ranked_notes))
+        or (resolved_labels and len(resolved_labels) > len(explicit_matches))
+        or (not explicit_matches and bool(_extract_answer_alias_mentions(cleaned_answer, candidate_notes, set())))
+    )
+    if needs_repair:
+        repaired_answer, repaired_matches = _repair_answer_citations(visible_answer, candidate_notes)
+        if repaired_matches:
+            return repaired_answer, repaired_matches
+
+    return visible_answer, explicit_matches
+
+
+def _filter_ranked_notes_by_citation_markers(
+    answer_text: str | None,
+    ranked_notes: list[tuple[KnowledgeBaseNote, float]],
+) -> list[tuple[KnowledgeBaseNote, float]]:
+    if not ranked_notes:
+        return []
+
+    referenced_positions = _extract_citation_positions(answer_text, len(ranked_notes))
     if not referenced_positions:
         return []
 
@@ -482,6 +928,7 @@ def _ask_ai_system_prompt() -> str:
         "优先使用每条内容已有的摘要，不要重复整理同一份内容。"
         "如果证据不足，必须明确说信息不足。"
         "提到任何内容时，必须使用 [1] [2] 这样的引用编号，不要用「笔记1」「（笔记51）」等其他格式。"
+        "如果你在做归类、列表、表格或逐条总结，每一条内容名称后都必须紧跟自己的 [编号]，不要只在小节末尾统一放引用。"
         "如果答案没有直接引用具体内容，就不要输出引用编号。"
         "\n\n"
         "【重要】仔细审查所有提供的内容，不要只看标题是否字面匹配用户问题。"
@@ -511,6 +958,7 @@ def _assistant_chat_system_prompt() -> str:
         "只能基于提供的上下文回答；若上下文不足，必须明确说明。"
         "回答请使用中文。"
         "提到任何收藏内容时，必须使用 [编号] 引用标记（如 [1] [2]），不要用「笔记1」「（笔记51）」等其他格式。"
+        "如果你在做归类、列表、表格或逐条总结，每一条内容名称后都必须紧跟自己的 [编号]，不要只在小节末尾统一放引用。"
         "如果没有直接引用具体内容，就不要输出引用编号。"
         "\n\n"
         "【重要：深度语义检索】\n"
@@ -523,9 +971,9 @@ def _assistant_chat_system_prompt() -> str:
         "简洁、直接、信息密度高，不要废话和客套。\n"
         "格式要求：\n"
         "- 开头一句话直接回答要点，不要重复用户问题。\n"
-        "- 列举型回答用「名称 [编号] — 一句话说明核心价值和用法」的格式。\n"
+        "- 列举型回答用「名称 [编号] — 一句话说明核心价值和用法」的格式，编号紧跟在名称后。\n"
         "- 对比型回答（如比较多个工具/方案的异同）用 Markdown 表格呈现，列为对比维度，行为对比对象。\n"
-        "- 提到任何内容时，必须使用 [编号] 格式引用（如 [1] [2]），绝对不要用「笔记1」「（笔记51）」等其他格式。\n"
+        "- 提到任何内容时，必须使用 [编号] 格式引用（如 [1] [2]），绝对不要用「笔记1」「（笔记51）」等其他格式；如果一行里列了某条内容，编号要贴在那条内容名字后面。\n"
         "- 如果有实用建议（如工具组合使用方式），在末尾用一段话给出。\n"
         "- 不要输出'希望对你有帮助'之类的尾巴。\n"
         "- 不要问'需要我展开吗'，直接把有价值的信息说完。"
@@ -1124,37 +1572,37 @@ def _build_full_items_index(db: Session, user_id: str) -> tuple[str, list[Knowle
 _CHAT_ITEMS_DIRECTORY_LIMIT = 200
 
 
-def _build_chat_items_directory(db: Session, user_id: str) -> str:
+def _build_chat_items_directory(db: Session, user_id: str) -> tuple[str, list[KnowledgeBaseNote]]:
     """Build a compact chronological directory of all user items for chat mode awareness.
 
-    Uses plain numbered format (no [n] brackets) to avoid conflicts with RAG citation
-    numbering. This gives the AI a full picture of what's in the library so it can
-    correctly answer listing/overview questions like "list my recent items".
+    Uses bullet format with no numeric prefixes, so the model is less likely to copy
+    directory positions like `[11]` and confuse them with citation markers.
     """
     items_snapshot = _build_items_only_snapshot(db, user_id)
     if not items_snapshot.notes:
-        return ""
+        return "", []
 
     lines: list[str] = []
-    for i, note in enumerate(items_snapshot.notes[:_CHAT_ITEMS_DIRECTORY_LIMIT]):
+    directory_notes = items_snapshot.notes[:_CHAT_ITEMS_DIRECTORY_LIMIT]
+    for note in directory_notes:
         title = (note.title or "").strip()[:80]
         if not title:
             continue
         date_str = note.created_at.strftime("%Y-%m-%d") if note.created_at else ""
         folder = (note.folder or "").strip()
-        parts = [f"{i + 1}."]
+        parts = ["-"]
         if date_str:
-            parts.append(f"({date_str})")
+            parts.append(date_str)
         parts.append(title)
         if folder:
-            parts.append(f"[{folder}]")
+            parts.append(f"文件夹: {folder}")
         lines.append(" ".join(parts))
 
     total = items_snapshot.note_count
     header = f"收藏库完整目录（共 {total} 条，按保存时间倒序）："
     if total > _CHAT_ITEMS_DIRECTORY_LIMIT:
         header += f"（仅显示最近 {_CHAT_ITEMS_DIRECTORY_LIMIT} 条）"
-    return header + "\n" + "\n".join(lines)
+    return header + "\n" + "\n".join(lines), directory_notes
 
 
 def _semantic_chunk_signature(snapshot: KnowledgeBaseSnapshot) -> str:
@@ -4350,12 +4798,12 @@ async def ask_ai(request: AiAskRequest, db: Session = Depends(get_db)):
             insufficient_context=True,
         )
 
-    items_directory = _build_chat_items_directory(db, user_id)
+    items_directory, directory_notes = _build_chat_items_directory(db, user_id)
     user_content_parts = [f"用户问题：{question}\n"]
     if items_directory:
         user_content_parts.append(
             "下面是用户收藏库的完整目录，供你了解全貌。"
-            "当用户问概览性问题时以此为准。\n\n"
+            "当用户问概览性问题时以此为准。这里不是引用编号列表，不要把目录顺序写成 [11] 这类引用。\n\n"
             f"{items_directory}\n"
         )
     user_content_parts.append(
@@ -4379,13 +4827,14 @@ async def ask_ai(request: AiAskRequest, db: Session = Depends(get_db)):
     except AiClientError as exc:
         raise _ai_request_failed(exc) from exc
 
+    answer, citation_matches = _annotate_answer_with_citations(answer, rag_context.ranked_notes, directory_notes)
     return AiAskResponse(
         question=question,
         answer=answer.strip(),
-        citations=_serialize_citations(
+        citations=_serialize_citation_matches(
             db,
             user_id,
-            _filter_ranked_notes_by_citation_markers(answer, rag_context.ranked_notes),
+            citation_matches,
         ),
         knowledge_base_path=None,
         note_count=rag_context.note_count,
@@ -4432,7 +4881,7 @@ async def assistant(request: AiAssistantRequest, db: Session = Depends(get_db)):
     )
 
     current_item_context = _build_current_item_context(current_item, current_item_note, current_page_notes) if current_item is not None else ""
-    items_directory = _build_chat_items_directory(db, user_id)
+    items_directory, directory_notes = _build_chat_items_directory(db, user_id)
     system_message = _compose_system_message(
         _assistant_chat_system_prompt(),
         (
@@ -4441,7 +4890,7 @@ async def assistant(request: AiAssistantRequest, db: Session = Depends(get_db)):
         ) if current_item_context else "",
         (
             "下面是用户收藏库的完整目录，供你了解全貌。"
-            "当用户问'最近保存了什么''列出我的内容'等概览性问题时，以此为准。\n\n"
+            "当用户问'最近保存了什么''列出我的内容'等概览性问题时，以此为准。这里不是引用编号列表，不要把目录顺序写成 [11] 这类引用。\n\n"
             f"{items_directory}"
         ) if items_directory else "",
         (
@@ -4462,13 +4911,14 @@ async def assistant(request: AiAssistantRequest, db: Session = Depends(get_db)):
     except AiClientError as exc:
         raise _ai_request_failed(exc) from exc
 
+    answer, citation_matches = _annotate_answer_with_citations(answer, rag_context.ranked_notes, directory_notes)
     return AiAssistantResponse(
         mode="chat",
         message=answer.strip(),
-        citations=_serialize_citations(
+        citations=_serialize_citation_matches(
             db,
             user_id,
-            _filter_ranked_notes_by_citation_markers(answer, rag_context.ranked_notes),
+            citation_matches,
         ),
         tool_events=[],
         knowledge_base_path=None,
@@ -4598,7 +5048,7 @@ async def assistant_stream(request: AiAssistantRequest, db: Session = Depends(ge
 
         # Build context and stream the answer
         current_item_context = _build_current_item_context(current_item, current_item_note, current_page_notes) if current_item is not None else ""
-        items_directory = _build_chat_items_directory(db, user_id)
+        items_directory, directory_notes = _build_chat_items_directory(db, user_id)
         system_message = _compose_system_message(
             _assistant_chat_system_prompt(),
             (
@@ -4607,7 +5057,7 @@ async def assistant_stream(request: AiAssistantRequest, db: Session = Depends(ge
             ) if current_item_context else "",
             (
                 "下面是用户收藏库的完整目录，供你了解全貌。"
-                "当用户问'最近保存了什么''列出我的内容'等概览性问题时，以此为准。\n\n"
+                "当用户问'最近保存了什么''列出我的内容'等概览性问题时，以此为准。这里不是引用编号列表，不要把目录顺序写成 [11] 这类引用。\n\n"
                 f"{items_directory}"
             ) if items_directory else "",
             (
@@ -4635,24 +5085,8 @@ async def assistant_stream(request: AiAssistantRequest, db: Session = Depends(ge
 
         # Final event with citations — build directly from indexed_notes
         # without DB query (all notes come from items, so item_id is valid)
-        answer = full_answer.strip()
-        filtered = _filter_ranked_notes_by_citation_markers(answer, rag_context.ranked_notes)
-        citations = [
-            AiCitationResponse(
-                note_id=note.note_id,
-                library_item_id=note.item_id,
-                title=note.title,
-                summary=note.summary or None,
-                folder=note.folder or None,
-                tags=note.tags or [],
-                source=note.source,
-                relative_path=note.relative_path,
-                created_at=note.created_at,
-                score=score,
-                excerpt=note.excerpt or None,
-            )
-            for note, score in filtered
-        ]
+        answer, citation_matches = _annotate_answer_with_citations(full_answer.strip(), rag_context.ranked_notes, directory_notes)
+        citations = _serialize_citation_matches(db, user_id, citation_matches)
         yield _sse({
             "type": "done",
             "message": answer,

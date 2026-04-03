@@ -210,6 +210,7 @@ class SettingsUpdateRequest(BaseModel):
 
 
 class AiCitationResponse(BaseModel):
+    reference_index: Optional[int] = None
     note_id: str
     library_item_id: Optional[str] = None
     title: str

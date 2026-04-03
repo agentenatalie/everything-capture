@@ -154,6 +154,7 @@ class AiRouteTests(unittest.TestCase):
 
         self.assertIn("AI UI 设计", response.answer)
         self.assertEqual(len(response.citations), 2)
+        self.assertEqual(response.citations[0].reference_index, 1)
         self.assertEqual(response.citations[0].title, "AI 写的 UI 太丑？这个 Skill 救了我")
 
     def test_analyze_item_returns_structured_fields(self) -> None:
@@ -204,7 +205,321 @@ class AiRouteTests(unittest.TestCase):
         self.assertEqual(response.mode, "chat")
         self.assertIn("AI UI 设计", response.message)
         self.assertEqual(len(response.citations), 2)
+        self.assertEqual(response.citations[1].reference_index, 2)
         self.assertFalse(response.insufficient_context)
+
+    def test_assistant_chat_backfills_missing_title_level_citation_markers(self) -> None:
+        request = AiAssistantRequest(
+            mode="chat",
+            messages=[AiConversationMessage(role="user", content="按条目总结我保存过的 AI UI 设计内容")],
+            top_k=4,
+        )
+
+        with self.Session() as db:
+            with patch.object(ai_router, "get_current_user_id", return_value="local-default-user"), patch.object(
+                ai_router,
+                "_retrieve_rag_context",
+                return_value=self._make_rag_context(),
+            ), patch.object(
+                ai_router,
+                "chat_completion",
+                return_value=(
+                    "最近保存的内容里，AI 写的 UI 太丑？这个 Skill 救了我 值得深入阅读；"
+                    "Vibe Coding 的时候不知道怎么描述 UI？ 更适合归档。"
+                ),
+            ):
+                response = asyncio.run(ai_router.assistant(request, db=db))
+
+        self.assertIn("AI 写的 UI 太丑？这个 Skill 救了我 [1]", response.message)
+        self.assertIn("Vibe Coding 的时候不知道怎么描述 UI？ [2]", response.message)
+        self.assertEqual([citation.reference_index for citation in response.citations], [1, 2])
+
+    def test_annotate_answer_with_citations_ignores_think_block_and_cites_visible_table_rows(self) -> None:
+        snapshot = self._make_snapshot()
+        ranked_notes = [(snapshot.notes[0], 0.98), (snapshot.notes[1], 0.91)]
+        answer = (
+            "<think>我主要参考了这些内容：[1][2]</think>\n\n"
+            "| 内容 | 核心观点 | 建议 |\n"
+            "|------|---------|------|\n"
+            "| AI 写的 UI 太丑？这个 Skill 救了我 | 解释 AI UI 为什么总差最后一口气 | 深入阅读 |\n"
+            "| Vibe Coding 的时候不知道怎么描述 UI？ | Component Gallery 更适合描述组件 | 归档 |\n"
+        )
+
+        annotated_answer, citation_matches = ai_router._annotate_answer_with_citations(answer, ranked_notes, snapshot.notes)
+
+        self.assertNotIn("<think>", annotated_answer)
+        self.assertIn("AI 写的 UI 太丑？这个 Skill 救了我 [1]", annotated_answer)
+        self.assertIn("Vibe Coding 的时候不知道怎么描述 UI？ [2]", annotated_answer)
+        self.assertEqual([match[1].item_id for match in citation_matches], ["item-ai", "item-related"])
+
+    def test_assistant_chat_strips_think_only_citation_markers(self) -> None:
+        request = AiAssistantRequest(
+            mode="chat",
+            messages=[AiConversationMessage(role="user", content="按条目总结我保存过的 AI UI 设计内容")],
+            top_k=4,
+        )
+
+        with self.Session() as db:
+            with patch.object(ai_router, "get_current_user_id", return_value="local-default-user"), patch.object(
+                ai_router,
+                "_retrieve_rag_context",
+                return_value=self._make_rag_context(),
+            ), patch.object(
+                ai_router,
+                "chat_completion",
+                return_value=(
+                    "<think>参考资料是 [1][2]</think>\n\n"
+                    "| 内容 | 核心观点 | 建议 |\n"
+                    "|------|---------|------|\n"
+                    "| AI 写的 UI 太丑？这个 Skill 救了我 | 解释 AI UI 为什么总差最后一口气 | 深入阅读 |\n"
+                    "| Vibe Coding 的时候不知道怎么描述 UI？ | Component Gallery 更适合描述组件 | 归档 |\n"
+                ),
+            ):
+                response = asyncio.run(ai_router.assistant(request, db=db))
+
+        self.assertNotIn("<think>", response.message)
+        self.assertEqual([citation.reference_index for citation in response.citations], [1, 2])
+
+    def test_annotate_answer_with_citations_rebuilds_clean_row_refs_when_model_inserts_wrong_numbers(self) -> None:
+        ranked_notes = [
+            (
+                prepare_note_for_similarity(
+                    KnowledgeBaseNote(
+                        note_id="n1",
+                        title="Claude Code 开源编译版来了！45+实验功能全开，隐私无遥测",
+                        summary="",
+                        body="",
+                        excerpt="",
+                        extracted_text="",
+                        tags=[],
+                        folder="AI",
+                        source="https://example.com/claude-compiled",
+                        created_at=datetime(2026, 3, 1, 10, 0, 0),
+                        relative_path="AI/claude-compiled.md",
+                        item_id="item-claude-compiled",
+                    )
+                ),
+                0.98,
+            ),
+            (
+                prepare_note_for_similarity(
+                    KnowledgeBaseNote(
+                        note_id="n2",
+                        title="Claude Code 源码深度解析：51.2万行代码的AI编程系统研究",
+                        summary="",
+                        body="",
+                        excerpt="",
+                        extracted_text="",
+                        tags=[],
+                        folder="AI",
+                        source="https://example.com/claude-source",
+                        created_at=datetime(2026, 3, 2, 10, 0, 0),
+                        relative_path="AI/claude-source.md",
+                        item_id="item-claude-source",
+                    )
+                ),
+                0.97,
+            ),
+            (
+                prepare_note_for_similarity(
+                    KnowledgeBaseNote(
+                        note_id="n3",
+                        title="Mastra：14天斩获1.3万Star的AI Agent开发框架",
+                        summary="",
+                        body="",
+                        excerpt="",
+                        extracted_text="",
+                        tags=[],
+                        folder="AI",
+                        source="https://example.com/mastra",
+                        created_at=datetime(2026, 3, 3, 10, 0, 0),
+                        relative_path="AI/mastra.md",
+                        item_id="item-mastra",
+                    )
+                ),
+                0.96,
+            ),
+            (
+                prepare_note_for_similarity(
+                    KnowledgeBaseNote(
+                        note_id="n4",
+                        title="Karpathy autorsearch：优化龙虾skill成功率从56%飙到92%",
+                        summary="",
+                        body="",
+                        excerpt="",
+                        extracted_text="",
+                        tags=[],
+                        folder="AI",
+                        source="https://example.com/autorsearch",
+                        created_at=datetime(2026, 3, 4, 10, 0, 0),
+                        relative_path="AI/autorsearch.md",
+                        item_id="item-autorsearch",
+                    )
+                ),
+                0.95,
+            ),
+            (
+                prepare_note_for_similarity(
+                    KnowledgeBaseNote(
+                        note_id="n5",
+                        title="OpenClaw：选股、Agent协作、Reddit需求调研等多场景应用",
+                        summary="",
+                        body="",
+                        excerpt="",
+                        extracted_text="",
+                        tags=[],
+                        folder="AI",
+                        source="https://example.com/openclaw",
+                        created_at=datetime(2026, 3, 5, 10, 0, 0),
+                        relative_path="AI/openclaw.md",
+                        item_id="item-openclaw",
+                    )
+                ),
+                0.94,
+            ),
+        ]
+        answer = (
+            "Claude Code [9] 开源编译版 [8] — 45+实验功能，隐私无遥测 [1]\n"
+            "Claude Code 源码深度解析 [10] — 51.2万行代码的AI编程系统研究 [2]\n"
+            "Mastra [11] — 14天斩获1.3万Star的AI Agent [12]开发框架 [3]\n"
+            "Karpathy [14] autorsearch [13] — 优化龙虾skill [15]成功率从56%飙到92% [4]\n"
+            "OpenClaw [17] — 选股、Agent协作、Reddit需求调研等多场景应用 [5]"
+        )
+
+        annotated_answer, citation_matches = ai_router._annotate_answer_with_citations(answer, ranked_notes, [note for note, _ in ranked_notes])
+
+        self.assertEqual(
+            annotated_answer,
+            (
+                "Claude Code 开源编译版 [1] — 45+实验功能，隐私无遥测\n"
+                "Claude Code 源码深度解析 [2] — 51.2万行代码的AI编程系统研究\n"
+                "Mastra [3] — 14天斩获1.3万Star的AI Agent 开发框架\n"
+                "Karpathy autorsearch [4] — 优化龙虾skill 成功率从56%飙到92%\n"
+                "OpenClaw [5] — 选股、Agent协作、Reddit需求调研等多场景应用"
+            ),
+        )
+        self.assertEqual(
+            [match[1].item_id for match in citation_matches],
+            [
+                "item-claude-compiled",
+                "item-claude-source",
+                "item-mastra",
+                "item-autorsearch",
+                "item-openclaw",
+            ],
+        )
+
+    def test_annotate_answer_with_citations_matches_product_aliases_from_urls_and_ocr_text(self) -> None:
+        notes = [
+            prepare_note_for_similarity(
+                KnowledgeBaseNote(
+                    note_id="khoj",
+                    title="GitHub 33k 星：这个开源项目，把你的知识库变成了会思考的 AI 大脑",
+                    summary="",
+                    body="",
+                    excerpt="",
+                    extracted_text=(
+                        "[urls]\nhttps://app.khoj.dev\nhttps://github.com/khoj-ai/khoj\n"
+                        "[ocr_text]\nKhoj AI - Your Second Brain"
+                    ),
+                    tags=[],
+                    folder="KM",
+                    source="https://app.khoj.dev",
+                    created_at=datetime(2026, 3, 1, 10, 0, 0),
+                    relative_path="khoj.md",
+                    item_id="item-khoj",
+                )
+            ),
+            prepare_note_for_similarity(
+                KnowledgeBaseNote(
+                    note_id="ec",
+                    title="开源版「稍后读」+ AI 知识库：我开发了 Everything Capture，一站式解决信息过载",
+                    summary="",
+                    body="",
+                    excerpt="",
+                    extracted_text="",
+                    tags=[],
+                    folder="KM",
+                    source="https://example.com/everything-capture",
+                    created_at=datetime(2026, 3, 1, 10, 1, 0),
+                    relative_path="ec.md",
+                    item_id="item-ec",
+                )
+            ),
+            prepare_note_for_similarity(
+                KnowledgeBaseNote(
+                    note_id="wk",
+                    title="太劲爆 r ！13.7K Star, 腾讯居然将这个知识库神器直接开源了",
+                    summary="",
+                    body="",
+                    excerpt="",
+                    extracted_text=(
+                        "[urls]\nhttps://github.com/Tencent/WeKnora.git\n"
+                        "[ocr_text]\nWEKNORA\n企业级智能文档检索框架"
+                    ),
+                    tags=[],
+                    folder="KM",
+                    source="https://github.com/Tencent/WeKnora",
+                    created_at=datetime(2026, 3, 1, 10, 2, 0),
+                    relative_path="weknora.md",
+                    item_id="item-weknora",
+                )
+            ),
+            prepare_note_for_similarity(
+                KnowledgeBaseNote(
+                    note_id="gn",
+                    title="GitNexus：从代码知识图谱到可靠公共记忆系统的进化之路",
+                    summary="",
+                    body="",
+                    excerpt="",
+                    extracted_text="",
+                    tags=[],
+                    folder="KM",
+                    source="https://example.com/gitnexus",
+                    created_at=datetime(2026, 3, 1, 10, 3, 0),
+                    relative_path="gitnexus.md",
+                    item_id="item-gitnexus",
+                )
+            ),
+            prepare_note_for_similarity(
+                KnowledgeBaseNote(
+                    note_id="sb",
+                    title="Openclaw帮你管理个人知识库",
+                    summary="",
+                    body="",
+                    excerpt="",
+                    extracted_text="### second-brain：打造AI管理的第二大脑",
+                    tags=[],
+                    folder="KM",
+                    source="https://example.com/openclaw-second-brain",
+                    created_at=datetime(2026, 3, 1, 10, 4, 0),
+                    relative_path="second-brain.md",
+                    item_id="item-second-brain",
+                )
+            ),
+        ]
+        ranked_notes = [(note, 0.95 - index * 0.01) for index, note in enumerate(notes)]
+        answer = (
+            "| 内容 | 核心观点 | 建议 |\n"
+            "|------|----------|------|\n"
+            "| Khoj - 33k星知识库 | 把知识库变成会思考的AI大脑 | 值得深入阅读 |\n"
+            "| Everything Capture [9] | 开源版「稍后读」+AI知识库 | 值得深入阅读 |\n"
+            "| WeKnora - 腾讯开源 | 企业级智能文档检索框架 | 值得深入阅读 |\n"
+            "| GitNexus [10] | 从代码知识图谱到公共记忆系统的进化 | 可归档 |\n"
+            "| OpenClaw second-brain | 用AI管理第二大脑 | 值得深入阅读 |"
+        )
+
+        annotated_answer, citation_matches = ai_router._annotate_answer_with_citations(answer, ranked_notes, notes)
+
+        self.assertIn("Khoj - 33k星知识库 [1]", annotated_answer)
+        self.assertIn("Everything Capture [2]", annotated_answer)
+        self.assertIn("WeKnora - 腾讯开源 [3]", annotated_answer)
+        self.assertIn("GitNexus [4]", annotated_answer)
+        self.assertIn("OpenClaw second-brain [5]", annotated_answer)
+        self.assertEqual(
+            [match[1].item_id for match in citation_matches],
+            ["item-khoj", "item-ec", "item-weknora", "item-gitnexus", "item-second-brain"],
+        )
 
     def test_assistant_chat_can_answer_from_current_item_context_without_kb(self) -> None:
         request = AiAssistantRequest(

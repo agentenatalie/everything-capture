@@ -1617,21 +1617,71 @@
         }
 
         function _linkifyCitationRefs(html, content, citations) {
-            // Convert [N] in rendered HTML to clickable citation buttons
             if (!Array.isArray(citations) || !citations.length) return html;
             const refMap = _buildCitationRefMap(content, citations);
             if (!Object.keys(refMap).length) return html;
 
-            return html.replace(/\[(\d{1,3})\]/g, (match, num) => {
-                const n = parseInt(num, 10);
-                const citation = refMap[n];
-                if (citation && citation.library_item_id) {
-                    const cId = escapeAttribute(citation.library_item_id);
-                    const cTitle = escapeHtml(citation.title || `引用 ${num}`);
-                    return `<button class="ai-citation-ref" data-ai-citation-id="${cId}" title="${cTitle}" type="button">[${num}]</button>`;
+            const host = document.createElement('div');
+            host.innerHTML = html;
+            // Only replace visible text-node refs so markdown-generated HTML structure stays intact.
+            const walker = document.createTreeWalker(host, window.NodeFilter?.SHOW_TEXT ?? 4);
+            const textNodes = [];
+            let currentNode = walker.nextNode();
+            while (currentNode) {
+                textNodes.push(currentNode);
+                currentNode = walker.nextNode();
+            }
+
+            textNodes.forEach((textNode) => {
+                const parentEl = textNode.parentElement;
+                if (!parentEl) return;
+                if (parentEl.closest('pre, code, a, button, script, style')) return;
+
+                const rawText = textNode.nodeValue || '';
+                if (!/\[\d{1,3}\]/.test(rawText)) return;
+
+                const fragment = document.createDocumentFragment();
+                const pattern = /\[(\d{1,3})\]/g;
+                let lastIndex = 0;
+                let hasReplacement = false;
+                let match;
+
+                while ((match = pattern.exec(rawText)) !== null) {
+                    const fullMatch = match[0];
+                    const num = match[1];
+                    const start = match.index;
+                    const end = start + fullMatch.length;
+                    const referenceIndex = parseInt(num, 10);
+                    const citation = refMap[referenceIndex];
+
+                    if (!citation || !citation.library_item_id) {
+                        continue;
+                    }
+
+                    if (start > lastIndex) {
+                        fragment.appendChild(document.createTextNode(rawText.slice(lastIndex, start)));
+                    }
+
+                    const button = document.createElement('button');
+                    button.className = 'ai-citation-ref';
+                    button.type = 'button';
+                    button.setAttribute('data-ai-citation-id', String(citation.library_item_id));
+                    button.setAttribute('title', citation.title || `引用 ${num}`);
+                    button.textContent = fullMatch;
+                    fragment.appendChild(button);
+
+                    lastIndex = end;
+                    hasReplacement = true;
                 }
-                return match;
+
+                if (!hasReplacement) return;
+                if (lastIndex < rawText.length) {
+                    fragment.appendChild(document.createTextNode(rawText.slice(lastIndex)));
+                }
+                textNode.parentNode?.replaceChild(fragment, textNode);
             });
+
+            return host.innerHTML;
         }
 
         function renderAssistantMessage(entry, options = {}) {

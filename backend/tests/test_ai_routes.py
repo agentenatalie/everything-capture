@@ -234,7 +234,7 @@ class AiRouteTests(unittest.TestCase):
         self.assertIn("Vibe Coding 的时候不知道怎么描述 UI？ [2]", response.message)
         self.assertEqual([citation.reference_index for citation in response.citations], [1, 2])
 
-    def test_annotate_answer_with_citations_ignores_think_block_and_cites_visible_table_rows(self) -> None:
+    def test_annotate_answer_with_citations_keeps_think_block_and_cites_visible_table_rows(self) -> None:
         snapshot = self._make_snapshot()
         ranked_notes = [(snapshot.notes[0], 0.98), (snapshot.notes[1], 0.91)]
         answer = (
@@ -247,12 +247,12 @@ class AiRouteTests(unittest.TestCase):
 
         annotated_answer, citation_matches = ai_router._annotate_answer_with_citations(answer, ranked_notes, snapshot.notes)
 
-        self.assertNotIn("<think>", annotated_answer)
+        self.assertIn("<think>我主要参考了这些内容：[1][2]</think>", annotated_answer)
         self.assertIn("AI 写的 UI 太丑？这个 Skill 救了我 [1]", annotated_answer)
         self.assertIn("Vibe Coding 的时候不知道怎么描述 UI？ [2]", annotated_answer)
         self.assertEqual([match[1].item_id for match in citation_matches], ["item-ai", "item-related"])
 
-    def test_assistant_chat_strips_think_only_citation_markers(self) -> None:
+    def test_assistant_chat_keeps_think_block_and_repairs_visible_citations(self) -> None:
         request = AiAssistantRequest(
             mode="chat",
             messages=[AiConversationMessage(role="user", content="按条目总结我保存过的 AI UI 设计内容")],
@@ -277,7 +277,9 @@ class AiRouteTests(unittest.TestCase):
             ):
                 response = asyncio.run(ai_router.assistant(request, db=db))
 
-        self.assertNotIn("<think>", response.message)
+        self.assertIn("<think>参考资料是 [1][2]</think>", response.message)
+        self.assertIn("AI 写的 UI 太丑？这个 Skill 救了我 [1]", response.message)
+        self.assertIn("Vibe Coding 的时候不知道怎么描述 UI？ [2]", response.message)
         self.assertEqual([citation.reference_index for citation in response.citations], [1, 2])
 
     def test_annotate_answer_with_citations_rebuilds_clean_row_refs_when_model_inserts_wrong_numbers(self) -> None:
@@ -520,6 +522,76 @@ class AiRouteTests(unittest.TestCase):
             [match[1].item_id for match in citation_matches],
             ["item-khoj", "item-ec", "item-weknora", "item-gitnexus", "item-second-brain"],
         )
+
+    def test_annotate_answer_with_citations_prefers_specific_title_alias_over_generic_product_name(self) -> None:
+        notes = [
+            prepare_note_for_similarity(
+                KnowledgeBaseNote(
+                    note_id="compiled",
+                    title="Claude Code 开源编译版来了！45+实验功能全开，隐私无遥测，开发者终于等到了",
+                    summary="",
+                    body="",
+                    excerpt="",
+                    extracted_text="",
+                    tags=[],
+                    folder="AI",
+                    source="https://example.com/compiled",
+                    created_at=datetime(2026, 4, 2, 0, 39, 1),
+                    relative_path="compiled.md",
+                    item_id="item-compiled",
+                )
+            ),
+            prepare_note_for_similarity(
+                KnowledgeBaseNote(
+                    note_id="tutorial",
+                    title="上班无聊写了篇Claude Code速通教程🥱",
+                    summary="",
+                    body="",
+                    excerpt="",
+                    extracted_text="",
+                    tags=[],
+                    folder="AI",
+                    source="https://example.com/tutorial",
+                    created_at=datetime(2026, 4, 3, 4, 30, 53),
+                    relative_path="tutorial.md",
+                    item_id="item-tutorial",
+                )
+            ),
+        ]
+        ranked_notes = [(notes[0], 0.98), (notes[1], 0.97)]
+        answer = "| 内容 | 核心观点 | 建议 |\n|------|----------|------|\n| Claude Code开源编译版来了 | 45+实验功能全开，隐私无遥测 | 值得深入阅读 |"
+
+        annotated_answer, citation_matches = ai_router._annotate_answer_with_citations(answer, ranked_notes, notes)
+
+        self.assertIn("Claude Code开源编译版来了 [1]", annotated_answer)
+        self.assertEqual([match[1].item_id for match in citation_matches], ["item-compiled"])
+
+    def test_annotate_answer_with_citations_strips_placeholder_marker_text(self) -> None:
+        notes = [
+            prepare_note_for_similarity(
+                KnowledgeBaseNote(
+                    note_id="n1",
+                    title="装上这个Skill后，Claude Code联网能力直接拉满",
+                    summary="",
+                    body="",
+                    excerpt="",
+                    extracted_text="",
+                    tags=[],
+                    folder="AI",
+                    source="https://example.com/web-access",
+                    created_at=datetime(2026, 4, 1, 10, 0, 0),
+                    relative_path="AI/web-access.md",
+                    item_id="item-web-access",
+                )
+            ),
+        ]
+        ranked_notes = [(notes[0], 0.98)]
+        answer = "装了Skill后，Claude Code联网能力直接拉满 [编号] [1]"
+
+        annotated_answer, citation_matches = ai_router._annotate_answer_with_citations(answer, ranked_notes, notes)
+
+        self.assertEqual(annotated_answer, "装了Skill后，Claude Code联网能力直接拉满 [1]")
+        self.assertEqual([match[1].item_id for match in citation_matches], ["item-web-access"])
 
     def test_assistant_chat_can_answer_from_current_item_context_without_kb(self) -> None:
         request = AiAssistantRequest(

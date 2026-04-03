@@ -80,7 +80,8 @@ router = APIRouter(prefix="/api/ai", tags=["ai"])
 _JSON_FENCE_PATTERN = re.compile(r"^```(?:json)?\s*|\s*```$", re.IGNORECASE)
 _NOTION_ID_RE = re.compile(r"([0-9a-fA-F]{32}|[0-9a-fA-F]{8}(?:-[0-9a-fA-F]{4}){3}-[0-9a-fA-F]{12})")
 _CITATION_INDEX_PATTERN = re.compile(r"\[(\d{1,3})\]")
-_TITLE_ALIAS_SPLIT_PATTERN = re.compile(r"[：:|｜—\-·•/]+")
+_CITATION_PLACEHOLDER_PATTERN = re.compile(r"\[(?:编号|引用编号|序号|ref|REF|index|INDEX)\]")
+_TITLE_ALIAS_SPLIT_PATTERN = re.compile(r"[：:|｜—\-·•/!！?？,，。；;]+")
 _TITLE_LEADING_LATIN_ALIAS_PATTERN = re.compile(r"^[A-Za-z][A-Za-z0-9 .+#_-]{2,}")
 _TITLE_NORMALIZE_PATTERN = re.compile(r"[\s\u3000`*_~\"'“”‘’「」『』《》【】\[\]\(\)（）:：;；,，.!！？?、\-—_|/·•]+")
 _URL_PATTERN = re.compile(r"https?://[^\s<>\]\)）,，]+", re.IGNORECASE)
@@ -382,6 +383,8 @@ def _collect_citation_matches(
 
 
 def _has_invalid_citation_markers(answer_text: str | None, ranked_note_count: int) -> bool:
+    if _CITATION_PLACEHOLDER_PATTERN.search(str(answer_text or "")):
+        return True
     for raw_index in _CITATION_INDEX_PATTERN.findall(str(answer_text or "")):
         try:
             index = int(raw_index)
@@ -673,8 +676,25 @@ def _candidate_notes_for_answer_matching(
     return candidates
 
 
-def _strip_answer_citation_markers(answer_text: str | None) -> str:
+def _strip_citation_placeholders(answer_text: str | None) -> str:
     text = str(answer_text or "")
+    if not text:
+        return ""
+
+    cleaned_lines: list[str] = []
+    for raw_line in text.splitlines():
+        cleaned_line = _CITATION_PLACEHOLDER_PATTERN.sub(" ", raw_line)
+        cleaned_line = re.sub(r"[ \t]{2,}", " ", cleaned_line)
+        cleaned_line = re.sub(r"\s+([,，.。!！?？:：;；、])", r"\1", cleaned_line)
+        cleaned_line = re.sub(r"([(\[【（])\s+", r"\1", cleaned_line)
+        cleaned_line = re.sub(r"\s+([)\]】）])", r"\1", cleaned_line)
+        cleaned_lines.append(cleaned_line.strip())
+
+    return re.sub(r"\n{3,}", "\n\n", "\n".join(cleaned_lines)).strip()
+
+
+def _strip_answer_citation_markers(answer_text: str | None) -> str:
+    text = _strip_citation_placeholders(answer_text)
     if not text:
         return ""
 
@@ -688,6 +708,52 @@ def _strip_answer_citation_markers(answer_text: str | None) -> str:
         cleaned_lines.append(cleaned_line.strip())
 
     return re.sub(r"\n{3,}", "\n\n", "\n".join(cleaned_lines)).strip()
+
+
+def _split_reasoning_and_answer(text: str | None) -> tuple[str | None, str, str | None]:
+    raw = str(text or "").strip()
+    if not raw:
+        return None, "", None
+
+    try:
+        parsed = json.loads(raw)
+    except json.JSONDecodeError:
+        parsed = None
+    if isinstance(parsed, dict):
+        thinking = parsed.get("think")
+        answer = parsed.get("answer")
+        if isinstance(thinking, str) and isinstance(answer, str):
+            return thinking, answer, "json"
+
+    matches = list(re.finditer(r"<think\b[^>]*>[\s\S]*?</think>", raw, flags=re.IGNORECASE))
+    if not matches:
+        return None, raw, None
+
+    reasoning_blocks = [match.group(0).strip() for match in matches if match.group(0).strip()]
+    answer_parts: list[str] = []
+    last_end = 0
+    for match in matches:
+        if match.start() > last_end:
+            answer_parts.append(raw[last_end:match.start()])
+        last_end = match.end()
+    if last_end < len(raw):
+        answer_parts.append(raw[last_end:])
+
+    answer = "".join(answer_parts).strip()
+    reasoning = "\n\n".join(reasoning_blocks).strip() or None
+    return reasoning, answer, "tags"
+
+
+def _merge_reasoning_and_answer(reasoning: str | None, answer: str, reasoning_format: str | None) -> str:
+    answer_text = str(answer or "").strip()
+    reasoning_text = str(reasoning or "").strip()
+    if not reasoning_text:
+        return answer_text
+    if reasoning_format == "json":
+        return json.dumps({"think": reasoning_text, "answer": answer_text}, ensure_ascii=False)
+    if not answer_text:
+        return reasoning_text
+    return f"{reasoning_text}\n\n{answer_text}".strip()
 
 
 def _inject_citations_for_matches(
@@ -742,9 +808,10 @@ def _annotate_answer_with_citations(
     ranked_notes: list[tuple[KnowledgeBaseNote, float]],
     directory_notes: list[KnowledgeBaseNote] | None = None,
 ) -> tuple[str, list[tuple[int, KnowledgeBaseNote, float]]]:
-    visible_answer = _strip_reasoning_blocks(answer_text).strip()
+    reasoning, answer_body, reasoning_format = _split_reasoning_and_answer(answer_text)
+    visible_answer = _strip_citation_placeholders(answer_body)
     if not visible_answer:
-        return "", []
+        return _merge_reasoning_and_answer(reasoning, "", reasoning_format), []
 
     explicit_matches = _collect_citation_matches(visible_answer, ranked_notes)
     candidate_notes = _candidate_notes_for_answer_matching(ranked_notes, directory_notes)
@@ -758,9 +825,9 @@ def _annotate_answer_with_citations(
     if needs_repair:
         repaired_answer, repaired_matches = _repair_answer_citations(visible_answer, candidate_notes)
         if repaired_matches:
-            return repaired_answer, repaired_matches
+            return _merge_reasoning_and_answer(reasoning, repaired_answer, reasoning_format), repaired_matches
 
-    return visible_answer, explicit_matches
+    return _merge_reasoning_and_answer(reasoning, visible_answer, reasoning_format), explicit_matches
 
 
 def _filter_ranked_notes_by_citation_markers(

@@ -3515,9 +3515,9 @@
             text-transform: uppercase;
         }
 
-        .folder-item.active .folder-item-glyph {
-            background: #ffffff;
-            color: #2a2c2e;
+        .folder-item.is-main-folder .folder-item-glyph {
+            background: #71767a;
+            color: #f3f4f6;
         }
 
         .folder-item-name {

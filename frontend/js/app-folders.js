@@ -158,6 +158,7 @@
 
         function renderFolderNavItem(label, scope, count, folderId = null, options = {}) {
             const active = currentFolderScope === scope && (scope !== 'folder' || currentFolderId === folderId);
+            const isMainFolder = scope === 'folder' && (options.level || 0) === 0 && Boolean(options.hasChildren);
             const menuButton = options.menu
                 ? `<button class="folder-item-menu" type="button" onclick="openFolderContextMenu('${folderId}', event)">···</button>`
                 : '';
@@ -169,7 +170,7 @@
                 ? ` draggable="true" data-folder-id="${folderId}" data-folder-scope="${scope}" ondragstart="handleFolderDragStart(event, '${folderId}')" ondragend="handleFolderDragEnd()" ondragover="handleFolderDragOver(event, '${folderId}')" ondragleave="handleFolderDragLeave(event, '${folderId}')" ondrop="handleFolderDrop(event, '${folderId}')"`
                 : ` data-folder-scope="${scope}"`;
             return `
-                <div class="folder-item${active ? ' active' : ''}" role="button" tabindex="0" title="${escapeAttribute(label)}" style="${indent ? `padding-left:${12 + indent}px` : ''}" onclick="handleFolderNavActivate('${scope}', ${folderId ? `'${folderId}'` : 'null'})" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();handleFolderNavActivate('${scope}', ${folderId ? `'${folderId}'` : 'null'});}"${dragAttrs}${contextMenuAttr}>
+                <div class="folder-item${active ? ' active' : ''}${isMainFolder ? ' is-main-folder' : ''}" role="button" tabindex="0" title="${escapeAttribute(label)}" style="${indent ? `padding-left:${12 + indent}px` : ''}" onclick="handleFolderNavActivate('${scope}', ${folderId ? `'${folderId}'` : 'null'})" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();handleFolderNavActivate('${scope}', ${folderId ? `'${folderId}'` : 'null'});}"${dragAttrs}${contextMenuAttr}>
                     <span class="folder-item-glyph" aria-hidden="true">${escapeHtml(glyph)}</span>
                     <span class="folder-item-name">${escapeHtml(label)}</span>
                     <span class="folder-item-count">${count}</span>

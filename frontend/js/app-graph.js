@@ -123,9 +123,10 @@
 
             // Folder highlight set
             const hasFolderHL = _graphHighlightFolderId !== null && !hasActive;
+            const highlightedFolderIds = hasFolderHL ? _graphCollectFolderSubtreeIds(_graphHighlightFolderId) : null;
             const folderHLSet = hasFolderHL ? new Set(_graphNodes.filter(n => {
                 if (_graphHighlightFolderId === '__unfiled') return !n.folder_ids || n.folder_ids.length === 0;
-                return n.folder_ids && n.folder_ids.includes(_graphHighlightFolderId);
+                return Array.isArray(n.folder_ids) && n.folder_ids.some(folderId => highlightedFolderIds?.has(folderId));
             }).map(n => n.id)) : null;
 
             const dimForFilter = (hasSearch || hasFolderHL) && !hasActive;
@@ -565,6 +566,42 @@
 
         let _graphFoldersData = [];
         let _graphHighlightFolderId = null;
+
+        function _graphCollectFolderSubtreeIds(folderId) {
+            const targetId = String(folderId || '').trim();
+            if (!targetId || targetId === '__unfiled') return new Set();
+
+            const sourceFolders = (typeof foldersData !== 'undefined' && Array.isArray(foldersData) && foldersData.length)
+                ? foldersData
+                : _graphFoldersData;
+            const childrenByParent = new Map();
+
+            for (const folder of sourceFolders || []) {
+                const id = String(folder?.id || '').trim();
+                if (!id) continue;
+                const parentId = folder?.parent_id ? String(folder.parent_id).trim() : '';
+                if (!childrenByParent.has(parentId)) {
+                    childrenByParent.set(parentId, []);
+                }
+                childrenByParent.get(parentId).push(id);
+            }
+
+            const subtreeIds = new Set();
+            const queue = [targetId];
+            while (queue.length) {
+                const currentId = queue.shift();
+                if (!currentId || subtreeIds.has(currentId)) continue;
+                subtreeIds.add(currentId);
+                const childIds = childrenByParent.get(currentId) || [];
+                childIds.forEach((childId) => {
+                    if (!subtreeIds.has(childId)) {
+                        queue.push(childId);
+                    }
+                });
+            }
+
+            return subtreeIds;
+        }
 
         function _graphRenderLegend(folders) {
             _graphFoldersData = folders;

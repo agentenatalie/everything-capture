@@ -21,7 +21,7 @@
         let readerChromeHidden = false;
         let readerChromeLastToggle = 0;
         let readerLastScrollTop = 0;
-        const readerNavStack = []; // stack of item IDs for back-navigation from citations
+        const readerNavStack = []; // stack of { itemId, sidebarTab } for back-navigation from citations
         let readerNavOrigin = null; // 'askAi' | 'readerAi' | null — where the citation nav started
         let readerScrollTicking = false;
         let readerScrollIntent = 0;
@@ -143,10 +143,14 @@
             }
         }
 
+        function normalizeReaderSidebarTab(tab) {
+            const validTabs = ['note', 'pageNotes', 'ai'];
+            return validTabs.includes(tab) ? tab : 'note';
+        }
+
         function openReaderSidebarPanel(tab = 'note') {
             if (!isReaderFullscreen) return;
-            const validTabs = ['note', 'pageNotes', 'ai'];
-            const nextTab = validTabs.includes(tab) ? tab : 'note';
+            const nextTab = normalizeReaderSidebarTab(tab);
 
             // If sidebar is already open on the same tab and user is editing a note in source mode,
             // skip re-render to avoid destroying the textarea and losing unsaved input.
@@ -193,8 +197,7 @@
         }
 
         function setReaderSidebarTab(tab) {
-            const validTabs = ['note', 'pageNotes', 'ai'];
-            const nextTab = validTabs.includes(tab) ? tab : 'note';
+            const nextTab = normalizeReaderSidebarTab(tab);
 
             // If switching away from pageNotes while editing, save first
             if (readerSidebarTab === 'pageNotes' && nextTab !== 'pageNotes'
@@ -2052,22 +2055,29 @@
             const keepNotePanel = Boolean(options.keepNotePanel);
             const preserveSidebarTab = Boolean(options.preserveSidebarTab);
             const pushToNavStack = Boolean(options.pushToNavStack);
+            const explicitSidebarTab = typeof options.preferredSidebarTab === 'string'
+                ? normalizeReaderSidebarTab(options.preferredSidebarTab)
+                : null;
             const navOrigin = options.navOrigin || null; // 'askAi' | 'readerAi'
             const previousOpenItemId = currentOpenItemId;
 
             // If navigating from a citation and we already have an item open, push it to the stack
             if (pushToNavStack && previousOpenItemId && previousOpenItemId !== item.id) {
-                readerNavStack.push(previousOpenItemId);
+                readerNavStack.push({
+                    itemId: previousOpenItemId,
+                    sidebarTab: readerSidebarOpen ? normalizeReaderSidebarTab(readerSidebarTab) : null,
+                });
             }
-            // Record where this citation navigation started (only on first push)
-            if (pushToNavStack && navOrigin && readerNavStack.length <= 1) {
+            // Record where this citation navigation started and keep it stable for the whole chain.
+            if (pushToNavStack && navOrigin && !readerNavOrigin) {
                 readerNavOrigin = navOrigin;
             }
             currentOpenItemId = item.id;
             // Fire-and-forget view tracking
             fetch(`/api/items/${encodeURIComponent(item.id)}/view`, { method: 'POST' }).catch(() => {});
             const isNewItem = previousOpenItemId !== currentOpenItemId;
-            const preferredSidebarTab = preserveSidebarTab ? (readerSidebarTab || 'note') : 'note';
+            const preferredSidebarTab = explicitSidebarTab
+                || (preserveSidebarTab ? normalizeReaderSidebarTab(readerSidebarTab) : 'note');
             if (isNewItem) {
                 contentViewMode = 'view';
                 contentWasEdited = false;
@@ -2257,10 +2267,15 @@
 
             // If there's a previous item on the nav stack, go back to it instead of closing
             if (readerNavStack.length > 0) {
-                const prevItemId = readerNavStack.pop();
+                const navEntry = readerNavStack.pop();
+                const prevItemId = typeof navEntry === 'string' ? navEntry : navEntry?.itemId;
+                const prevSidebarTab = typeof navEntry === 'string' ? null : navEntry?.sidebarTab;
                 const prevItem = getItemById(prevItemId);
                 if (prevItem) {
-                    openModalByItem(prevItem, { preserveSidebarTab: true });
+                    openModalByItem(prevItem, {
+                        preserveSidebarTab: Boolean(prevSidebarTab),
+                        preferredSidebarTab: prevSidebarTab || undefined,
+                    });
                     return;
                 }
                 // If item no longer available, clear stack and close normally

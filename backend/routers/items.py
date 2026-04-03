@@ -944,7 +944,7 @@ def get_items_graph(
 
     query = db.query(Item).filter(Item.user_id == user_id)
     if folder_id:
-        query = query.join(ItemFolderLink).filter(ItemFolderLink.folder_id == folder_id)
+        query = apply_folder_filter(query, folder_id=folder_id)
     items_list = query.order_by(Item.created_at.desc()).limit(500).all()
 
     # Build nodes + TF-IDF vectors

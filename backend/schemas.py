@@ -132,7 +132,7 @@ class SettingsResponse(BaseModel):
     ai_agent_can_sync_notion: bool = False
     ai_agent_can_execute_commands: bool = False
     ai_agent_can_web_search: bool = True
-    ai_agent_can_run_computer_commands: bool = False
+    ai_agent_can_run_computer_commands: bool = True
     auto_sync_target: str = "none"
     ai_auto_tag_enabled: bool = False
     notion_ready: bool = False

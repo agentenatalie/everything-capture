@@ -318,7 +318,7 @@
                                                 </label>
                                                 <label class="settings-checkbox-row">
                                                     <input type="checkbox" id="aiAgentCanExecuteCommands" />
-                                                    <span>允许执行沙箱命令</span>
+                                                    <span>允许执行沙箱命令（仅 exports 临时区）</span>
                                                 </label>
                                                 <label class="settings-checkbox-row">
                                                     <input type="checkbox" id="aiAgentCanWebSearch" checked />
@@ -326,10 +326,10 @@
                                                 </label>
                                                 <label class="settings-checkbox-row">
                                                     <input type="checkbox" id="aiAgentCanRunComputerCommands" />
-                                                    <span>允许系统命令（需逐条批准）</span>
+                                                    <span>允许系统命令（安装软件 / clone 到电脑 / 全局安装，需逐条批准）</span>
                                                 </label>
                                             </div>
-                                            <div class="settings-help">系统命令每次执行前都会弹出确认，你可以逐条批准或拒绝。</div>
+                                            <div class="settings-help">GitHub 项目下载、全局安装和本机配置应优先走系统命令；沙箱命令只用于 exports 临时文件。系统命令每次执行前都会弹出确认，你可以逐条批准或拒绝。</div>
                                             <label class="settings-checkbox-row" style="margin-top: 12px;">
                                                 <input type="checkbox" id="aiAutoTagEnabled" />
                                                 <span>导入内容时自动打标签</span>

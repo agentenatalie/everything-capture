@@ -1,4 +1,5 @@
 import asyncio
+import json
 import os
 import sys
 import unittest
@@ -800,6 +801,124 @@ class AiRouteTests(unittest.TestCase):
         self.assertEqual(response.tool_events[0].name, "search_library_items")
         self.assertGreaterEqual(len(response.citations), 1)
         self.assertIn("两条", response.message)
+
+    def test_assistant_agent_prompt_treats_local_install_as_system_command(self) -> None:
+        prompt = ai_router._assistant_agent_system_prompt(
+            ["search_library", "execute_commands", "run_computer_commands", "web_search"]
+        )
+
+        self.assertIn("run_computer_command", prompt)
+        self.assertIn("装到电脑里", prompt)
+        self.assertIn("全局安装", prompt)
+        self.assertIn("不要退回沙箱硬做", prompt)
+
+    def test_execute_sandbox_command_redirects_git_clone_to_run_computer_command(self) -> None:
+        with self.Session() as db:
+            result, event, ranked_notes, changed_items = asyncio.run(
+                ai_router._execute_agent_tool(
+                    tool_name="execute_sandbox_command",
+                    arguments={"action": "git_clone", "url": "https://github.com/example/project.git"},
+                    db=db,
+                    user_id="local-default-user",
+                    snapshot=self._make_snapshot(),
+                    agent_permissions=["execute_commands", "run_computer_commands"],
+                    ai_config={"api_key": "test-ai-key", "base_url": "https://api.example.com/v1", "model": "test-model"},
+                )
+            )
+
+        self.assertEqual(result["status"], "error")
+        self.assertIn("run_computer_command", result["message"])
+        self.assertEqual(event.status, "failed")
+        self.assertIn("不能走沙箱", event.summary)
+        self.assertEqual(ranked_notes, [])
+        self.assertEqual(changed_items, [])
+
+    def test_execute_sandbox_command_redirects_global_install_to_run_computer_command(self) -> None:
+        with self.Session() as db:
+            result, event, _, _ = asyncio.run(
+                ai_router._execute_agent_tool(
+                    tool_name="execute_sandbox_command",
+                    arguments={"action": "run_command", "command": "npm install -g @anthropic-ai/claude-code"},
+                    db=db,
+                    user_id="local-default-user",
+                    snapshot=self._make_snapshot(),
+                    agent_permissions=["execute_commands", "run_computer_commands"],
+                    ai_config={"api_key": "test-ai-key", "base_url": "https://api.example.com/v1", "model": "test-model"},
+                )
+            )
+
+        self.assertEqual(result["status"], "error")
+        self.assertIn("run_computer_command", result["message"])
+        self.assertEqual(event.status, "failed")
+
+    def test_run_computer_command_defaults_approval_working_directory_to_home(self) -> None:
+        with self.Session() as db:
+            result, event, _, _ = asyncio.run(
+                ai_router._execute_agent_tool(
+                    tool_name="run_computer_command",
+                    arguments={
+                        "command": "git clone https://github.com/example/project.git",
+                        "description": "把仓库克隆到本机",
+                    },
+                    db=db,
+                    user_id="local-default-user",
+                    snapshot=self._make_snapshot(),
+                    agent_permissions=["run_computer_commands"],
+                    ai_config={"api_key": "test-ai-key", "base_url": "https://api.example.com/v1", "model": "test-model"},
+                )
+            )
+
+        self.assertEqual(result["status"], "pending_approval")
+        self.assertEqual(result["working_directory"], os.path.expanduser("~"))
+        self.assertEqual(event.status, "pending")
+
+    def test_run_plan_and_execute_executes_all_planned_calls_without_fixed_step_cap(self) -> None:
+        executed_indexes: list[int] = []
+
+        async def fake_execute_agent_tool(*, arguments, **kwargs):
+            executed_indexes.append(int(arguments.get("index")))
+            return (
+                {"status": "ok", "index": int(arguments.get("index"))},
+                ai_router.AiToolEventResponse(name="search_library_items", summary=f"step {arguments.get('index')}"),
+                [],
+                [],
+            )
+
+        planned_calls = json.dumps(
+            [{"name": "search_library_items", "arguments": {"index": index}} for index in range(12)],
+            ensure_ascii=False,
+        )
+
+        with self.Session() as db:
+            with patch.object(
+                ai_router,
+                "chat_completion",
+                side_effect=[planned_calls, "全部执行完成。"],
+            ), patch.object(
+                ai_router,
+                "_execute_agent_tool",
+                side_effect=fake_execute_agent_tool,
+            ):
+                response = asyncio.run(
+                    ai_router._run_plan_and_execute(
+                        db=db,
+                        user_id="local-default-user",
+                        ai_config={
+                            "api_key": "test-ai-key",
+                            "base_url": "https://api.example.com/v1",
+                            "model": "test-model",
+                        },
+                        settings=None,
+                        conversation=[{"role": "user", "content": "把这些步骤全部跑完"}],
+                        tools=[{"function": {"name": "search_library_items", "description": "test"}}],
+                        agent_permissions=["execute_commands"],
+                        snapshot=self._make_snapshot(),
+                        memories=[],
+                    )
+                )
+
+        self.assertEqual(executed_indexes, list(range(12)))
+        self.assertEqual(response.message, "全部执行完成。")
 
     def test_assistant_chat_omits_citations_when_answer_has_no_reference_markers(self) -> None:
         request = AiAssistantRequest(

@@ -10,6 +10,7 @@ import re
 import uuid
 from dataclasses import dataclass, field
 from datetime import datetime
+from pathlib import Path
 from typing import Any, Optional
 from urllib.parse import urlparse
 
@@ -94,7 +95,7 @@ _ALIAS_STOP_WORDS = {
 _URL_HOST_STOP_WORDS = {"www", "app", "docs", "github", "localhost", "com", "org", "net", "dev", "ai"}
 _CHAT_HISTORY_LIMIT = 10
 _SAVED_CHAT_HISTORY_LIMIT = 120
-_AGENT_TOOL_STEP_LIMIT = 10
+_AGENT_TOOL_REPEAT_LIMIT = 3
 
 _RAG_CHUNK_CHAR_LIMIT = 1100
 _RAG_CHUNK_OVERLAP_CHAR_LIMIT = 180
@@ -117,6 +118,27 @@ _COMPUTER_CMD_BANNED_PATTERNS = [
     "sudo rm", "mkfs", "dd if=", "> /dev/",
     ":(){ :|:& };:",  # fork bomb
 ]
+_REAL_COMPUTER_COMMAND_PATTERNS = [
+    re.compile(r"(^|\s)git\s+clone(\s|$)", re.IGNORECASE),
+    re.compile(r"(^|\s)brew\s+install(\s|$)", re.IGNORECASE),
+    re.compile(r"(^|\s)(npm|pnpm|bun)\s+.*(?:\s|^)(-g|--global)(\s|$)", re.IGNORECASE),
+    re.compile(r"(^|\s)yarn\s+global\s+add(\s|$)", re.IGNORECASE),
+    re.compile(r"(^|\s)(pip|pip3|pipx)\s+install(\s|$)", re.IGNORECASE),
+    re.compile(r"(^|\s)uv\s+(tool\s+install|pip\s+install)(\s|$)", re.IGNORECASE),
+    re.compile(r"(^|\s)cargo\s+install(\s|$)", re.IGNORECASE),
+    re.compile(r"(^|\s)go\s+install(\s|$)", re.IGNORECASE),
+    re.compile(r"(^|\s)gem\s+install(\s|$)", re.IGNORECASE),
+    re.compile(r"(^|\s)(npm|pnpm|bun)\s+(create|dlx)(\s|$)", re.IGNORECASE),
+]
+_REAL_COMPUTER_PATH_PREFIXES = (
+    "~",
+    "/Users/",
+    "/Applications/",
+    "/Applications",
+    "/usr/local/",
+    "/opt/homebrew/",
+    "/Library/",
+)
 
 
 @dataclass
@@ -225,6 +247,78 @@ def _get_setting_secret(settings: Settings | None, field_name: str) -> str | Non
         return _clean_optional_string(decrypt_secret(getattr(settings, field_name, None)))
     except ValueError as exc:
         raise HTTPException(status_code=500, detail=f"Stored secret {field_name} is unreadable") from exc
+
+
+def _is_real_computer_command(command: str | None) -> bool:
+    normalized = _clean_optional_string(command)
+    if not normalized:
+        return False
+    return any(pattern.search(normalized) for pattern in _REAL_COMPUTER_COMMAND_PATTERNS)
+
+
+def _looks_like_real_computer_path(path_value: str | None) -> bool:
+    normalized = _clean_optional_string(path_value)
+    if not normalized:
+        return False
+
+    if normalized.startswith(_REAL_COMPUTER_PATH_PREFIXES):
+        return True
+
+    if normalized.startswith("/"):
+        candidate = Path(os.path.expanduser(normalized))
+        try:
+            resolved = candidate.resolve(strict=False)
+        except OSError:
+            return True
+        allowed_roots = []
+        try:
+            from paths import DATA_ROOT
+
+            allowed_roots.append(DATA_ROOT.resolve())
+        except Exception:
+            allowed_roots = []
+        allowed_roots.append(Path("/tmp").resolve())
+        return not any(str(resolved).startswith(str(root)) for root in allowed_roots)
+
+    return False
+
+
+def _sandbox_command_requires_real_computer(action: str, arguments: dict[str, Any]) -> str | None:
+    normalized_action = _clean_optional_string(action) or ""
+
+    if normalized_action == "git_clone":
+        return "克隆仓库应该直接落到用户电脑上的真实目录，不应该进入 exports 沙箱。"
+
+    if normalized_action == "run_command":
+        if _is_real_computer_command(arguments.get("command")):
+            return "软件安装、全局安装或项目初始化应该在用户电脑上执行，不应该进入 exports 沙箱。"
+
+    if normalized_action == "batch":
+        operations = arguments.get("operations") or []
+        for operation in operations:
+            if not isinstance(operation, dict):
+                continue
+            nested_action = _clean_optional_string(operation.get("action")) or ""
+            nested_reason = _sandbox_command_requires_real_computer(nested_action, operation)
+            if nested_reason:
+                return nested_reason
+
+    for candidate in (
+        arguments.get("path"),
+        arguments.get("output_filename"),
+    ):
+        if _looks_like_real_computer_path(candidate):
+            return "用户指定了真实电脑目录，不能继续在 exports 沙箱里执行。"
+
+    return None
+
+
+def _tool_call_signature(tool_name: str, arguments: dict[str, Any]) -> str:
+    try:
+        serialized_arguments = json.dumps(arguments or {}, ensure_ascii=False, sort_keys=True, default=str)
+    except TypeError:
+        serialized_arguments = str(arguments)
+    return f"{tool_name}:{serialized_arguments}"
 
 
 def _resolve_ai_config(settings: Settings | None) -> dict[str, str]:
@@ -1087,7 +1181,8 @@ def _assistant_agent_system_prompt(agent_permissions: list[str], memories: list[
         "parse_content": "触发内容解析",
         "sync_obsidian": "触发同步到 Obsidian",
         "sync_notion": "触发同步到 Notion",
-        "execute_commands": "执行沙箱命令（克隆仓库、下载文件、打包等）",
+        "execute_commands": "执行沙箱命令（仅限 exports 临时区）",
+        "run_computer_commands": "在用户电脑上执行系统命令（需逐条批准）",
         "web_search": "联网搜索外部信息",
     }
     readable_permissions = "、".join(permission_lines[key] for key in agent_permissions if key in permission_lines)
@@ -1162,15 +1257,22 @@ def _assistant_agent_system_prompt(agent_permissions: list[str], memories: list[
         "\n"
         "【重要：了解外部项目/网页】\n"
         "当用户要求你'去看看''去读一下''了解一下'某个外部项目、GitHub 仓库或网页时：\n"
-        "1. 必须使用 web_search 搜索相关信息，而不是用 execute_sandbox_command 的 git_clone 把项目克隆到本地。\n"
+        "1. 必须使用 web_search 搜索相关信息，而不是把项目下载到本地。\n"
         "2. 克隆仓库会占用用户磁盘空间，用户只是想了解项目内容，不是要下载代码。\n"
-        "3. 只有当用户明确要求'下载''克隆''clone'到本地时，才使用 git_clone，且必须先征得用户同意。\n"
+        "3. 只有当用户明确要求'下载''克隆''clone'到本地时，才允许执行本机命令，且必须先征得用户同意。\n"
         "\n"
-        "【重要：沙盒命令中的下载操作】\n"
-        "使用 execute_sandbox_command 的 git_clone 或 download_file 时，必须先向用户确认：\n"
-        "- 告诉用户你要下载什么、大概占用多少空间\n"
-        "- 等用户同意后再执行\n"
-        "- 绝对不要未经用户同意就下载文件或克隆仓库到本地\n"
+        "【重要：安装到电脑 / 全局安装 / 本地项目配置】\n"
+        "当用户要你'装到电脑里''全局安装''brew 安装''npm -g''pipx install''clone 到本地''放到 ~/Projects''配置 GitHub 项目'时：\n"
+        "1. 必须使用 run_computer_command，不要使用 execute_sandbox_command。\n"
+        "2. execute_sandbox_command 只适合 exports/ 目录下的临时文件，不适合软件安装、全局依赖、仓库克隆、项目初始化、PATH 配置。\n"
+        "3. 如果用户没指定目录，run_computer_command 的 working_directory 默认用用户主目录，不要擅自改成 exports/ 或数据目录。\n"
+        "4. 如果当前没有开放系统命令权限，不要退回沙箱硬做，直接告诉用户去设置里开启“允许系统命令（需逐条批准）”。\n"
+        "\n"
+        "【重要：任何下载到电脑的动作都要先批准】\n"
+        "使用 run_computer_command 下载文件、克隆仓库或安装软件时，必须先向用户确认：\n"
+        "- 告诉用户你要下载或安装什么、大概会影响哪里\n"
+        "- 等用户批准后再执行\n"
+        "- 绝对不要未经用户批准就下载文件、克隆仓库或安装软件\n"
         "\n"
         "【重要：导出/打包/下载请求】\n"
         "当用户要求'打包''导出''下载''整理成文档'内容时：\n"
@@ -3001,7 +3103,9 @@ def _build_agent_tools(agent_permissions: list[str]) -> list[dict[str, Any]]:
                         "IMPORTANT: Use 'batch' action with 'operations' array to run multiple commands at once "
                         "instead of calling this tool multiple times — this is MUCH faster. "
                         "NOTE: This sandbox is restricted to the exports/ directory. "
-                        "If the run_computer_command tool is available, prefer it for git clone, software installation, "
+                        "NEVER use this tool for software installation, global package installs, git clone to the user's computer, "
+                        "or project setup that should live outside exports/. "
+                        "If the run_computer_command tool is available, use that instead for git clone, software installation, "
                         "project setup, and any task where the user wants files in a specific location on their computer "
                         "(e.g. home directory, ~/Projects, etc). Only use this sandbox for temporary/disposable operations."
                     ),
@@ -3043,8 +3147,8 @@ def _build_agent_tools(agent_permissions: list[str]) -> list[dict[str, Any]]:
                     "name": "run_computer_command",
                     "description": (
                         "Run a command on the user's computer. This requires explicit user approval before execution. "
-                        "PREFERRED over execute_sandbox_command for: git clone, software installation (brew/pip/npm), "
-                        "project setup, running scripts, and any task where files should be in a real location "
+                        "ALWAYS use this for git clone to local machine, software installation (brew/pip/pipx/npm/pnpm/yarn), "
+                        "global package installs, GitHub project setup, running scripts, and any task where files should be in a real location "
                         "on the user's computer (not the sandbox exports/ directory). "
                         "The user will see the exact command and must click 'Allow' before it runs. "
                         "Always provide a clear description of what the command does and why. "
@@ -4051,6 +4155,21 @@ async def _execute_agent_tool(
         from services.sandbox_executor import execute_sandbox_action, SandboxError
 
         action = _clean_optional_string(arguments.get("action")) or ""
+        redirect_reason = _sandbox_command_requires_real_computer(action, arguments)
+        if redirect_reason:
+            if "run_computer_commands" in agent_permissions:
+                message = (
+                    f"{redirect_reason} 请改用 run_computer_command，"
+                    "并把 working_directory 设为用户真正想要的目录；如果用户没指定目录，默认用主目录。"
+                )
+                result = {"status": "error", "message": message}
+                return result, AiToolEventResponse(name=tool_name, status="failed", summary="本机安装/克隆任务不能走沙箱，请改用系统命令"), [], []
+            message = (
+                f"{redirect_reason} 当前没有开放系统命令权限。"
+                "不要继续往 exports 沙箱下载或安装，请直接提示用户到设置里开启“允许系统命令（需逐条批准）”。"
+            )
+            result = {"status": "error", "message": message}
+            return result, AiToolEventResponse(name=tool_name, status="failed", summary="缺少系统命令权限，不能在沙箱里替代执行"), [], []
 
         # Route git_clone and download_file through approval system
         _SANDBOX_APPROVAL_ACTIONS = {"git_clone", "download_file"}
@@ -4127,7 +4246,7 @@ async def _execute_agent_tool(
 
         command = _clean_optional_string(arguments.get("command")) or ""
         description = _clean_optional_string(arguments.get("description")) or command
-        working_directory = _clean_optional_string(arguments.get("working_directory"))
+        working_directory = _clean_optional_string(arguments.get("working_directory")) or os.path.expanduser("~")
 
         if not command:
             result = {"status": "error", "message": "command is required"}
@@ -4383,7 +4502,7 @@ async def _run_plan_and_execute(
 
     # --- Phase 2: Execute all planned tools ---
     execution_results: list[dict[str, Any]] = []
-    for call in planned_calls[:_AGENT_TOOL_STEP_LIMIT]:
+    for call in planned_calls:
         tool_name = _clean_optional_string(call.get("name")) or ""
         arguments = call.get("arguments") or {}
 
@@ -4516,7 +4635,11 @@ async def _run_agent_loop(
     _tool_call_counts: dict[str, int] = {}  # 每个工具的调用计数
     _WEB_SEARCH_MAX_CALLS = 3  # web_search 最多调用次数
 
-    for _ in range(_AGENT_TOOL_STEP_LIMIT):
+    last_tool_signature: str | None = None
+    repeated_tool_call_count = 0
+    force_finalize_reason: str | None = None
+
+    while True:
         try:
             payload = await create_chat_completion(
                 api_key=ai_config["api_key"],
@@ -4595,15 +4718,39 @@ async def _run_agent_loop(
                 ranked_notes: list[tuple[KnowledgeBaseNote, float]] = []
                 changed_items: list[dict[str, Any]] = []
             else:
-                result, event, ranked_notes, changed_items = await _execute_agent_tool(
-                    tool_name=tool_name,
-                    arguments=arguments,
-                    db=db,
-                    user_id=user_id,
-                    snapshot=snapshot,
-                    agent_permissions=agent_permissions,
-                    ai_config=ai_config,
-                )
+                tool_signature = _tool_call_signature(tool_name, arguments)
+                if tool_signature == last_tool_signature:
+                    repeated_tool_call_count += 1
+                else:
+                    last_tool_signature = tool_signature
+                    repeated_tool_call_count = 1
+
+                if repeated_tool_call_count > _AGENT_TOOL_REPEAT_LIMIT:
+                    result = {
+                        "status": "error",
+                        "message": (
+                            "检测到 agent 连续重复调用同一个工具且参数完全相同。"
+                            "为避免死循环，停止继续执行重复操作，请基于已有结果给出下一步结论。"
+                        ),
+                    }
+                    event = AiToolEventResponse(
+                        name=tool_name,
+                        status="failed",
+                        summary="检测到重复工具调用，已停止继续重复执行",
+                    )
+                    ranked_notes = []
+                    changed_items = []
+                    force_finalize_reason = "检测到重复工具调用死循环"
+                else:
+                    result, event, ranked_notes, changed_items = await _execute_agent_tool(
+                        tool_name=tool_name,
+                        arguments=arguments,
+                        db=db,
+                        user_id=user_id,
+                        snapshot=snapshot,
+                        agent_permissions=agent_permissions,
+                        ai_config=ai_config,
+                    )
             tool_events.append(event)
             _append_unique_ranked_notes(collected_notes, ranked_notes)
             _append_unique_updated_items(updated_items, changed_items)
@@ -4637,10 +4784,19 @@ async def _run_agent_loop(
                     ),
                 )
 
+            if force_finalize_reason:
+                break
+
+        if force_finalize_reason:
+            break
+
     model_messages.append(
         {
             "role": "system",
-            "content": "停止继续调用工具。现在基于已有工具结果，给出最终简洁回答。",
+            "content": (
+                f"{force_finalize_reason}。"
+                "停止继续调用工具。现在基于已有工具结果，给出最终简洁回答。"
+            ) if force_finalize_reason else "停止继续调用工具。现在基于已有工具结果，给出最终简洁回答。",
         }
     )
     try:

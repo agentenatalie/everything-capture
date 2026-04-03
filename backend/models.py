@@ -164,7 +164,7 @@ class Settings(Base):
     ai_agent_can_sync_notion = Column(Boolean, nullable=False, default=False)
     ai_agent_can_execute_commands = Column(Boolean, nullable=False, default=False)
     ai_agent_can_web_search = Column(Boolean, nullable=False, default=True)
-    ai_agent_can_run_computer_commands = Column(Boolean, nullable=False, default=False)
+    ai_agent_can_run_computer_commands = Column(Boolean, nullable=False, default=True)
     auto_sync_target = Column(String, default="none") # "none", "notion", "obsidian", "both"
     ai_auto_tag_enabled = Column(Boolean, nullable=False, default=False)
 
@@ -276,4 +276,3 @@ class AiMemory(Base):
     updated_at = Column(DateTime, default=datetime.datetime.utcnow)
 
     user = relationship("User")
-

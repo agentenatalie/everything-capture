@@ -2459,6 +2459,38 @@
             return false;
         }
 
+        function isEditableLibraryEscapeTarget(element) {
+            if (!element) return false;
+            if (element === filterInput || element === platformFilter || element === tagFilter) return false;
+            if (element.isContentEditable) return true;
+            const tagName = String(element.tagName || '').toLowerCase();
+            return tagName === 'input' || tagName === 'textarea' || tagName === 'select';
+        }
+
+        function clearActiveLibraryFilters() {
+            let changed = false;
+            if (filterInput && filterInput.value.trim()) {
+                filterInput.value = '';
+                filterInput.blur();
+                changed = true;
+            }
+            if (platformFilter && platformFilter.value !== 'all') {
+                platformFilter.value = 'all';
+                changed = true;
+            }
+            if (tagFilter && (tagFilter.value || currentTagId)) {
+                tagFilter.value = '';
+                currentTagId = null;
+                changed = true;
+            }
+            if (!changed) return false;
+            if (typeof syncToolbarFilterLabels === 'function') syncToolbarFilterLabels();
+            if (typeof updateCommandPaletteState === 'function') updateCommandPaletteState();
+            if (typeof renderFolderNavigation === 'function') renderFolderNavigation();
+            fetchItems();
+            return true;
+        }
+
         document.addEventListener('keydown', (e) => {
             if (e.key !== 'Escape') return;
             if (closeTopmostPopupOnEscape()) {
@@ -2466,11 +2498,10 @@
                 e.stopImmediatePropagation();
                 return;
             }
-            // No popup open — clear search filter if active
-            if (filterInput && filterInput.value.trim()) {
-                filterInput.value = '';
-                filterInput.blur();
-                fetchItems();
+            if (isEditableLibraryEscapeTarget(document.activeElement)) {
+                return;
+            }
+            if (clearActiveLibraryFilters()) {
                 e.preventDefault();
                 e.stopImmediatePropagation();
                 return;

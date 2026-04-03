@@ -1120,6 +1120,42 @@ def _build_full_items_index(db: Session, user_id: str) -> tuple[str, list[Knowle
     return "\n".join(lines), indexed
 
 
+_CHAT_ITEMS_DIRECTORY_LIMIT = 200
+
+
+def _build_chat_items_directory(db: Session, user_id: str) -> str:
+    """Build a compact chronological directory of all user items for chat mode awareness.
+
+    Uses plain numbered format (no [n] brackets) to avoid conflicts with RAG citation
+    numbering. This gives the AI a full picture of what's in the library so it can
+    correctly answer listing/overview questions like "list my recent items".
+    """
+    items_snapshot = _build_items_only_snapshot(db, user_id)
+    if not items_snapshot.notes:
+        return ""
+
+    lines: list[str] = []
+    for i, note in enumerate(items_snapshot.notes[:_CHAT_ITEMS_DIRECTORY_LIMIT]):
+        title = (note.title or "").strip()[:80]
+        if not title:
+            continue
+        date_str = note.created_at.strftime("%Y-%m-%d") if note.created_at else ""
+        folder = (note.folder or "").strip()
+        parts = [f"{i + 1}."]
+        if date_str:
+            parts.append(f"({date_str})")
+        parts.append(title)
+        if folder:
+            parts.append(f"[{folder}]")
+        lines.append(" ".join(parts))
+
+    total = items_snapshot.note_count
+    header = f"收藏库完整目录（共 {total} 条，按保存时间倒序）："
+    if total > _CHAT_ITEMS_DIRECTORY_LIMIT:
+        header += f"（仅显示最近 {_CHAT_ITEMS_DIRECTORY_LIMIT} 条）"
+    return header + "\n" + "\n".join(lines)
+
+
 def _semantic_chunk_signature(snapshot: KnowledgeBaseSnapshot) -> str:
     digest = hashlib.sha1()
     for note in snapshot.notes:
@@ -4268,6 +4304,19 @@ async def ask_ai(request: AiAskRequest, db: Session = Depends(get_db)):
             insufficient_context=True,
         )
 
+    items_directory = _build_chat_items_directory(db, user_id)
+    user_content_parts = [f"用户问题：{question}\n"]
+    if items_directory:
+        user_content_parts.append(
+            "下面是用户收藏库的完整目录，供你了解全貌。"
+            "当用户问概览性问题时以此为准。\n\n"
+            f"{items_directory}\n"
+        )
+    user_content_parts.append(
+        "下面是从用户收藏库中检索出的相关内容（含详细正文）。"
+        "回答具体问题时请基于这些详细内容，引用时使用 [编号] 格式。若信息不够，请直接说明缺口。\n\n"
+        f"{rag_context.context_text}"
+    )
     try:
         answer = await chat_completion(
             api_key=ai_config["api_key"],
@@ -4277,13 +4326,7 @@ async def ask_ai(request: AiAskRequest, db: Session = Depends(get_db)):
                 {"role": "system", "content": _ask_ai_system_prompt()},
                 {
                     "role": "user",
-                    "content": (
-                        f"用户问题：{question}\n\n"
-                        "下面是从用户收藏库中检索出的相关内容。"
-                        "请只基于这些证据回答。"
-                        "引用时使用 [编号] 格式。若信息不够，请直接说明缺口。\n\n"
-                        f"{rag_context.context_text}"
-                    ),
+                    "content": "\n".join(user_content_parts),
                 },
             ],
         )
@@ -4343,6 +4386,7 @@ async def assistant(request: AiAssistantRequest, db: Session = Depends(get_db)):
     )
 
     current_item_context = _build_current_item_context(current_item, current_item_note, current_page_notes) if current_item is not None else ""
+    items_directory = _build_chat_items_directory(db, user_id)
     system_message = _compose_system_message(
         _assistant_chat_system_prompt(),
         (
@@ -4350,9 +4394,13 @@ async def assistant(request: AiAssistantRequest, db: Session = Depends(get_db)):
             f"{current_item_context}"
         ) if current_item_context else "",
         (
-            "下面是从用户收藏库中检索出的相关内容。"
-            "请把它们当作辅助证据来回答。"
-            "引用时使用 [编号] 格式。\n\n"
+            "下面是用户收藏库的完整目录，供你了解全貌。"
+            "当用户问'最近保存了什么''列出我的内容'等概览性问题时，以此为准。\n\n"
+            f"{items_directory}"
+        ) if items_directory else "",
+        (
+            "下面是从用户收藏库中检索出的相关内容（含详细正文）。"
+            "回答具体问题时请基于这些详细内容，引用时使用 [编号] 格式。\n\n"
             f"{rag_context.context_text}"
         ) if rag_context.context_text else "",
     )
@@ -4504,6 +4552,7 @@ async def assistant_stream(request: AiAssistantRequest, db: Session = Depends(ge
 
         # Build context and stream the answer
         current_item_context = _build_current_item_context(current_item, current_item_note, current_page_notes) if current_item is not None else ""
+        items_directory = _build_chat_items_directory(db, user_id)
         system_message = _compose_system_message(
             _assistant_chat_system_prompt(),
             (
@@ -4511,9 +4560,13 @@ async def assistant_stream(request: AiAssistantRequest, db: Session = Depends(ge
                 f"{current_item_context}"
             ) if current_item_context else "",
             (
-                "下面是从用户收藏库中检索出的相关内容。"
-                "请把它们当作辅助证据来回答。"
-                "引用时使用 [编号] 格式。\n\n"
+                "下面是用户收藏库的完整目录，供你了解全貌。"
+                "当用户问'最近保存了什么''列出我的内容'等概览性问题时，以此为准。\n\n"
+                f"{items_directory}"
+            ) if items_directory else "",
+            (
+                "下面是从用户收藏库中检索出的相关内容（含详细正文）。"
+                "回答具体问题时请基于这些详细内容，引用时使用 [编号] 格式。\n\n"
                 f"{rag_context.context_text}"
             ) if rag_context.context_text else "",
         )

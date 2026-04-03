@@ -22,7 +22,7 @@
 
 ## 为什么做这个
 
-大多数「稍后阅读」服务把你的数据存在他们的服务器上。Everything Capture 把**所有内容、媒体和元数据存在你本机的 SQLite 数据库**里。可选的云端采集服务允许手机提交链接，但真正的内容提取始终在本地运行。
+大多数「稍后阅读」服务把你的数据存在他们的服务器上。Everything Capture 把**所有内容、媒体和元数据存在你本机的 SQLite 数据库**里。AI 助手默认直接读取这份本地 `app.db` 条目库本身；Obsidian 只是一个可选同步 / 导出目标，不是默认检索源。可选的云端采集服务允许手机提交链接，但真正的内容提取始终在本地运行。
 
 ## 功能
 
@@ -36,7 +36,7 @@
 | 🤖 | **AI 助手** | 对话与 Agent 模式，知识库问答、内容分析、自动整理 |
 | 🎙️ | **本地语音转录** | 设备端 mlx-whisper 语音转文字（Apple Silicon） |
 | 👁️ | **OCR 识别** | macOS Vision 框架提取图片文字 + 识别二维码 |
-| 📤 | **同步到 Notion/Obsidian** | 推送到你已有的知识管理工具 |
+| 📤 | **可选同步 / 导出** | 推送到 Notion 或 Obsidian；它们是可选输出，不是 AI 的主检索来源 |
 | 📱 | **云端收件箱** | 可选 — 自行部署轻量采集服务，手机/快捷指令投递链接 |
 | 🖥️ | **桌面应用** | *开发中* — macOS .app 打包，支持代码签名和公证 |
 
@@ -127,6 +127,8 @@ everything-capture/
 
 可通过环境变量覆盖：`DATA_DIR`、`SQLITE_PATH`、`MEDIA_DIR`、`EXPORTS_DIR`。
 
+其中本地 `app.db` 是 AI 检索与引用的主知识源。
+
 ## 文件夹层级
 
 - 文件夹支持多层嵌套。
@@ -162,7 +164,7 @@ echo 'CAPTURE_SERVICE_URL="https://your-deployment.vercel.app"' > backend/.local
 | 集成 | 用途 |
 |---|---|
 | **Notion** | 同步条目到 Notion 数据库（OAuth 授权） |
-| **Obsidian** | 通过 Obsidian REST API 插件导出 Markdown |
+| **Obsidian** | 通过 Obsidian REST API 插件做可选 Markdown 导出 |
 | **AI**（OpenAI 兼容） | 知识库问答、内容分析、自动整理 |
 
 所有 API 密钥使用 Fernet 加密存储。
@@ -173,6 +175,8 @@ echo 'CAPTURE_SERVICE_URL="https://your-deployment.vercel.app"' > backend/.local
 
 - **对话模式** — 知识库上下文问答、内容分析
 - **Agent 模式** — 工具调用：搜索、文件夹管理、同步、导出、沙盒执行、系统命令
+
+知识源说明：助手默认读取 Everything Capture 自己的本地 `app.db` 条目与解析文本。Obsidian 同步只是可选输出，不属于默认检索链路。
 
 **阅读器侧栏 AI** 自动使用 Agent 模式 — 根据你的请求自动判断是否需要调用工具，无需手动切换模式。
 

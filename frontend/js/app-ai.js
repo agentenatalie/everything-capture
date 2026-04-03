@@ -415,7 +415,6 @@
                 citations: Array.isArray(entry.citations) ? entry.citations : [],
                 toolEvents: Array.isArray(entry.tool_events) ? entry.tool_events : (Array.isArray(entry.toolEvents) ? entry.toolEvents : []),
                 insufficientContext: Boolean(entry.insufficient_context ?? entry.insufficientContext),
-                knowledgeBasePath: entry.knowledge_base_path || entry.knowledgeBasePath || '',
                 noteCount: Number(entry.note_count ?? entry.noteCount ?? 0),
                 isError: Boolean(entry.is_error ?? entry.isError),
                 createdAt: entry.created_at || entry.createdAt || '',
@@ -435,7 +434,6 @@
                         citations: Array.isArray(entry.citations) ? entry.citations : [],
                         tool_events: Array.isArray(entry.toolEvents) ? entry.toolEvents : [],
                         insufficient_context: Boolean(entry.insufficientContext),
-                        knowledge_base_path: entry.knowledgeBasePath || '',
                         note_count: Number(entry.noteCount || 0),
                         is_error: Boolean(entry.isError),
                         created_at: entry.createdAt || new Date().toISOString(),
@@ -1457,7 +1455,6 @@
                         citations: Array.isArray(followUp.citations) ? followUp.citations : [],
                         toolEvents: Array.isArray(followUp.tool_events) ? followUp.tool_events : [],
                         insufficientContext: Boolean(followUp.insufficient_context),
-                        knowledgeBasePath: followUp.knowledge_base_path || '',
                         noteCount: Number(followUp.note_count || 0),
                         createdAt: new Date().toISOString(),
                     });
@@ -1484,13 +1481,7 @@
         }
 
         function buildAiMetaMarkup(entry) {
-            const metaBits = [];
-            if (entry.knowledgeBasePath) {
-                metaBits.push(`知识库：${escapeHtml(entry.knowledgeBasePath)}`);
-            }
-            return metaBits.length
-                ? `<div class="ai-answer-meta">${metaBits.join(' · ')}</div>`
-                : '';
+            return '';
         }
 
         function buildAiMessageActionsMarkup(options = {}) {
@@ -2173,7 +2164,6 @@
                         citations: Array.isArray(data.citations) ? data.citations : [],
                         toolEvents: Array.isArray(data.tool_events) ? data.tool_events : [],
                         insufficientContext: Boolean(data.insufficient_context),
-                        knowledgeBasePath: data.knowledge_base_path || '',
                         noteCount: Number(data.note_count || 0),
                         createdAt: new Date().toISOString(),
                     };
@@ -2685,7 +2675,6 @@
                     citations: Array.isArray(data.citations) ? data.citations : [],
                     toolEvents: Array.isArray(data.tool_events) ? data.tool_events : [],
                     insufficientContext: Boolean(data.insufficient_context),
-                    knowledgeBasePath: data.knowledge_base_path || '',
                     noteCount: Number(data.note_count || 0),
                     createdAt: new Date().toISOString(),
                 });
@@ -2778,7 +2767,6 @@
                         citations: Array.isArray(followUp.citations) ? followUp.citations : [],
                         toolEvents: Array.isArray(followUp.tool_events) ? followUp.tool_events : [],
                         insufficientContext: Boolean(followUp.insufficient_context),
-                        knowledgeBasePath: followUp.knowledge_base_path || '',
                         noteCount: Number(followUp.note_count || 0),
                         createdAt: new Date().toISOString(),
                     });

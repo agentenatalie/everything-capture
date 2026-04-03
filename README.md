@@ -22,7 +22,7 @@ Capture URLs, articles, social media, videos, and text from any device — extra
 
 ## Why
 
-Most "read-it-later" services store your data on their servers. Everything Capture keeps **all content, media, and metadata in a local SQLite database** on your machine. An optional cloud capture service lets your phone queue items, but the heavy extraction always runs locally.
+Most "read-it-later" services store your data on their servers. Everything Capture keeps **all content, media, and metadata in a local SQLite database** on your machine. The AI assistant reads from that local `app.db` item library itself; Obsidian is only an optional sync/export target, not the assistant's default retrieval source. An optional cloud capture service lets your phone queue items, but the heavy extraction always runs locally.
 
 ## Features
 
@@ -36,7 +36,7 @@ Most "read-it-later" services store your data on their servers. Everything Captu
 | 🤖 | **AI assistant** | Chat & agent mode with knowledge base Q&A, content analysis, auto-organization |
 | 🎙️ | **Local transcription** | On-device speech-to-text via mlx-whisper (Apple Silicon) |
 | 👁️ | **OCR** | Image text extraction + QR code detection via macOS Vision framework |
-| 📤 | **Sync to Notion/Obsidian** | Push items to your existing knowledge management tools |
+| 📤 | **Optional sync/export** | Push items to Notion or Obsidian; these are optional outputs, not the primary AI retrieval source |
 | 📱 | **Cloud inbox** | Optional — deploy a lightweight capture service for mobile/Shortcuts submissions (self-hosted) |
 | 🖥️ | **Desktop app** | *Coming soon* — macOS .app bundle with PyInstaller, code-signed and notarized |
 
@@ -127,6 +127,8 @@ All data lives **outside** the repo in a sibling directory:
 
 Override with env vars: `DATA_DIR`, `SQLITE_PATH`, `MEDIA_DIR`, `EXPORTS_DIR`.
 
+The local `app.db` in this data directory is the primary knowledge source for AI retrieval and citations.
+
 ## Folder Hierarchy
 
 - Folders support multi-level nesting.
@@ -162,7 +164,7 @@ Configure through the web UI settings — no config files needed:
 | Integration | Purpose |
 |---|---|
 | **Notion** | Sync items to a Notion database (OAuth) |
-| **Obsidian** | Export as Markdown via Obsidian REST API plugin |
+| **Obsidian** | Optional Markdown export via Obsidian REST API plugin |
 | **AI** (OpenAI-compatible) | Knowledge base Q&A, content analysis, auto-organization |
 
 All API keys are encrypted at rest with Fernet.
@@ -173,6 +175,8 @@ The built-in AI assistant supports two modes:
 
 - **Chat mode** — Conversational Q&A with knowledge base context, content analysis
 - **Agent mode** — Tool-calling with search, folder management, sync, export, sandbox execution, and system commands
+
+Knowledge source: the assistant reads Everything Capture's own local `app.db` item records and extracted text. Obsidian sync is optional and not part of the default retrieval pipeline.
 
 The **Reader sidebar AI** uses agent mode automatically — it decides whether to use tools based on your request, no manual mode switching needed.
 

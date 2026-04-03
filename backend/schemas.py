@@ -141,8 +141,6 @@ class SettingsResponse(BaseModel):
     obsidian_missing_fields: list[str] = Field(default_factory=list)
     ai_ready: bool = False
     ai_missing_fields: list[str] = Field(default_factory=list)
-    ai_knowledge_base_path: Optional[str] = None
-    ai_knowledge_base_available: bool = False
 
     class Config:
         from_attributes = True
@@ -233,7 +231,6 @@ class AiAskResponse(BaseModel):
     question: str
     answer: str
     citations: list[AiCitationResponse] = Field(default_factory=list)
-    knowledge_base_path: Optional[str] = None
     note_count: int = 0
     insufficient_context: bool = False
 
@@ -248,13 +245,11 @@ class AiItemAnalysisResponse(BaseModel):
     themes: list[str] = Field(default_factory=list)
     thinking_questions: list[str] = Field(default_factory=list)
     citations: list[AiCitationResponse] = Field(default_factory=list)
-    knowledge_base_path: Optional[str] = None
 
 
 class AiRelatedNotesResponse(BaseModel):
     item_id: str
     related: list[AiCitationResponse] = Field(default_factory=list)
-    knowledge_base_path: Optional[str] = None
     note_count: int = 0
 
 
@@ -290,7 +285,6 @@ class AiAssistantResponse(BaseModel):
     message: str
     citations: list[AiCitationResponse] = Field(default_factory=list)
     tool_events: list[AiToolEventResponse] = Field(default_factory=list)
-    knowledge_base_path: Optional[str] = None
     note_count: int = 0
     insufficient_context: bool = False
     agent_permissions: list[str] = Field(default_factory=list)
@@ -315,7 +309,6 @@ class AiConversationStoredMessage(BaseModel):
     mode: str = "chat"
     citations: list[AiCitationResponse] = Field(default_factory=list)
     tool_events: list[AiToolEventResponse] = Field(default_factory=list)
-    knowledge_base_path: Optional[str] = None
     note_count: int = 0
     insufficient_context: bool = False
     is_error: bool = False

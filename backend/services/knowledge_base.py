@@ -1,3 +1,10 @@
+"""Shared ranking utilities for the AI knowledge base.
+
+Live AI retrieval indexes database `Item` snapshots from Everything Capture's own
+`app.db`. The Markdown-note discovery/parsing helpers in this module are legacy
+compatibility utilities and are not the default runtime retrieval source.
+"""
+
 from __future__ import annotations
 
 import json
@@ -331,11 +338,6 @@ def discover_knowledge_base_root() -> Path | None:
             return vault_root
 
     return vault_roots[0]
-
-
-def detect_knowledge_base_path() -> str | None:
-    root = discover_knowledge_base_root()
-    return root.as_posix() if root else None
 
 
 def _open_obsidian_vault_roots() -> list[Path]:

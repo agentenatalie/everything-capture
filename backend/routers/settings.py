@@ -18,7 +18,6 @@ from services.ai_defaults import (
     AI_MODEL_OPTIONS,
     coerce_bool,
 )
-from services.knowledge_base import detect_knowledge_base_path
 from schemas import (
     ComponentInstallTaskResponse,
     ComponentsCatalogResponse,
@@ -46,7 +45,6 @@ def _settings_bool(value: Optional[bool], default: bool) -> bool:
 
 
 def _build_settings_response(settings_obj: Optional[Settings], db: Session) -> SettingsResponse:
-    ai_knowledge_base_path = detect_knowledge_base_path()
     default_ai_base_url = clean_optional_string(AI_DEFAULT_BASE_URL)
     if not settings_obj:
         return SettingsResponse(
@@ -64,8 +62,6 @@ def _build_settings_response(settings_obj: Optional[Settings], db: Session) -> S
             ai_agent_can_web_search=AI_AGENT_DEFAULT_CAN_WEB_SEARCH,
             ai_agent_can_run_computer_commands=AI_AGENT_DEFAULT_CAN_RUN_COMPUTER_COMMANDS,
             ai_auto_tag_enabled=False,
-            ai_knowledge_base_path=ai_knowledge_base_path,
-            ai_knowledge_base_available=bool(ai_knowledge_base_path),
         )
 
     notion_api_token_saved = _has_configured_value(settings_obj.notion_api_token)
@@ -151,8 +147,6 @@ def _build_settings_response(settings_obj: Optional[Settings], db: Session) -> S
         obsidian_missing_fields=obsidian_missing_fields,
         ai_ready=len(ai_missing_fields) == 0,
         ai_missing_fields=ai_missing_fields,
-        ai_knowledge_base_path=ai_knowledge_base_path,
-        ai_knowledge_base_available=bool(ai_knowledge_base_path),
     )
 
 @router.get("", response_model=SettingsResponse)

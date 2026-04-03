@@ -1302,7 +1302,7 @@ async def _expand_search_queries(ai_config: dict[str, str], question: str) -> li
 
 
 # ---------------------------------------------------------------------------
-# Stage 2: Unified TF-IDF candidate retrieval (Obsidian notes + DB items)
+# Stage 2: TF-IDF candidate retrieval over database items
 # ---------------------------------------------------------------------------
 
 _CANDIDATE_POOL_SIZE = 30
@@ -1328,35 +1328,8 @@ def _item_to_virtual_note(item: Item) -> KnowledgeBaseNote:
     )
 
 
-def _build_unified_snapshot(
-    snapshot: KnowledgeBaseSnapshot,
-    db_items: list[Item] | None = None,
-) -> KnowledgeBaseSnapshot:
-    """Merge Obsidian notes with database items into one searchable snapshot."""
-    seen_item_ids: set[str] = set()
-    all_notes: list[KnowledgeBaseNote] = list(snapshot.notes)
-    for note in snapshot.notes:
-        if note.item_id:
-            seen_item_ids.add(note.item_id)
-
-    if db_items:
-        for item in db_items:
-            if item.id in seen_item_ids:
-                continue
-            virtual_note = _item_to_virtual_note(item)
-            virtual_note = prepare_note_for_similarity(virtual_note)
-            all_notes.append(virtual_note)
-            seen_item_ids.add(item.id)
-
-    return KnowledgeBaseSnapshot(
-        root_path=snapshot.root_path,
-        notes=all_notes,
-        loaded_at=snapshot.loaded_at,
-    )
-
-
 # ---------------------------------------------------------------------------
-# Cached items-only snapshot — avoids loading Obsidian + rebuilding every request
+# Cached DB-item snapshot
 # ---------------------------------------------------------------------------
 
 _ITEMS_SNAPSHOT_CACHE: dict[str, tuple[str, KnowledgeBaseSnapshot]] = {}
@@ -1374,7 +1347,7 @@ def _items_cache_signature(items: list[Item]) -> str:
 
 
 def _build_items_only_snapshot(db: Session, user_id: str) -> KnowledgeBaseSnapshot:
-    """Build a searchable snapshot from DB items only (no Obsidian), with caching."""
+    """Build a searchable snapshot from database items, with caching."""
     items = _load_all_user_items(db, user_id)
     sig = _items_cache_signature(items)
 
@@ -2362,7 +2335,6 @@ def _sanitize_saved_conversation_messages(messages: list[Any]) -> list[dict[str,
                 "mode": mode,
                 "citations": citations if isinstance(citations, list) else [],
                 "tool_events": tool_events if isinstance(tool_events, list) else [],
-                "knowledge_base_path": _clean_optional_string(payload.get("knowledge_base_path")),
                 "note_count": max(0, int(payload.get("note_count") or 0)),
                 "insufficient_context": bool(payload.get("insufficient_context")),
                 "is_error": bool(payload.get("is_error")),
@@ -4441,7 +4413,6 @@ async def _run_plan_and_execute(
                 message=result.get("description", "需要你的批准才能执行此命令。"),
                 citations=[],
                 tool_events=tool_events,
-                knowledge_base_path=None,
                 note_count=snapshot.note_count,
                 insufficient_context=False,
                 agent_permissions=agent_permissions,
@@ -4505,7 +4476,6 @@ async def _run_plan_and_execute(
             _filter_ranked_notes_by_citation_markers(final_text, collected_notes),
         ),
         tool_events=tool_events,
-        knowledge_base_path=None,
         note_count=snapshot.note_count,
         insufficient_context=False,
         agent_permissions=agent_permissions,
@@ -4575,7 +4545,6 @@ async def _run_agent_loop(
                     _filter_ranked_notes_by_citation_markers(final_message, collected_notes),
                 ),
                 tool_events=tool_events,
-                knowledge_base_path=None,
                 note_count=snapshot.note_count,
                 insufficient_context=False,
                 agent_permissions=agent_permissions,
@@ -4656,7 +4625,6 @@ async def _run_agent_loop(
                     message=result.get("description", "需要你的批准才能执行此命令。"),
                     citations=[],
                     tool_events=tool_events,
-                    knowledge_base_path=None,
                     note_count=snapshot.note_count,
                     insufficient_context=False,
                     agent_permissions=agent_permissions,
@@ -4695,7 +4663,6 @@ async def _run_agent_loop(
             _filter_ranked_notes_by_citation_markers(final_text, collected_notes),
         ),
         tool_events=tool_events,
-        knowledge_base_path=None,
         note_count=snapshot.note_count,
         insufficient_context=False,
         agent_permissions=agent_permissions,
@@ -4850,7 +4817,6 @@ async def ask_ai(request: AiAskRequest, db: Session = Depends(get_db)):
             question=question,
             answer="收藏库里没有找到任何内容。",
             citations=[],
-            knowledge_base_path=None,
             note_count=0,
             insufficient_context=True,
         )
@@ -4859,7 +4825,6 @@ async def ask_ai(request: AiAskRequest, db: Session = Depends(get_db)):
             question=question,
             answer="收藏库里没有找到足够相关的内容来可靠回答这个问题。",
             citations=[],
-            knowledge_base_path=None,
             note_count=rag_context.note_count,
             insufficient_context=True,
         )
@@ -4902,7 +4867,6 @@ async def ask_ai(request: AiAskRequest, db: Session = Depends(get_db)):
             user_id,
             citation_matches,
         ),
-        knowledge_base_path=None,
         note_count=rag_context.note_count,
         insufficient_context=False,
     )
@@ -4987,7 +4951,6 @@ async def assistant(request: AiAssistantRequest, db: Session = Depends(get_db)):
             citation_matches,
         ),
         tool_events=[],
-        knowledge_base_path=None,
         note_count=rag_context.note_count,
         insufficient_context=rag_context.insufficient_context,
         agent_permissions=_agent_permissions(settings),
@@ -5185,7 +5148,6 @@ def related_notes(item_id: str, limit: int = 5, db: Session = Depends(get_db)):
     return AiRelatedNotesResponse(
         item_id=item.id,
         related=_serialize_citations(db, user_id, ranked_related),
-        knowledge_base_path=None,
         note_count=snapshot.note_count,
     )
 
@@ -5432,7 +5394,6 @@ async def analyze_item(item_id: str, db: Session = Depends(get_db)):
         themes=_coerce_text_list(payload.get("themes")),
         thinking_questions=_coerce_text_list(payload.get("thinking_questions")),
         citations=_serialize_citations(db, user_id, deduped_citations),
-        knowledge_base_path=None,
     )
 
 

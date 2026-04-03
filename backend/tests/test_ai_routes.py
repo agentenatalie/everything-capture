@@ -1020,7 +1020,6 @@ class AiRouteTests(unittest.TestCase):
                     role="assistant",
                     content="这批内容主要在讨论 AI UI 生成之后，为什么还需要统一设计规范与后处理。",
                     note_count=2,
-                    knowledge_base_path="/tmp/Sources.base",
                 ),
             ],
         )

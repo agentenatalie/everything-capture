@@ -15,7 +15,7 @@
 - 视频下载
 - AI 处理
 - Notion / Obsidian 同步
-- 本地知识库写入
+- 本地 Everything Capture 主库写入
 
 ## 部署 `capture_service`
 
@@ -260,4 +260,3 @@ https://capture.example.com/
 
 - 外部数据库
 - 或者有持久磁盘的 SQLite 路径
-

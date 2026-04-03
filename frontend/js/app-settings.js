@@ -427,26 +427,11 @@
             setObsidianTargetHint(data);
         }
 
-        function setAiKnowledgeBaseHint(data) {
-            const hint = document.getElementById('aiKnowledgeBaseHint');
-            if (!hint) return;
-            const knowledgeBasePath = String(data?.ai_knowledge_base_path || '').trim();
-            if (knowledgeBasePath) {
-                hint.textContent = `知识库：${knowledgeBasePath}`;
-                hint.style.color = '#6b7280';
-                return;
-            }
-            hint.textContent = '未识别知识库目录';
-            hint.style.color = '#6b7280';
-        }
-
         function setAiStatus(data) {
             const status = document.getElementById('aiStatusText');
             if (!status) return;
 
-            setAiKnowledgeBaseHint(data);
-
-            if (data?.ai_ready && data?.ai_knowledge_base_available) {
+            if (data?.ai_ready) {
                 status.textContent = '已配置';
                 status.style.color = '#1f7a4d';
                 return;

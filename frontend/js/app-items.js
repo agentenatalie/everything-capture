@@ -1874,70 +1874,207 @@
             }
             const tagNames = item.tag_names || [];
             const pills = tagNames.map(n => `<span class="reader-tag-pill">${escapeHtml(n)}</span>`).join('');
-            const addBtn = `<button class="reader-tag-add" type="button" onclick="openReaderTagPicker('${item.id}')" title="管理标签">+</button>`;
+            const addBtn = `<button class="reader-tag-add" type="button" onclick="openReaderTagPicker('${item.id}')" title="管理标签" aria-label="管理标签"><svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true"><path d="M8 3v10M3 8h10" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg></button>`;
             container.innerHTML = pills + addBtn;
         }
 
         function openReaderTagPicker(itemId) {
             const item = getItemById(itemId);
             if (!item) return;
-            const existingTagIds = new Set(item.tag_ids || []);
-            const options = tagsData.map(t => {
-                const checked = existingTagIds.has(t.id) ? ' checked' : '';
-                return `<label class="tag-picker-row"><input type="checkbox" data-tag-id="${t.id}"${checked}/><span>${escapeHtml(t.name)}</span></label>`;
-            }).join('');
-            const html = `<div class="tag-picker-overlay" onclick="if(event.target===this)this.remove()">
-                <div class="tag-picker-panel">
-                    <div class="tag-picker-header">管理标签</div>
-                    <div class="tag-picker-list">${options || '<div style="padding:8px;color:#888;">暂无标签</div>'}</div>
-                    <div class="tag-picker-footer">
-                        <input type="text" class="tag-picker-new-input" placeholder="新建标签..." />
-                        <button type="button" class="tag-picker-save" onclick="saveReaderTags('${itemId}')">保存</button>
-                    </div>
-                </div>
-            </div>`;
-            document.body.insertAdjacentHTML('beforeend', html);
-            const input = document.querySelector('.tag-picker-new-input');
-            if (input) {
-                input.addEventListener('keydown', async (e) => {
-                    if (e.key !== 'Enter') return;
-                    const name = input.value.trim();
-                    if (!name) return;
-                    try {
-                        const res = await fetch('/api/tags', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name }) });
-                        if (res.ok) {
-                            const tag = await res.json();
-                            tagsData.push(tag);
-                            populateTagFilter();
-                            const list = document.querySelector('.tag-picker-list');
-                            if (list) list.insertAdjacentHTML('beforeend', `<label class="tag-picker-row"><input type="checkbox" data-tag-id="${tag.id}" checked/><span>${escapeHtml(tag.name)}</span></label>`);
-                            input.value = '';
-                        }
-                    } catch (err) { /* silent */ }
-                });
-            }
-        }
+            const existing = document.querySelector('.tag-picker-overlay');
+            if (existing) existing.remove();
 
-        async function saveReaderTags(itemId) {
-            const overlay = document.querySelector('.tag-picker-overlay');
-            if (!overlay) return;
-            const checked = overlay.querySelectorAll('input[data-tag-id]:checked');
-            const tagIds = Array.from(checked).map(el => el.dataset.tagId);
-            try {
-                const res = await fetch(`/api/items/${encodeURIComponent(itemId)}/tags`, {
-                    method: 'PATCH',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ tag_ids: tagIds }),
-                });
-                if (res.ok) {
+            const selectedIds = new Set(item.tag_ids || []);
+
+            const overlay = document.createElement('div');
+            overlay.className = 'tag-picker-overlay';
+            overlay.innerHTML = `
+                <div class="tag-picker-panel" role="dialog" aria-modal="true" aria-label="管理标签">
+                    <div class="tag-picker-header">
+                        <div class="tag-picker-headline">
+                            <div class="tag-picker-title">管理标签</div>
+                            <div class="tag-picker-hint">勾选已有标签或输入新名称回车创建</div>
+                        </div>
+                        <button type="button" class="tag-picker-close" aria-label="关闭">×</button>
+                    </div>
+                    <div class="tag-picker-body">
+                        <div class="tag-picker-commandbar">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                                <path d="M4 12h16"></path>
+                                <path d="M12 4v16"></path>
+                            </svg>
+                            <input type="text" class="tag-picker-input" placeholder="输入标签名，回车创建" />
+                            <button type="button" class="tag-picker-create-btn">新建</button>
+                        </div>
+                        <div class="tag-picker-section-title">现有标签</div>
+                        <div class="tag-picker-list"></div>
+                    </div>
+                    <div class="tag-picker-footer">
+                        <div class="tag-picker-status"></div>
+                        <div class="tag-picker-actions">
+                            <button type="button" class="tag-picker-clear">清空选择</button>
+                            <button type="button" class="tag-picker-save">完成</button>
+                        </div>
+                    </div>
+                </div>`;
+            document.body.appendChild(overlay);
+
+            const panel = overlay.querySelector('.tag-picker-panel');
+            const listEl = overlay.querySelector('.tag-picker-list');
+            const input = overlay.querySelector('.tag-picker-input');
+            const statusEl = overlay.querySelector('.tag-picker-status');
+            const createBtn = overlay.querySelector('.tag-picker-create-btn');
+            const saveBtn = overlay.querySelector('.tag-picker-save');
+            const clearBtn = overlay.querySelector('.tag-picker-clear');
+            const closeBtn = overlay.querySelector('.tag-picker-close');
+
+            function setStatus(text, isError = false) {
+                statusEl.textContent = text || '';
+                statusEl.classList.toggle('is-error', !!isError);
+            }
+            function updateStatus() {
+                if (statusEl.classList.contains('is-error')) return;
+                const n = selectedIds.size;
+                setStatus(n > 0 ? `已选择 ${n} 个标签` : '未选择标签');
+            }
+            function renderList() {
+                if (!tagsData.length) {
+                    listEl.innerHTML = '<div class="tag-picker-empty">暂无标签，输入名称创建</div>';
+                    return;
+                }
+                const sorted = [...tagsData].sort((a, b) => (a.name || '').localeCompare(b.name || '', 'zh'));
+                listEl.innerHTML = sorted.map(t => {
+                    const active = selectedIds.has(t.id);
+                    const count = t.item_count ? `<span class="tag-picker-option-meta">${t.item_count}</span>` : '';
+                    return `<button type="button" class="tag-picker-option${active ? ' active' : ''}" data-tag-id="${escapeHtml(t.id)}">
+                        <span class="tag-picker-option-label">${escapeHtml(t.name)}</span>
+                        <span class="tag-picker-option-side">
+                            ${count}
+                            <span class="tag-picker-check"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg></span>
+                        </span>
+                    </button>`;
+                }).join('');
+            }
+            renderList();
+            updateStatus();
+
+            listEl.addEventListener('click', (e) => {
+                const btn = e.target.closest('.tag-picker-option');
+                if (!btn) return;
+                const tagId = btn.dataset.tagId;
+                if (selectedIds.has(tagId)) selectedIds.delete(tagId);
+                else selectedIds.add(tagId);
+                btn.classList.toggle('active');
+                setStatus('');
+                updateStatus();
+            });
+
+            async function createTagFromInput({ autoSelect = true } = {}) {
+                const name = input.value.trim();
+                if (!name) return null;
+                const dup = tagsData.find(t => (t.name || '').toLowerCase() === name.toLowerCase());
+                if (dup) {
+                    if (autoSelect) selectedIds.add(dup.id);
+                    input.value = '';
+                    renderList();
+                    updateStatus();
+                    return dup;
+                }
+                createBtn.disabled = true;
+                setStatus('正在创建标签...');
+                try {
+                    const res = await fetch('/api/tags', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ name }),
+                    });
+                    if (!res.ok) {
+                        let msg = `创建失败 (${res.status})`;
+                        try { const data = await res.json(); if (data && data.detail) msg = data.detail; } catch (_) {}
+                        setStatus(msg, true);
+                        return null;
+                    }
+                    const tag = await res.json();
+                    tagsData.push(tag);
+                    populateTagFilter();
+                    if (typeof renderTagsInSidebar === 'function') {
+                        try { renderTagsInSidebar(); } catch (_) {}
+                    }
+                    if (autoSelect) selectedIds.add(tag.id);
+                    input.value = '';
+                    renderList();
+                    setStatus('');
+                    updateStatus();
+                    return tag;
+                } catch (err) {
+                    setStatus('网络错误，无法创建标签', true);
+                    return null;
+                } finally {
+                    createBtn.disabled = false;
+                }
+            }
+
+            input.addEventListener('keydown', (e) => {
+                if (e.key === 'Enter') {
+                    e.preventDefault();
+                    createTagFromInput();
+                } else if (e.key === 'Escape') {
+                    overlay.remove();
+                }
+            });
+            createBtn.addEventListener('click', () => createTagFromInput());
+
+            clearBtn.addEventListener('click', () => {
+                selectedIds.clear();
+                renderList();
+                setStatus('');
+                updateStatus();
+            });
+
+            saveBtn.addEventListener('click', async () => {
+                if (input.value.trim()) {
+                    const created = await createTagFromInput();
+                    if (!created) return;
+                }
+                saveBtn.disabled = true;
+                setStatus('正在保存...');
+                try {
+                    const res = await fetch(`/api/items/${encodeURIComponent(itemId)}/tags`, {
+                        method: 'PATCH',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ tag_ids: Array.from(selectedIds) }),
+                    });
+                    if (!res.ok) {
+                        let msg = `保存失败 (${res.status})`;
+                        try { const data = await res.json(); if (data && data.detail) msg = data.detail; } catch (_) {}
+                        setStatus(msg, true);
+                        saveBtn.disabled = false;
+                        return;
+                    }
                     const updatedItem = await res.json();
                     const idx = itemsData.findIndex(i => i.id === itemId);
                     if (idx >= 0) itemsData[idx] = updatedItem;
                     renderReaderTags(updatedItem);
                     fetchTags();
+                    overlay.remove();
+                } catch (err) {
+                    setStatus('网络错误，保存失败', true);
+                    saveBtn.disabled = false;
                 }
-            } catch (err) { /* silent */ }
-            overlay.remove();
+            });
+
+            closeBtn.addEventListener('click', () => overlay.remove());
+            overlay.addEventListener('click', (e) => { if (e.target === overlay) overlay.remove(); });
+            panel.addEventListener('click', (e) => e.stopPropagation());
+
+            setTimeout(() => input.focus(), 30);
+        }
+
+        // Backward compat: older inline handlers may still call this.
+        async function saveReaderTags(itemId) {
+            const overlay = document.querySelector('.tag-picker-overlay');
+            const saveBtn = overlay && overlay.querySelector('.tag-picker-save');
+            if (saveBtn) saveBtn.click();
         }
 
         function renderNotePanel(item) {

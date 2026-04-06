@@ -51,6 +51,7 @@ desktop/**/*.dmg
 plans/
 tasks/
 md-docs/
+PROJECT.md
 
 # Temporary debug artifacts
 tmp-*
@@ -69,3 +70,4 @@ CLAUDE.md
 .impeccable.md
 logo-concepts.html
 logo-viewfinder-bw.html
+

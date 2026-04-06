@@ -179,6 +179,10 @@ def _clean_optional_string(value: object | None) -> str | None:
     return text or None
 
 
+def _normalize_conversation_scope(value: object | None) -> str:
+    return "reader_sidebar" if _clean_optional_string(value) == "reader_sidebar" else "main"
+
+
 def _cleanup_expired_approvals() -> None:
     now = datetime.utcnow()
     expired_ids: list[str] = []
@@ -2522,6 +2526,7 @@ def _serialize_ai_conversation_summary(conversation: AiConversation) -> AiConver
         id=conversation.id,
         title=_clean_optional_string(conversation.title) or "未命名对话",
         mode="agent" if _clean_optional_string(conversation.mode) == "agent" else "chat",
+        scope=_normalize_conversation_scope(getattr(conversation, "scope", None)),
         current_item_id=_clean_optional_string(conversation.current_item_id),
         current_item_title=current_item_title,
         message_count=len(messages),
@@ -4851,12 +4856,17 @@ def list_ai_memories_for_frontend(db: Session = Depends(get_db)):
 @router.get("/conversations", response_model=AiConversationListResponse)
 def list_ai_conversations(
     q: str | None = None,
+    scope: str | None = None,
     current_item_id: str | None = None,
     limit: int = 40,
     db: Session = Depends(get_db),
 ):
     user_id = get_current_user_id()
     query = db.query(AiConversation).filter(AiConversation.user_id == user_id)
+
+    normalized_scope = _clean_optional_string(scope)
+    if normalized_scope:
+        query = query.filter(AiConversation.scope == _normalize_conversation_scope(normalized_scope))
 
     normalized_item_id = _clean_optional_string(current_item_id)
     if normalized_item_id:
@@ -4929,6 +4939,7 @@ def save_ai_conversation(request: AiConversationSaveRequest, db: Session = Depen
     if current_item is not None:
         conversation.workspace_id = current_item.workspace_id
     conversation.mode = "agent" if _clean_optional_string(request.mode) == "agent" else "chat"
+    conversation.scope = _normalize_conversation_scope(request.scope)
     conversation.title = _derive_conversation_title(
         messages,
         explicit_title=request.title,

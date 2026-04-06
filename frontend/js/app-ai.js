@@ -62,7 +62,9 @@
             '基于正文和笔记，给这条内容建议 3-5 个标签，不要建议文件夹',
             '结合正文和笔记，给我 3 个值得继续追问的问题',
         ];
-        const READER_AI_SESSION_STORAGE_KEY = 'everything-capture.reader-ai.sidebar.v1';
+        const AI_CONVERSATION_SCOPE_MAIN = 'main';
+        const AI_CONVERSATION_SCOPE_READER_SIDEBAR = 'reader_sidebar';
+        const READER_AI_PERSISTENT_STORAGE_KEY = 'everything-capture.reader-ai.sidebar.v1';
         const AI_CODE_COPY_ICON = `
             <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
                 <rect x="9" y="9" width="10" height="10" rx="2"></rect>
@@ -104,6 +106,8 @@
         let currentAiContextItemId = null;
         const readerAiConversationIdByItem = new Map();
         const readerAiConversationLoadedByItem = new Set();
+        const readerAiConversationLoadingByItem = new Set();
+        const readerAiConversationLoadPromiseByItem = new Map();
         const readerAiConversationByItem = new Map();
         const readerAiDraftByItem = new Map();
         const aiComposerCompositionState = new WeakMap();
@@ -112,30 +116,39 @@
             return String(itemId ?? '').trim();
         }
 
-        function readReaderAiSessionStore() {
+        function readReaderAiPersistentStore() {
             try {
-                const raw = window.sessionStorage?.getItem(READER_AI_SESSION_STORAGE_KEY);
-                if (!raw) return {};
-                const parsed = JSON.parse(raw);
-                return parsed && typeof parsed === 'object' ? parsed : {};
+                const localRaw = window.localStorage?.getItem(READER_AI_PERSISTENT_STORAGE_KEY);
+                if (localRaw) {
+                    const parsed = JSON.parse(localRaw);
+                    return parsed && typeof parsed === 'object' ? parsed : {};
+                }
+
+                const legacyRaw = window.sessionStorage?.getItem(READER_AI_PERSISTENT_STORAGE_KEY);
+                if (!legacyRaw) return {};
+                const parsed = JSON.parse(legacyRaw);
+                const normalized = parsed && typeof parsed === 'object' ? parsed : {};
+                writeReaderAiPersistentStore(normalized);
+                window.sessionStorage?.removeItem(READER_AI_PERSISTENT_STORAGE_KEY);
+                return normalized;
             } catch (error) {
-                console.warn('Failed to read reader AI session store', error);
+                console.warn('Failed to read reader AI persistent store', error);
                 return {};
             }
         }
 
-        function writeReaderAiSessionStore(nextStore) {
+        function writeReaderAiPersistentStore(nextStore) {
             try {
-                window.sessionStorage?.setItem(READER_AI_SESSION_STORAGE_KEY, JSON.stringify(nextStore || {}));
+                window.localStorage?.setItem(READER_AI_PERSISTENT_STORAGE_KEY, JSON.stringify(nextStore || {}));
             } catch (error) {
-                console.warn('Failed to persist reader AI session store', error);
+                console.warn('Failed to persist reader AI local cache', error);
             }
         }
 
-        function persistReaderAiSessionState(itemId) {
+        function persistReaderAiLocalState(itemId) {
             const key = normalizeReaderAiItemKey(itemId);
             if (!key) return;
-            const store = readReaderAiSessionStore();
+            const store = readReaderAiPersistentStore();
             const conversation = getReaderAiConversation(key);
             const draft = String(readerAiDraftByItem.get(key) || '');
             if (!conversation.length && !draft) {
@@ -146,13 +159,13 @@
                     draft,
                 };
             }
-            writeReaderAiSessionStore(store);
+            writeReaderAiPersistentStore(store);
         }
 
-        function loadReaderAiSessionState(itemId) {
+        function loadReaderAiLocalState(itemId) {
             const key = normalizeReaderAiItemKey(itemId);
             if (!key) return;
-            const store = readReaderAiSessionStore();
+            const store = readReaderAiPersistentStore();
             const saved = store[key];
             if (!saved || typeof saved !== 'object') return;
             const messages = Array.isArray(saved.messages)
@@ -599,6 +612,7 @@
             try {
                 const params = new URLSearchParams();
                 params.set('limit', '30');
+                params.set('scope', AI_CONVERSATION_SCOPE_MAIN);
                 if (aiHistorySearchQuery) {
                     params.set('q', aiHistorySearchQuery);
                 }
@@ -692,7 +706,12 @@
         }
 
         async function persistAiConversationSnapshot(conversation, options = {}) {
-            const { conversationId = null, currentItemId = null, mode = aiAssistantMode } = options;
+            const {
+                conversationId = null,
+                currentItemId = null,
+                mode = aiAssistantMode,
+                scope = AI_CONVERSATION_SCOPE_MAIN,
+            } = options;
             const messages = serializeConversationForSave(conversation);
             if (!messages.length) return null;
 
@@ -702,6 +721,7 @@
                 body: JSON.stringify({
                     conversation_id: conversationId || undefined,
                     mode,
+                    scope,
                     current_item_id: currentItemId || undefined,
                     messages,
                 }),
@@ -1996,6 +2016,7 @@
                 conversationId: aiConversationId,
                 currentItemId: currentAiContextItemId,
                 mode: aiAssistantMode,
+                scope: AI_CONVERSATION_SCOPE_MAIN,
             });
             if (!saved) return null;
             aiConversationId = saved.id || aiConversationId;
@@ -2054,19 +2075,121 @@
             throw new Error(normalizeAiRequestError(lastError));
         }
 
+        async function loadReaderAiConversationFromServer(itemId) {
+            const key = normalizeReaderAiItemKey(itemId);
+            if (!key) return [];
+            if (!(await ensureAiSessionReady({ allowRecovery: true }))) {
+                return getReaderAiConversation(key);
+            }
+
+            const params = new URLSearchParams();
+            params.set('limit', '1');
+            params.set('scope', AI_CONVERSATION_SCOPE_READER_SIDEBAR);
+            params.set('current_item_id', key);
+
+            const listResponse = await fetch(`/api/ai/conversations?${params.toString()}`);
+            const listData = await listResponse.json().catch(() => ({}));
+            if (!listResponse.ok) {
+                throw new Error(listData.detail || '侧栏历史加载失败');
+            }
+
+            const latestConversation = Array.isArray(listData.conversations)
+                ? listData.conversations[0]
+                : null;
+            if (!latestConversation?.id) {
+                return getReaderAiConversation(key);
+            }
+
+            const conversationResponse = await fetch(`/api/ai/conversations/${latestConversation.id}`);
+            const conversationData = await conversationResponse.json().catch(() => ({}));
+            if (!conversationResponse.ok) {
+                throw new Error(conversationData.detail || '侧栏对话恢复失败');
+            }
+
+            const messages = Array.isArray(conversationData.messages)
+                ? conversationData.messages.map(normalizeStoredConversationMessage)
+                : [];
+            readerAiConversationIdByItem.set(key, conversationData.id || latestConversation.id);
+            if (messages.length) {
+                readerAiConversationByItem.set(key, messages);
+            } else {
+                readerAiConversationByItem.delete(key);
+            }
+            persistReaderAiLocalState(key);
+            return messages;
+        }
+
         function ensureReaderAiConversationLoaded(itemId) {
             const key = normalizeReaderAiItemKey(itemId);
-            if (!key || readerAiConversationLoadedByItem.has(key)) return;
-            readerAiConversationLoadedByItem.add(key);
-            loadReaderAiSessionState(key);
+            if (!key) return Promise.resolve([]);
+            loadReaderAiLocalState(key);
+            if (readerAiConversationLoadedByItem.has(key)) {
+                return Promise.resolve(getReaderAiConversation(key));
+            }
+            const existingPromise = readerAiConversationLoadPromiseByItem.get(key);
+            if (existingPromise) {
+                return existingPromise;
+            }
+
+            readerAiConversationLoadingByItem.add(key);
+            const loadPromise = (async () => {
+                try {
+                    await loadReaderAiConversationFromServer(key);
+                    if (!readerAiConversationIdByItem.get(key) && getReaderAiConversation(key).length) {
+                        try {
+                            await persistReaderAiConversation(key);
+                        } catch (error) {
+                            console.error('Failed to migrate cached reader AI conversation', error);
+                        }
+                    }
+                    return getReaderAiConversation(key);
+                } catch (error) {
+                    console.error('Failed to load reader AI conversation history', error);
+                    return getReaderAiConversation(key);
+                } finally {
+                    readerAiConversationLoadedByItem.add(key);
+                    readerAiConversationLoadingByItem.delete(key);
+                    readerAiConversationLoadPromiseByItem.delete(key);
+                    rerenderReaderAiSidebar(key);
+                }
+            })();
+            readerAiConversationLoadPromiseByItem.set(key, loadPromise);
+            return loadPromise;
         }
 
         async function persistReaderAiConversation(itemId) {
             const key = normalizeReaderAiItemKey(itemId);
-            persistReaderAiSessionState(key);
+            const conversation = getReaderAiConversation(key);
+            persistReaderAiLocalState(key);
+            if (!conversation.length) {
+                return {
+                    id: readerAiConversationIdByItem.get(key) || null,
+                    messages: [],
+                };
+            }
+
+            const saved = await persistAiConversationSnapshot(conversation, {
+                conversationId: readerAiConversationIdByItem.get(key) || null,
+                currentItemId: key,
+                mode: 'agent',
+                scope: AI_CONVERSATION_SCOPE_READER_SIDEBAR,
+            });
+            if (!saved) {
+                return {
+                    id: readerAiConversationIdByItem.get(key) || null,
+                    messages: conversation,
+                };
+            }
+
+            const savedMessages = Array.isArray(saved.messages)
+                ? saved.messages.map(normalizeStoredConversationMessage)
+                : conversation;
+            readerAiConversationIdByItem.set(key, saved.id || readerAiConversationIdByItem.get(key) || null);
+            readerAiConversationByItem.set(key, savedMessages);
+            persistReaderAiLocalState(key);
             return {
                 id: readerAiConversationIdByItem.get(key) || null,
-                messages: getReaderAiConversation(key),
+                messages: savedMessages,
             };
         }
 
@@ -2565,6 +2688,7 @@
             ensureReaderAiConversationLoaded(itemKey);
             const conversation = getReaderAiConversation(itemKey);
             const draft = readerAiDraftByItem.get(itemKey) || '';
+            const isLoadingConversation = readerAiConversationLoadingByItem.has(itemKey);
             const isBusy = readerAiRequestsInFlight.has(itemKey);
 
             if (!isAiConfigured()) {
@@ -2611,6 +2735,12 @@
                     <div class="reader-ai-quick-actions-list">${quickActionsMarkup}</div>
                 </div>
             `;
+            const loadingEmptyStateMarkup = `
+                <div class="reader-ai-empty-state reader-ai-empty-state--loading">
+                    <div class="reader-ai-empty-title">正在恢复 Ask AI 历史</div>
+                    <div class="reader-ai-empty-copy">正在从持久化存储恢复当前笔记的侧栏对话。</div>
+                </div>
+            `;
             const loadingMarkup = isBusy
                 ? renderAiLoadingMessage({
                     mode: 'agent',
@@ -2619,15 +2749,18 @@
                     description: '正在结合当前笔记的内容分析与知识库上下文生成回答。',
                 })
                 : '';
+            const emptyStateMarkup = isLoadingConversation && !conversation.length
+                ? loadingEmptyStateMarkup
+                : contextMarkup + quickActionsSectionMarkup;
 
             return `
                 <div class="reader-ai-sidebar-shell">
-                    <div class="reader-ai-messages" id="readerAiMessages">${conversation.length ? '' : contextMarkup + quickActionsSectionMarkup}${messagesMarkup}${loadingMarkup}</div>
+                    <div class="reader-ai-messages" id="readerAiMessages">${conversation.length ? '' : emptyStateMarkup}${messagesMarkup}${loadingMarkup}</div>
                     <div class="reader-ai-composer${isBusy ? ' is-loading' : ''}">
-                        <textarea id="readerAiInput" class="reader-ai-input" placeholder="问这条笔记、问关联内容，或让 AI 帮你整理下一步..." ${isBusy ? 'disabled' : ''}>${escapeHtml(draft)}</textarea>
+                        <textarea id="readerAiInput" class="reader-ai-input" placeholder="问这条笔记、问关联内容，或让 AI 帮你整理下一步..." ${(isBusy || isLoadingConversation) ? 'disabled' : ''}>${escapeHtml(draft)}</textarea>
                         <div class="reader-ai-composer-actions">
                             <button id="readerAiClearBtn" class="reader-ai-secondary-btn" type="button" ${conversation.length ? '' : 'disabled'}>清空</button>
-                            <button id="readerAiSubmitBtn" class="reader-ai-submit${isBusy ? ' is-loading' : ''}" type="button" ${isBusy ? 'disabled' : ''}>${isBusy ? '<span class="reader-ai-spinner"></span>' : '发送'}</button>
+                            <button id="readerAiSubmitBtn" class="reader-ai-submit${isBusy ? ' is-loading' : ''}" type="button" ${(isBusy || isLoadingConversation) ? 'disabled' : ''}>${isBusy ? '<span class="reader-ai-spinner"></span>' : '发送'}</button>
                         </div>
                     </div>
                 </div>
@@ -2657,18 +2790,30 @@
                 onSubmit: () => submitReaderAiQuestion(),
                 onInput: (value) => {
                     readerAiDraftByItem.set(itemKey, value);
-                    persistReaderAiSessionState(itemKey);
+                    persistReaderAiLocalState(itemKey);
                 },
             });
 
             submitBtn?.addEventListener('click', () => submitReaderAiQuestion());
-            clearBtn?.addEventListener('click', () => {
+            clearBtn?.addEventListener('click', async () => {
+                const conversationId = readerAiConversationIdByItem.get(itemKey) || null;
                 readerAiConversationByItem.delete(itemKey);
                 readerAiConversationIdByItem.delete(itemKey);
                 readerAiConversationLoadedByItem.add(itemKey);
                 readerAiDraftByItem.set(itemKey, '');
-                persistReaderAiSessionState(itemKey);
+                persistReaderAiLocalState(itemKey);
                 rerenderReaderAiSidebar(itemKey);
+                if (!conversationId) return;
+                try {
+                    const response = await fetch(`/api/ai/conversations/${conversationId}`, { method: 'DELETE' });
+                    if (!response.ok) {
+                        const data = await response.json().catch(() => ({}));
+                        throw new Error(data.detail || '删除失败');
+                    }
+                } catch (error) {
+                    console.error('Failed to delete reader AI conversation', error);
+                    showToast(`删除失败：${error.message}`, 'error');
+                }
             });
             quickActions.forEach((button) => {
                 button.addEventListener('click', () => {
@@ -2691,6 +2836,7 @@
             if (!currentOpenItemId) return;
             const itemKey = normalizeReaderAiItemKey(currentOpenItemId);
             if (readerAiRequestsInFlight.has(itemKey)) return;
+            await ensureReaderAiConversationLoaded(itemKey);
             const item = typeof getItemById === 'function' ? getItemById(currentOpenItemId) : null;
             if (!item) return;
 
@@ -2712,7 +2858,7 @@
             conversation.push({ role: 'user', content: question, createdAt: new Date().toISOString() });
             readerAiConversationByItem.set(itemKey, conversation);
             readerAiDraftByItem.set(itemKey, '');
-            persistReaderAiSessionState(itemKey);
+            persistReaderAiLocalState(itemKey);
             if (input) {
                 input.value = '';
             }
@@ -2860,7 +3006,7 @@
             window.openReaderSidebarPanel?.('ai');
             await ensureAiSettingsLoaded();
             const itemKey = normalizeReaderAiItemKey(currentOpenItemId);
-            ensureReaderAiConversationLoaded(itemKey);
+            await ensureReaderAiConversationLoaded(itemKey);
             rerenderReaderAiSidebar(itemKey);
             focusReaderAiComposer();
             window.requestAnimationFrame(() => {

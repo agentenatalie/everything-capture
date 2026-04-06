@@ -320,6 +320,7 @@ class AiConversationStoredMessage(BaseModel):
 class AiConversationSaveRequest(BaseModel):
     conversation_id: Optional[str] = None
     mode: str = "chat"
+    scope: str = "main"
     current_item_id: Optional[str] = None
     title: Optional[str] = None
     messages: list[AiConversationStoredMessage] = Field(default_factory=list)
@@ -329,6 +330,7 @@ class AiConversationSummaryResponse(BaseModel):
     id: str
     title: str
     mode: str = "chat"
+    scope: str = "main"
     current_item_id: Optional[str] = None
     current_item_title: Optional[str] = None
     message_count: int = 0

@@ -393,6 +393,7 @@ def ensure_runtime_schema():
                 current_item_id VARCHAR REFERENCES items(id),
                 title VARCHAR NOT NULL,
                 mode VARCHAR NOT NULL DEFAULT 'chat',
+                scope VARCHAR NOT NULL DEFAULT 'main',
                 messages_json TEXT NOT NULL DEFAULT '[]',
                 search_text TEXT,
                 created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
@@ -409,6 +410,10 @@ def ensure_runtime_schema():
         if "mode" not in ai_conversation_columns:
             connection.exec_driver_sql(
                 "ALTER TABLE ai_conversations ADD COLUMN mode VARCHAR NOT NULL DEFAULT 'chat'"
+            )
+        if "scope" not in ai_conversation_columns:
+            connection.exec_driver_sql(
+                "ALTER TABLE ai_conversations ADD COLUMN scope VARCHAR NOT NULL DEFAULT 'main'"
             )
         if "messages_json" not in ai_conversation_columns:
             connection.exec_driver_sql(
@@ -430,6 +435,9 @@ def ensure_runtime_schema():
             "UPDATE ai_conversations SET mode = 'chat' WHERE mode IS NULL OR trim(mode) = ''"
         )
         connection.exec_driver_sql(
+            "UPDATE ai_conversations SET scope = 'main' WHERE scope IS NULL OR trim(scope) = ''"
+        )
+        connection.exec_driver_sql(
             "UPDATE ai_conversations SET messages_json = '[]' WHERE messages_json IS NULL OR trim(messages_json) = ''"
         )
         connection.exec_driver_sql(
@@ -441,6 +449,12 @@ def ensure_runtime_schema():
         )
         connection.exec_driver_sql(
             "CREATE INDEX IF NOT EXISTS idx_ai_conversations_user_updated_at ON ai_conversations(user_id, updated_at DESC)"
+        )
+        connection.exec_driver_sql(
+            "CREATE INDEX IF NOT EXISTS idx_ai_conversations_user_scope_updated_at ON ai_conversations(user_id, scope, updated_at DESC)"
+        )
+        connection.exec_driver_sql(
+            "CREATE INDEX IF NOT EXISTS idx_ai_conversations_item_scope_updated_at ON ai_conversations(current_item_id, scope, updated_at DESC)"
         )
         connection.exec_driver_sql(
             "CREATE INDEX IF NOT EXISTS idx_ai_conversations_user_last_message_at ON ai_conversations(user_id, last_message_at DESC)"

@@ -182,6 +182,7 @@ class AiConversation(Base):
     current_item_id = Column(String, ForeignKey("items.id"), nullable=True, index=True)
     title = Column(String, nullable=False)
     mode = Column(String, nullable=False, default="chat")
+    scope = Column(String, nullable=False, default="main")
     messages_json = Column(Text, nullable=False, default="[]")
     search_text = Column(Text, nullable=True)
     created_at = Column(DateTime, default=datetime.datetime.utcnow)

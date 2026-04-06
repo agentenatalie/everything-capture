@@ -1132,6 +1132,7 @@ class AiRouteTests(unittest.TestCase):
     def test_save_and_query_ai_conversation_history(self) -> None:
         request = AiConversationSaveRequest(
             mode="chat",
+            scope="reader_sidebar",
             current_item_id="item-ai",
             messages=[
                 AiConversationStoredMessage(role="user", content="帮我总结 AI UI 设计规范"),
@@ -1146,16 +1147,55 @@ class AiRouteTests(unittest.TestCase):
         with self.Session() as db:
             with patch.object(ai_router, "get_current_user_id", return_value="local-default-user"):
                 saved = ai_router.save_ai_conversation(request, db=db)
-                listed = ai_router.list_ai_conversations(q="设计规范", current_item_id="item-ai", db=db)
+                listed = ai_router.list_ai_conversations(
+                    q="设计规范",
+                    scope="reader_sidebar",
+                    current_item_id="item-ai",
+                    db=db,
+                )
                 loaded = ai_router.get_ai_conversation(saved.id, db=db)
 
         self.assertEqual(saved.current_item_id, "item-ai")
+        self.assertEqual(saved.scope, "reader_sidebar")
         self.assertEqual(saved.title, "帮我总结 AI UI 设计规范")
         self.assertEqual(len(saved.messages), 2)
         self.assertEqual(len(listed.conversations), 1)
         self.assertEqual(listed.conversations[0].id, saved.id)
+        self.assertEqual(listed.conversations[0].scope, "reader_sidebar")
         self.assertEqual(loaded.messages[1].note_count, 2)
         self.assertIn("统一设计规范", loaded.messages[1].content)
+
+    def test_list_ai_conversations_can_filter_by_scope(self) -> None:
+        reader_request = AiConversationSaveRequest(
+            mode="agent",
+            scope="reader_sidebar",
+            current_item_id="item-ai",
+            messages=[AiConversationStoredMessage(role="user", content="reader sidebar 对话")],
+        )
+        popup_request = AiConversationSaveRequest(
+            mode="chat",
+            scope="main",
+            current_item_id="item-ai",
+            messages=[AiConversationStoredMessage(role="user", content="popup 对话")],
+        )
+
+        with self.Session() as db:
+            with patch.object(ai_router, "get_current_user_id", return_value="local-default-user"):
+                reader_saved = ai_router.save_ai_conversation(reader_request, db=db)
+                popup_saved = ai_router.save_ai_conversation(popup_request, db=db)
+                reader_only = ai_router.list_ai_conversations(
+                    scope="reader_sidebar",
+                    current_item_id="item-ai",
+                    db=db,
+                )
+                popup_only = ai_router.list_ai_conversations(
+                    scope="main",
+                    current_item_id="item-ai",
+                    db=db,
+                )
+
+        self.assertEqual([conversation.id for conversation in reader_only.conversations], [reader_saved.id])
+        self.assertEqual([conversation.id for conversation in popup_only.conversations], [popup_saved.id])
 
 
 if __name__ == "__main__":

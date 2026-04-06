@@ -117,10 +117,24 @@ def get_folders(db: Session = Depends(get_db)):
         .scalar()
         or 0
     )
+    unread_count = (
+        db.query(func.count(Item.id))
+        .filter(Item.user_id == user_id, Item.last_viewed_at.is_(None))
+        .scalar()
+        or 0
+    )
+    favorite_count = (
+        db.query(func.count(Item.id))
+        .filter(Item.user_id == user_id, Item.is_favorite.is_(True))
+        .scalar()
+        or 0
+    )
     return FolderListResponse(
         folders=_serialize_folders(folders, aggregate_counts),
         total_count=total_count,
         unfiled_count=unfiled_count,
+        unread_count=unread_count,
+        favorite_count=favorite_count,
     )
 
 

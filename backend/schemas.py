@@ -54,6 +54,8 @@ class ItemResponse(BaseModel):
     folder_ids: list[str] = Field(default_factory=list)
     folder_names: list[str] = Field(default_factory=list)
     last_viewed_at: Optional[datetime] = None
+    is_read: bool = False
+    is_favorite: bool = False
     folder_count: int = 0
     tag_ids: list[str] = Field(default_factory=list)
     tag_names: list[str] = Field(default_factory=list)
@@ -438,6 +440,8 @@ class FolderListResponse(BaseModel):
     folders: list[FolderResponse] = Field(default_factory=list)
     total_count: int = 0
     unfiled_count: int = 0
+    unread_count: int = 0
+    favorite_count: int = 0
 
 
 class FolderCreateRequest(BaseModel):
@@ -500,6 +504,11 @@ class ItemContentUpdateRequest(BaseModel):
 
 class ItemNoteUpdateRequest(BaseModel):
     extracted_text: str = ""
+
+
+class ItemStateUpdateRequest(BaseModel):
+    is_read: Optional[bool] = None
+    is_favorite: Optional[bool] = None
 
 
 class BulkFolderUpdateRequest(BaseModel):

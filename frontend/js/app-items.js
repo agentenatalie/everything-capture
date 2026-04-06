@@ -26,7 +26,8 @@
         let readerScrollTicking = false;
         let readerScrollIntent = 0;
         const READER_SIDEBAR_MIN_WIDTH = 360;
-        const READER_SIDEBAR_MAX_WIDTH = 680;
+        const READER_SIDEBAR_MAX_WIDTH_RATIO_FALLBACK = 0.44;
+        const itemStateMutationKeys = new Set();
         const analysisAiSparkIcon = `
             <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" id="Ai-Spark-Generate-Text--Streamline-Outlined-Material-Pro-Free" height="24" width="24" aria-hidden="true" focusable="false">
                 <desc>
@@ -751,6 +752,34 @@
         function initSidebarResize() {
             if (!readerSidebarResizeHandle || !readerSidebar) return;
 
+            const getReaderSidebarResizeBounds = () => {
+                if (typeof window.getComputedStyle !== 'function') {
+                    const fallbackMax = Math.max(
+                        READER_SIDEBAR_MIN_WIDTH,
+                        Math.round((window.innerWidth || READER_SIDEBAR_MIN_WIDTH) * READER_SIDEBAR_MAX_WIDTH_RATIO_FALLBACK),
+                    );
+                    return {
+                        minWidth: READER_SIDEBAR_MIN_WIDTH,
+                        maxWidth: fallbackMax,
+                    };
+                }
+                const styles = window.getComputedStyle(readerSidebar);
+                const minWidth = Math.max(
+                    READER_SIDEBAR_MIN_WIDTH,
+                    Number.parseFloat(styles.minWidth) || READER_SIDEBAR_MIN_WIDTH,
+                );
+                const fallbackMax = Math.max(
+                    minWidth,
+                    Math.round((window.innerWidth || minWidth) * READER_SIDEBAR_MAX_WIDTH_RATIO_FALLBACK),
+                );
+                const parsedMax = Number.parseFloat(styles.maxWidth);
+                const maxWidth = Number.isFinite(parsedMax) ? parsedMax : fallbackMax;
+                return {
+                    minWidth,
+                    maxWidth: Math.max(minWidth, maxWidth),
+                };
+            };
+
             readerSidebarResizeHandle.addEventListener('mousedown', (e) => {
                 e.preventDefault();
                 readerSidebarResizing = true;
@@ -764,7 +793,8 @@
             document.addEventListener('mousemove', (e) => {
                 if (!readerSidebarResizing) return;
                 const deltaX = readerSidebarStartX - e.clientX;
-                const newWidth = Math.max(READER_SIDEBAR_MIN_WIDTH, Math.min(READER_SIDEBAR_MAX_WIDTH, readerSidebarStartWidth + deltaX));
+                const { minWidth, maxWidth } = getReaderSidebarResizeBounds();
+                const newWidth = Math.max(minWidth, Math.min(maxWidth, readerSidebarStartWidth + deltaX));
                 readerSidebar.style.width = `${newWidth}px`;
             });
 
@@ -806,6 +836,7 @@
                 const returnedCount = Number(response.headers.get('X-Returned-Count') || '0');
                 const nextItems = await response.json();
                 if (requestId !== libraryRequestId) return;
+                nextItems.forEach((item) => cacheItemById(item));
                 itemsData = nextItems;
                 filteredEntries = itemsData;
                 latestTotalCount = totalCount;
@@ -1148,14 +1179,88 @@
             return `<div class="activity-chips">${chips.join('')}</div>`;
         }
 
-        function renderSyncBadges(item) {
-            const notionBusy = isItemSyncInFlight(item?.id, 'notion');
-            const obsidianBusy = isItemSyncInFlight(item?.id, 'obsidian');
+        function isItemRead(item) {
+            return Boolean(item?.is_read || item?.last_viewed_at);
+        }
+
+        function isItemFavorite(item) {
+            return Boolean(item?.is_favorite);
+        }
+
+        function isItemStateMutating(itemId, stateName) {
+            return itemStateMutationKeys.has(`${String(itemId || '')}:${String(stateName || '')}`);
+        }
+
+        function itemReadIcon() {
+            return `<svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><circle cx="12" cy="12" r="8.25"></circle><path d="m8.6 12.35 2.15 2.15 4.7-5.05"></path></svg>`;
+        }
+
+        function itemFavoriteIcon() {
+            return `<svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M11.48 3.5a.56.56 0 0 1 1.04 0l2.12 5.11a.56.56 0 0 0 .48.35l5.52.44a.56.56 0 0 1 .32.99l-4.2 3.6a.56.56 0 0 0-.18.56l1.28 5.38a.56.56 0 0 1-.84.61l-4.72-2.89a.56.56 0 0 0-.59 0l-4.72 2.89a.56.56 0 0 1-.84-.61l1.28-5.38a.56.56 0 0 0-.18-.56l-4.2-3.6a.56.56 0 0 1 .32-.99l5.52-.44a.56.56 0 0 0 .48-.35L11.48 3.5Z"></path></svg>`;
+        }
+
+        function renderItemStateButtons(item, options = {}) {
+            const { compact = true } = options;
+            const readActive = isItemRead(item);
+            const favoriteActive = isItemFavorite(item);
+            const readMutating = isItemStateMutating(item?.id, 'read');
+            const favoriteMutating = isItemStateMutating(item?.id, 'favorite');
+            if (compact) {
+                return `
+                    <div class="knowledge-dots is-compact" aria-label="内容状态">
+                        <span
+                            class="knowledge-dot is-indicator${favoriteActive ? ' is-active is-favorite' : ''}"
+                            aria-hidden="true"
+                        ></span>
+                        <span
+                            class="knowledge-dot is-indicator${readActive ? ' is-active is-read' : ''}"
+                            aria-hidden="true"
+                        ></span>
+                    </div>
+                `;
+            }
+            const buttonClass = compact ? 'knowledge-dot' : 'modal-icon-btn item-state-toggle';
+            const readMarkup = itemReadIcon();
+            const favoriteMarkup = itemFavoriteIcon();
             return `
-                <div class="knowledge-dots${notionBusy || obsidianBusy ? ' is-busy' : ''}" aria-label="知识库状态">
-                    <span class="knowledge-dot notion ${notionBusy ? 'is-processing' : (item.notion_page_id ? 'is-ready' : 'is-idle')}" title="${notionBusy ? 'Notion同步中' : `Notion${item.notion_page_id ? '已同步' : '未同步'}`}"></span>
-                    <span class="knowledge-dot obsidian ${obsidianBusy ? 'is-processing' : (getObsidianSyncState(item) === 'ready' ? 'is-ready' : (getObsidianSyncState(item) === 'partial' ? 'is-partial' : 'is-idle'))}" title="${obsidianBusy ? 'Obsidian同步中' : getObsidianSyncTitle(item)}"></span>
+                <div class="knowledge-dots" aria-label="内容状态">
+                    <button
+                        type="button"
+                        class="${buttonClass}${favoriteActive ? ' is-active is-favorite' : ''}${favoriteMutating ? ' is-loading' : ''}"
+                        title="${favoriteActive ? '取消收藏' : '加入收藏夹'}"
+                        aria-label="${favoriteActive ? '取消收藏' : '加入收藏夹'}"
+                        aria-pressed="${favoriteActive ? 'true' : 'false'}"
+                        onclick="toggleItemFavorite('${item.id}', event)"
+                        ${favoriteMutating ? 'disabled' : ''}
+                    >${favoriteMarkup}</button>
+                    <button
+                        type="button"
+                        class="${buttonClass}${readActive ? ' is-active is-read' : ''}${readMutating ? ' is-loading' : ''}"
+                        title="${readActive ? '标记为未读' : '标记为已读'}"
+                        aria-label="${readActive ? '标记为未读' : '标记为已读'}"
+                        aria-pressed="${readActive ? 'true' : 'false'}"
+                        onclick="toggleItemRead('${item.id}', event)"
+                        ${readMutating ? 'disabled' : ''}
+                    >${readMarkup}</button>
                 </div>
+            `;
+        }
+
+        function renderFavoriteActionButton(item) {
+            const favoriteActive = isItemFavorite(item);
+            const favoriteMutating = isItemStateMutating(item?.id, 'favorite');
+            return `
+                <button
+                    type="button"
+                    onclick="toggleItemFavorite('${item.id}', event)"
+                    class="favorite-action-btn${favoriteActive ? ' is-active' : ''}${favoriteMutating ? ' is-loading' : ''}"
+                    title="${favoriteActive ? '取消收藏' : '加入收藏夹'}"
+                    aria-label="${favoriteActive ? '取消收藏' : '加入收藏夹'}"
+                    aria-pressed="${favoriteActive ? 'true' : 'false'}"
+                    ${favoriteMutating ? 'disabled' : ''}
+                >
+                    ${itemFavoriteIcon()}
+                </button>
             `;
         }
 
@@ -1192,7 +1297,8 @@
                         </div>
                         <div class="list-actions">
                             ${activityBadges}
-                            ${renderSyncBadges(item)}
+                            ${renderItemStateButtons(item)}
+                            ${renderFavoriteActionButton(item)}
                             ${renderFolderActionButton(item)}
                             <button onclick="deleteItem('${item.id}', event)" class="delete-btn" title="删除">
                                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2M10 11v6M14 11v6"/></svg>
@@ -1226,7 +1332,7 @@
                                 <span>•</span>
                                 <span>${relativeTime}</span>
                             </div>
-                            ${renderSyncBadges(item)}
+                            ${renderItemStateButtons(item)}
                         </div>
                         ${activityBadges}
                         <h3 class="card-title" title="${fullTitle}">${title}</h3>
@@ -1235,6 +1341,7 @@
                                 ${tagsHtml}
                             </div>
                             <div class="card-footer-actions">
+                                ${renderFavoriteActionButton(item)}
                                 ${renderFolderActionButton(item)}
                                 <button onclick="deleteItem('${item.id}', event)" class="delete-btn" title="删除">
                                     <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2M10 11v6M14 11v6"/></svg>
@@ -1263,6 +1370,40 @@
             const normalizedId = String(itemId || '');
             if (!normalizedId || !grid) return null;
             return Array.from(grid.children).find((node) => node?.dataset?.itemId === normalizedId) || null;
+        }
+
+        function patchRenderedItemStateById(itemId) {
+            const currentNode = findRenderedItemNode(itemId);
+            if (!currentNode) return false;
+            const nextItem = filteredEntries.find((entry) => entry.id === itemId) || getItemById(itemId);
+            if (!nextItem) return false;
+
+            const favoriteActive = isItemFavorite(nextItem);
+            const readActive = isItemRead(nextItem);
+            const favoriteMutating = isItemStateMutating(nextItem?.id, 'favorite');
+
+            const stateContainer = currentNode.querySelector('.knowledge-dots.is-compact');
+            if (stateContainer) {
+                const [favoriteDot, readDot] = stateContainer.querySelectorAll('.knowledge-dot');
+                if (favoriteDot) {
+                    favoriteDot.className = `knowledge-dot is-indicator${favoriteActive ? ' is-active is-favorite' : ''}`;
+                }
+                if (readDot) {
+                    readDot.className = `knowledge-dot is-indicator${readActive ? ' is-active is-read' : ''}`;
+                }
+            }
+
+            const favoriteButton = currentNode.querySelector('.favorite-action-btn');
+            if (favoriteButton) {
+                const nextTitle = favoriteActive ? '取消收藏' : '加入收藏夹';
+                favoriteButton.className = `favorite-action-btn${favoriteActive ? ' is-active' : ''}${favoriteMutating ? ' is-loading' : ''}`;
+                favoriteButton.title = nextTitle;
+                favoriteButton.setAttribute('aria-label', nextTitle);
+                favoriteButton.setAttribute('aria-pressed', favoriteActive ? 'true' : 'false');
+                favoriteButton.disabled = favoriteMutating;
+            }
+
+            return Boolean(stateContainer || favoriteButton);
         }
 
         function patchRenderedItemById(itemId) {
@@ -1316,8 +1457,22 @@
             const { animate = false } = options;
             if (entries.length === 0) {
                 grid.className = currentView === 'gallery' ? 'grid' : 'list-view';
-                grid.innerHTML = filterInput.value.trim() || platformFilter.value !== 'all' || currentFolderScope !== 'all'
-                    ? `<div class="empty-state">${currentFolderScope === 'folder' && !filterInput.value.trim() && platformFilter.value === 'all' ? '这个文件夹里还没有内容。' : '没有找到匹配内容，请换个关键词或平台试试。'}</div>`
+                const hasKeyword = Boolean(filterInput.value.trim());
+                const hasPlatformFilter = platformFilter.value !== 'all';
+                const hasFolderFilter = currentFolderScope !== 'all';
+                const hasTagFilter = Boolean(currentTagId);
+                let emptyMessage = '没有找到匹配内容，请换个关键词或平台试试。';
+                if (!hasKeyword && !hasPlatformFilter && !hasTagFilter) {
+                    if (currentFolderScope === 'folder') {
+                        emptyMessage = '这个文件夹里还没有内容。';
+                    } else if (currentFolderScope === 'favorites') {
+                        emptyMessage = '收藏夹里还没有内容。';
+                    } else if (currentFolderScope === 'unread') {
+                        emptyMessage = '未读内容已经清空。';
+                    }
+                }
+                grid.innerHTML = hasKeyword || hasPlatformFilter || hasFolderFilter || hasTagFilter
+                    ? `<div class="empty-state">${emptyMessage}</div>`
                     : '<div class="empty-state">⌘K 开启你的收录之旅。</div>';
                 return;
             }
@@ -1447,9 +1602,96 @@
         }
 
         function mergeUpdatedItem(updatedItem) {
+            cacheItemById(updatedItem);
             itemsData = itemsData.map((entry) => entry.id === updatedItem.id ? updatedItem : entry);
             filteredEntries = filteredEntries.map((entry) => entry.id === updatedItem.id ? updatedItem : entry);
             commandSearchResults = commandSearchResults.map((entry) => entry.id === updatedItem.id ? updatedItem : entry);
+        }
+
+        function syncLibraryStatsForCurrentEntries() {
+            const hasKeyword = Boolean(filterInput.value.trim());
+            const hasPlatformFilter = platformFilter.value !== 'all';
+            const hasFolderFilter = currentFolderScope !== 'all';
+            const hasTagFilter = Boolean(currentTagId);
+            const visibleCount = filteredEntries.length;
+
+            latestVisibleCount = visibleCount;
+            latestReturnedCount = visibleCount;
+
+            setStatsSummary(
+                latestTotalCount || visibleCount,
+                visibleCount,
+                visibleCount,
+                hasKeyword || hasPlatformFilter || hasFolderFilter || hasTagFilter,
+            );
+        }
+
+        function updateSystemScopeCounts(previousItem, nextItem) {
+            const previousFavorite = isItemFavorite(previousItem);
+            const nextFavorite = isItemFavorite(nextItem);
+            if (previousFavorite !== nextFavorite) {
+                favoriteFolderCount = Math.max(0, favoriteFolderCount + (nextFavorite ? 1 : -1));
+            }
+
+            const previousUnread = !isItemRead(previousItem);
+            const nextUnread = !isItemRead(nextItem);
+            if (previousUnread !== nextUnread) {
+                unreadFolderCount = Math.max(0, unreadFolderCount + (nextUnread ? 1 : -1));
+            }
+
+            if (previousFavorite !== nextFavorite || previousUnread !== nextUnread) {
+                renderFolderNavigation();
+            }
+        }
+
+        function reconcileCurrentScopeItemState(previousItem, nextItem) {
+            if (currentFolderScope !== 'favorites' && currentFolderScope !== 'unread') {
+                return false;
+            }
+
+            const matchesScope = currentFolderScope === 'favorites'
+                ? isItemFavorite(nextItem)
+                : !isItemRead(nextItem);
+            const matchedBefore = currentFolderScope === 'favorites'
+                ? isItemFavorite(previousItem)
+                : !isItemRead(previousItem);
+
+            if (matchesScope === matchedBefore) {
+                return false;
+            }
+
+            const itemId = String(nextItem.id || previousItem.id || '');
+            if (!itemId) return false;
+
+            if (matchesScope) {
+                const existingIndex = filteredEntries.findIndex((entry) => String(entry.id) === itemId);
+                if (existingIndex === -1) {
+                    itemsData = [nextItem, ...itemsData];
+                    filteredEntries = [nextItem, ...filteredEntries];
+                    latestTotalCount += 1;
+                }
+            } else {
+                itemsData = itemsData.filter((entry) => String(entry.id) !== itemId);
+                filteredEntries = filteredEntries.filter((entry) => String(entry.id) !== itemId);
+                latestTotalCount = Math.max(0, latestTotalCount - 1);
+            }
+
+            syncLibraryStatsForCurrentEntries();
+            renderItems(filteredEntries);
+            syncRecentViewsSectionState();
+            return true;
+        }
+
+        function applyLocalItemStateSnapshot(previousItem, nextItem) {
+            mergeUpdatedItem(nextItem);
+            updateSystemScopeCounts(previousItem, nextItem);
+            const rerendered = reconcileCurrentScopeItemState(previousItem, nextItem);
+            if (!rerendered) {
+                patchRenderedItemStateById(nextItem.id) || patchRenderedItemsById(nextItem.id);
+            }
+            if (currentOpenItemId === nextItem.id) {
+                refreshOpenModalChrome(nextItem, { preserveSidebarTab: true });
+            }
         }
 
         /* ── Background refresh: poll processing items & detect new external captures ── */
@@ -1742,18 +1984,18 @@
             const editIcon = `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>`;
             const viewIcon = `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>`;
             const isParseLoading = manualParseInFlightItemId === item.id || item.parse_status === 'processing';
-            const isNotionLoading = isItemSyncInFlight(item.id, 'notion');
-            const isObsidianLoading = isItemSyncInFlight(item.id, 'obsidian');
-            const notionTitle = isNotionLoading ? 'Notion 同步中...' : (item.notion_page_id ? '再次检查 Notion 同步' : '同步至 Notion');
-            const obsidianTitle = isObsidianLoading ? 'Obsidian 同步中...' : getObsidianSyncButtonLabel(item);
+            const notionReady = Boolean(item?.notion_page_id);
+            const notionLoading = isItemSyncInFlight(item?.id, 'notion');
+            const obsidianState = getObsidianSyncState(item);
+            const obsidianLoading = isItemSyncInFlight(item?.id, 'obsidian');
             const contentModeTitle = contentViewMode === 'edit' ? '预览模式' : '编辑模式';
             const contentModeIcon = contentViewMode === 'edit' ? viewIcon : editIcon;
 
             modalFooter.innerHTML = `
                 <div class="modal-footer-actions modal-footer-icons">
                     <button onclick="parseItemContent('${item.id}')" class="extract-btn modal-icon-btn parse-action-btn${isParseLoading ? ' is-loading' : ''}" title="${isParseLoading ? '识别中...' : '识别内容'}" ${isParseLoading ? 'disabled' : ''}>${parseIcon}</button>
-                    <button onclick="syncItem('${item.id}', 'notion')" class="extract-btn modal-icon-btn${isNotionLoading ? ' is-loading' : ''}" title="${notionTitle}" ${isNotionLoading ? 'disabled' : ''}>${notionIcon}</button>
-                    <button onclick="syncItem('${item.id}', 'obsidian')" class="extract-btn modal-icon-btn${isObsidianLoading ? ' is-loading' : ''}" title="${obsidianTitle}" ${isObsidianLoading ? 'disabled' : ''}>${obsidianIcon}</button>
+                    <button onclick="syncItem('${item.id}', 'notion')" class="extract-btn modal-icon-btn sync-target-btn is-notion${notionReady ? ' is-ready' : ''}${notionLoading ? ' is-loading' : ''}" title="${notionReady ? '再次同步到 Notion' : '同步到 Notion'}" ${notionLoading ? 'disabled' : ''}>${notionIcon}</button>
+                    <button onclick="syncItem('${item.id}', 'obsidian')" class="extract-btn modal-icon-btn sync-target-btn is-obsidian${obsidianState === 'ready' ? ' is-ready' : ''}${obsidianState === 'partial' ? ' is-partial' : ''}${obsidianLoading ? ' is-loading' : ''}" title="${obsidianLoading ? 'Obsidian同步中' : getObsidianSyncButtonLabel(item)}" ${obsidianLoading ? 'disabled' : ''}>${obsidianIcon}</button>
                     <button onclick="exportToChatGPT('${item.id}')" class="extract-btn modal-icon-btn" title="导入到 ChatGPT">${chatgptIcon}</button>
                     <button class="extract-btn modal-icon-btn content-mode-toggle" title="${contentModeTitle}">${contentModeIcon}</button>
                 </div>
@@ -1802,6 +2044,71 @@
             if (readerSidebarOpen && preserveSidebarTab && readerSidebarTab === 'note') {
                 openReaderSidebarPanel('note');
             }
+        }
+
+        async function toggleItemState(itemId, stateName, nextValue, event = null) {
+            event?.preventDefault?.();
+            event?.stopPropagation?.();
+
+            const key = `${String(itemId || '')}:${String(stateName || '')}`;
+            if (!itemId || !stateName || itemStateMutationKeys.has(key)) return;
+
+            const currentItem = getItemById(itemId);
+            if (!currentItem) return;
+
+            const payload = stateName === 'read'
+                ? { is_read: Boolean(nextValue) }
+                : { is_favorite: Boolean(nextValue) };
+            const optimisticItem = {
+                ...currentItem,
+                ...(stateName === 'read'
+                    ? {
+                        is_read: Boolean(nextValue),
+                        last_viewed_at: nextValue ? (currentItem.last_viewed_at || new Date().toISOString()) : null,
+                    }
+                    : {
+                        is_favorite: Boolean(nextValue),
+                    }),
+            };
+
+            itemStateMutationKeys.add(key);
+            applyLocalItemStateSnapshot(currentItem, optimisticItem);
+
+            try {
+                const response = await fetch(`/api/items/${encodeURIComponent(itemId)}/state`, {
+                    method: 'PATCH',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload),
+                });
+                const data = await response.json().catch(() => ({}));
+                if (!response.ok) {
+                    throw new Error(data.detail || '状态更新失败');
+                }
+
+                applyLocalItemStateSnapshot(optimisticItem, data);
+            } catch (error) {
+                applyLocalItemStateSnapshot(optimisticItem, currentItem);
+                showToast(`更新失败：${error.message}`, 'error');
+            } finally {
+                itemStateMutationKeys.delete(key);
+                const latestItem = getItemById(itemId) || currentItem;
+                patchRenderedItemStateById(itemId) || patchRenderedItemsById(itemId);
+                if (currentOpenItemId === itemId) {
+                    refreshOpenModalChrome(latestItem, { preserveSidebarTab: true });
+                }
+            }
+        }
+
+        async function toggleItemRead(itemId, event = null) {
+            const item = getItemById(itemId);
+            if (!item) return;
+            await toggleItemState(itemId, 'read', !isItemRead(item), event);
+        }
+
+        async function toggleItemFavorite(itemId, event = null) {
+            const item = getItemById(itemId);
+            if (!item) return;
+            await toggleItemState(itemId, 'favorite', !isItemFavorite(item), event);
         }
 
         async function parseItemContent(itemId, event = null) {
@@ -2073,8 +2380,25 @@
                 readerNavOrigin = navOrigin;
             }
             currentOpenItemId = item.id;
+            const itemWasRead = isItemRead(item);
+            if (!itemWasRead) {
+                item = {
+                    ...item,
+                    is_read: true,
+                    last_viewed_at: item.last_viewed_at || new Date().toISOString(),
+                };
+                mergeUpdatedItem(item);
+                patchRenderedItemsById(item.id);
+            }
             // Fire-and-forget view tracking
-            fetch(`/api/items/${encodeURIComponent(item.id)}/view`, { method: 'POST' }).catch(() => {});
+            fetch(`/api/items/${encodeURIComponent(item.id)}/view`, { method: 'POST' })
+                .then(() => {
+                    if (!itemWasRead) {
+                        return fetchFolders();
+                    }
+                    return null;
+                })
+                .catch(() => {});
             const isNewItem = previousOpenItemId !== currentOpenItemId;
             const preferredSidebarTab = explicitSidebarTab
                 || (preserveSidebarTab ? normalizeReaderSidebarTab(readerSidebarTab) : 'note');

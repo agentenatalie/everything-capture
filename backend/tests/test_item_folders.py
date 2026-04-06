@@ -102,6 +102,27 @@ class ItemFolderTests(unittest.TestCase):
         self.assertEqual(serialized.folder_id, "folder-b")
         self.assertEqual(serialized.folder_name, "Beta")
 
+    def test_serialize_items_exposes_read_and_favorite_state(self) -> None:
+        viewed_at = datetime.datetime(2026, 3, 9, 12, 5, 0)
+        item = Item(
+            id="item-1",
+            title="Example",
+            source_url="https://example.com",
+            canonical_text="body",
+            platform="web",
+            status="ready",
+            created_at=datetime.datetime(2026, 3, 9, 12, 0, 0),
+            last_viewed_at=viewed_at,
+            is_favorite=True,
+        )
+        item.folder_links = []
+        item.media = []
+
+        [serialized] = serialize_items([item])
+
+        self.assertTrue(serialized.is_read)
+        self.assertTrue(serialized.is_favorite)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -36,6 +36,7 @@ from schemas import (
     ItemPageNoteResponse,
     ItemPageNoteUpdateRequest,
     ItemResponse,
+    ItemStateUpdateRequest,
     ItemTagUpdateRequest,
     MediaResponse,
 )
@@ -331,6 +332,8 @@ def serialize_items(items: list[Item]) -> list[ItemResponse]:
             folder_names=folder_names,
             folder_count=len(folder_ids),
             last_viewed_at=item.last_viewed_at,
+            is_read=bool(item.last_viewed_at),
+            is_favorite=bool(getattr(item, "is_favorite", False)),
             tag_ids=tag_ids,
             tag_names=tag_names,
             media=media_list,
@@ -424,6 +427,10 @@ def apply_folder_filter(query, folder_scope: str = "all", folder_id: Optional[st
     if normalized_scope == "unfiled":
         linked_item_ids = query.session.query(ItemFolderLink.item_id)
         return query.filter(~Item.id.in_(linked_item_ids))
+    if normalized_scope == "favorites":
+        return query.filter(Item.is_favorite.is_(True))
+    if normalized_scope == "unread":
+        return query.filter(Item.last_viewed_at.is_(None))
     return query
 
 
@@ -1328,6 +1335,30 @@ def record_item_view(item_id: str, db: Session = Depends(get_db)):
     item.last_viewed_at = datetime.utcnow()
     db.commit()
     return Response(status_code=204)
+
+
+@router.patch("/items/{item_id}/state", response_model=ItemResponse)
+def update_item_state(
+    item_id: str,
+    request: ItemStateUpdateRequest,
+    db: Session = Depends(get_db),
+):
+    user_id = get_current_user_id()
+    item = db.query(Item).filter(Item.id == item_id, Item.user_id == user_id).first()
+    if not item:
+        raise HTTPException(status_code=404, detail="Item not found")
+
+    if request.is_read is None and request.is_favorite is None:
+        raise HTTPException(status_code=400, detail="At least one state field is required")
+
+    if request.is_read is not None:
+        item.last_viewed_at = datetime.utcnow() if request.is_read else None
+    if request.is_favorite is not None:
+        item.is_favorite = bool(request.is_favorite)
+
+    db.commit()
+    db.refresh(item)
+    return serialize_items([item])[0]
 
 
 @router.patch("/items/{item_id}/tags", response_model=ItemResponse)

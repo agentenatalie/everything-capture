@@ -1220,7 +1220,12 @@ def _assistant_agent_system_prompt(agent_permissions: list[str], memories: list[
         "\n"
         "【重要：执行操作的通用原则】\n"
         "你拥有多个原子工具，可以自由组合来完成用户的各种请求：\n"
-        "- 查看内容：search_library_items / list_recent_notes（支持 scope='unfiled' 筛选未归档）/ get_item_details\n"
+        "- 查看内容：search_library_items / list_recent_notes / get_item_details\n"
+        "  ⚠ 重点：list_recent_notes 的 scope 参数必须根据用户意图正确选择：\n"
+        "    • scope='unread' —— 用户问『还没看/没读过/未读/待读/最近收藏了啥值得读/backlog/挑几个值得读的』时必须用这个。返回的是所有 last_viewed_at 为空的条目（即用户从未打开过的），不受时间限制。\n"
+        "    • scope='unfiled' —— 用户问『未归档/没分类/散着的』时用这个。\n"
+        "    • scope='all'（默认）—— 只有在用户想看最新的全部收藏（不关心读没读）时才用。\n"
+        "    • 当用户要你『总结/挑选/推荐』未读收藏时，把 limit 设高（50-200），宁多勿少。\n"
         "- 管理标签：list_tags / create_tag / assign_item_tags / batch_assign_item_tags\n"
         "- 管理文件夹：list_folders / create_folder / assign_item_folders / batch_assign_item_folders\n"
         "- 联网搜索：web_search — 当需要查询收藏库以外的外部信息（事实校验、最新资讯、百科知识等）时使用\n"
@@ -2745,17 +2750,24 @@ def _build_agent_tools(agent_permissions: list[str]) -> list[dict[str, Any]]:
                 "name": "list_recent_notes",
                 "description": (
                     "List saved items from the library. "
-                    "Supports filtering by scope (all/unfiled) and platform. "
-                    "Returns item_id, title, folder info, excerpt for each item."
+                    "Supports filtering by scope (all/unfiled/unread) and platform. "
+                    "CRITICAL: Use scope='unread' whenever the user asks anything about "
+                    "what they haven't read yet / what to read / recent captures / backlog / "
+                    "待读 / 还没看 / 没读过的 / 未读 / 最近收藏了啥 / 挑几个值得读的. "
+                    "The 'unread' scope returns ALL items the user has never opened "
+                    "(last_viewed_at IS NULL), regardless of capture date. "
+                    "Do NOT use scope='all' for these questions — it will include already-read items. "
+                    "Returns item_id, title, folder info, excerpt for each item. "
+                    "Set a high limit (e.g. 50) when the user asks for a comprehensive overview of unread items."
                 ),
                 "parameters": {
                     "type": "object",
                     "properties": {
-                        "limit": {"type": "integer", "minimum": 1, "maximum": 50},
+                        "limit": {"type": "integer", "minimum": 1, "maximum": 200},
                         "scope": {
                             "type": "string",
-                            "enum": ["all", "unfiled"],
-                            "description": "'unfiled' = only items not in any folder. Default 'all'.",
+                            "enum": ["all", "unfiled", "unread"],
+                            "description": "'unfiled' = only items not in any folder. 'unread' = items the user has never opened (the user's backlog / 待读收藏). Default 'all'.",
                         },
                         "platform": {
                             "type": "string",
@@ -3485,7 +3497,7 @@ async def _execute_agent_tool(
         return result, AiToolEventResponse(name=tool_name, summary=f"已读取《{item.title or item.id}》的详情"), [], []
 
     if tool_name == "list_recent_notes":
-        list_limit = max(1, min(int(arguments.get("limit") or 10), 50))
+        list_limit = max(1, min(int(arguments.get("limit") or 10), 200))
         scope = _clean_optional_string(arguments.get("scope")) or "all"
         platform_filter = _clean_optional_string(arguments.get("platform"))
 
@@ -3493,6 +3505,8 @@ async def _execute_agent_tool(
 
         if scope == "unfiled":
             q = q.outerjoin(ItemFolderLink, ItemFolderLink.item_id == Item.id).filter(ItemFolderLink.item_id.is_(None))
+        elif scope == "unread":
+            q = q.filter(Item.last_viewed_at.is_(None))
         if platform_filter:
             q = q.filter(Item.platform == platform_filter)
 
@@ -3503,7 +3517,7 @@ async def _execute_agent_tool(
             virtual = _item_to_virtual_note(item)
             virtual = prepare_note_for_similarity(virtual)
             ranked_notes.append((virtual, 1.0))
-        scope_label = "未归档" if scope == "unfiled" else "最近"
+        scope_label = {"unfiled": "未归档", "unread": "未读"}.get(scope, "最近")
         result = {"status": "ok", "results": [_tool_item_result(item) for item in items]}
         summary = f"已列出{scope_label} {len(items)} 条收藏内容"
         return result, AiToolEventResponse(name=tool_name, summary=summary), ranked_notes, []

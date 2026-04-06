@@ -170,7 +170,7 @@
             const text = String(value || '');
             if (!text) return false;
             try {
-                if (navigator.clipboard?.writeText && window.isSecureContext) {
+                if (navigator.clipboard?.writeText) {
                     await navigator.clipboard.writeText(text);
                     return true;
                 }
@@ -178,22 +178,74 @@
                 console.warn('Navigator clipboard copy failed, falling back', error);
             }
 
+            if (!document.body) return false;
+
+            const activeElement = document.activeElement instanceof HTMLElement
+                ? document.activeElement
+                : null;
+            const selection = typeof window.getSelection === 'function'
+                ? window.getSelection()
+                : null;
+            const savedRanges = [];
+            if (selection?.rangeCount) {
+                for (let index = 0; index < selection.rangeCount; index += 1) {
+                    savedRanges.push(selection.getRangeAt(index).cloneRange());
+                }
+            }
+
+            const restoreSelection = () => {
+                if (selection) {
+                    selection.removeAllRanges();
+                    savedRanges.forEach((range) => selection.addRange(range));
+                }
+                if (activeElement && typeof activeElement.focus === 'function') {
+                    try {
+                        activeElement.focus({ preventScroll: true });
+                    } catch (error) {
+                        activeElement.focus();
+                    }
+                }
+            };
+
             const helper = document.createElement('textarea');
             helper.value = text;
-            helper.setAttribute('readonly', 'readonly');
+            helper.setAttribute('aria-hidden', 'true');
             helper.style.position = 'fixed';
+            helper.style.top = '0';
+            helper.style.left = '-9999px';
             helper.style.opacity = '0';
             helper.style.pointerEvents = 'none';
+            helper.style.contain = 'strict';
             document.body.appendChild(helper);
-            helper.focus();
-            helper.select();
             let succeeded = false;
             try {
+                try {
+                    helper.focus({ preventScroll: true });
+                } catch (error) {
+                    helper.focus();
+                }
+                helper.select();
+                helper.setSelectionRange(0, helper.value.length);
                 succeeded = document.execCommand('copy');
+                if (!succeeded) {
+                    const handleCopy = (event) => {
+                        if (!event.clipboardData) return;
+                        event.preventDefault();
+                        event.clipboardData.setData('text/plain', text);
+                        succeeded = true;
+                    };
+                    document.addEventListener('copy', handleCopy, true);
+                    try {
+                        document.execCommand('copy');
+                    } finally {
+                        document.removeEventListener('copy', handleCopy, true);
+                    }
+                }
             } catch (error) {
                 console.warn('execCommand copy failed', error);
             } finally {
                 helper.remove();
+                restoreSelection();
             }
             return succeeded;
         }
@@ -1607,72 +1659,64 @@
             return refMap;
         }
 
-        function _linkifyCitationRefs(html, content, citations) {
-            if (!Array.isArray(citations) || !citations.length) return html;
-            const refMap = _buildCitationRefMap(content, citations);
-            if (!Object.keys(refMap).length) return html;
-
-            const host = document.createElement('div');
-            host.innerHTML = html;
-            // Only replace visible text-node refs so markdown-generated HTML structure stays intact.
-            const walker = document.createTreeWalker(host, window.NodeFilter?.SHOW_TEXT ?? 4);
-            const textNodes = [];
-            let currentNode = walker.nextNode();
-            while (currentNode) {
-                textNodes.push(currentNode);
-                currentNode = walker.nextNode();
+        // Walk the source markdown and replace `[N]` references with opaque
+        // placeholders BEFORE markdown rendering. We skip fenced code blocks and
+        // inline code spans so refs inside code stay literal. The placeholder
+        // uses a null-byte sentinel that survives escapeHtml and won't appear
+        // in user content, then gets swapped to a <button> after rendering.
+        function _injectCitationPlaceholders(source, refMap) {
+            const text = String(source || '');
+            const tokens = [];
+            if (!text || !refMap || !Object.keys(refMap).length) {
+                return { text, tokens };
             }
-
-            textNodes.forEach((textNode) => {
-                const parentEl = textNode.parentElement;
-                if (!parentEl) return;
-                if (parentEl.closest('pre, code, a, button, script, style')) return;
-
-                const rawText = textNode.nodeValue || '';
-                if (!/\[\d{1,3}\]/.test(rawText)) return;
-
-                const fragment = document.createDocumentFragment();
-                const pattern = /\[(\d{1,3})\]/g;
-                let lastIndex = 0;
-                let hasReplacement = false;
-                let match;
-
-                while ((match = pattern.exec(rawText)) !== null) {
-                    const fullMatch = match[0];
-                    const num = match[1];
-                    const start = match.index;
-                    const end = start + fullMatch.length;
-                    const referenceIndex = parseInt(num, 10);
-                    const citation = refMap[referenceIndex];
-
-                    if (!citation || !citation.library_item_id) {
-                        continue;
-                    }
-
-                    if (start > lastIndex) {
-                        fragment.appendChild(document.createTextNode(rawText.slice(lastIndex, start)));
-                    }
-
-                    const button = document.createElement('button');
-                    button.className = 'ai-citation-ref';
-                    button.type = 'button';
-                    button.setAttribute('data-ai-citation-id', String(citation.library_item_id));
-                    button.setAttribute('title', citation.title || `引用 ${num}`);
-                    button.textContent = fullMatch;
-                    fragment.appendChild(button);
-
-                    lastIndex = end;
-                    hasReplacement = true;
+            let out = '';
+            let i = 0;
+            const len = text.length;
+            while (i < len) {
+                // fenced code block ```...```
+                if (text.startsWith('```', i)) {
+                    const end = text.indexOf('```', i + 3);
+                    if (end === -1) { out += text.slice(i); break; }
+                    out += text.slice(i, end + 3);
+                    i = end + 3;
+                    continue;
                 }
-
-                if (!hasReplacement) return;
-                if (lastIndex < rawText.length) {
-                    fragment.appendChild(document.createTextNode(rawText.slice(lastIndex)));
+                // inline code `...`
+                if (text[i] === '`') {
+                    const end = text.indexOf('`', i + 1);
+                    if (end === -1) { out += text[i]; i += 1; continue; }
+                    out += text.slice(i, end + 1);
+                    i = end + 1;
+                    continue;
                 }
-                textNode.parentNode?.replaceChild(fragment, textNode);
-            });
+                // [N] citation reference
+                if (text[i] === '[') {
+                    const rest = text.slice(i, i + 6);
+                    const m = /^\[(\d{1,3})\]/.exec(rest);
+                    if (m) {
+                        const num = m[1];
+                        const referenceIndex = parseInt(num, 10);
+                        const citation = refMap[referenceIndex];
+                        if (citation && citation.library_item_id) {
+                            const tokenIdx = tokens.length;
+                            tokens.push({ num, citation });
+                            out += `\x00AICITE${tokenIdx}\x00`;
+                            i += m[0].length;
+                            continue;
+                        }
+                    }
+                }
+                out += text[i];
+                i += 1;
+            }
+            return { text: out, tokens };
+        }
 
-            return host.innerHTML;
+        function _renderCitationButtonHtml(num, citation) {
+            const id = escapeAttribute(String(citation.library_item_id));
+            const title = escapeAttribute(citation.title || `引用 ${num}`);
+            return `<button class="ai-citation-ref" type="button" data-ai-citation-id="${id}" title="${title}">[${escapeHtml(num)}]</button>`;
         }
 
         function renderAssistantMessage(entry, options = {}) {
@@ -1693,11 +1737,25 @@
             const thinkingMarkup = renderThinkingBlock(thinking);
 
             const displayContent = answer || entry.content || '';
-            let markdownHtml = renderMarkdown(displayContent);
-            // Make [N] references clickable — link to the cited item
+            // Pre-process: swap [N] citation refs for opaque placeholders, then
+            // string-substitute back to <button> after markdown rendering. This
+            // avoids walking the rendered DOM (which used to drop characters
+            // when refs straddled inline nodes or had no matching citation).
+            let citationTokens = [];
+            let renderSource = displayContent;
             if (citations.length) {
-                markdownHtml = _linkifyCitationRefs(markdownHtml, displayContent, entry.citations);
+                const refMap = _buildCitationRefMap(displayContent, entry.citations);
+                if (Object.keys(refMap).length) {
+                    const injected = _injectCitationPlaceholders(displayContent, refMap);
+                    renderSource = injected.text;
+                    citationTokens = injected.tokens;
+                }
             }
+            let markdownHtml = renderMarkdown(renderSource);
+            citationTokens.forEach((token, idx) => {
+                const button = _renderCitationButtonHtml(token.num, token.citation);
+                markdownHtml = markdownHtml.split(`\x00AICITE${idx}\x00`).join(button);
+            });
 
             const copyBtnMarkup = (!entry.isError && displayContent.trim())
                 ? `<button class="ai-msg-copy-btn" type="button" data-ai-copy-msg aria-label="复制" title="复制">${AI_CODE_COPY_ICON}</button>`
@@ -2915,9 +2973,10 @@
                 ? event.target.closest('[data-ai-copy-msg]')
                 : null;
             if (msgCopyBtn) {
+                event.preventDefault();
                 const msgEl = msgCopyBtn.closest('.ai-msg');
                 const markdown = msgEl?.querySelector('.ai-markdown');
-                const text = markdown?.innerText || '';
+                const text = (markdown?.innerText || markdown?.textContent || '').trim();
                 if (!text) return;
                 const copied = await copyTextToClipboard(text);
                 if (!copied) {
@@ -2941,6 +3000,7 @@
                 ? event.target.closest('[data-ai-copy-code]')
                 : null;
             if (!copyBtn) return;
+            event.preventDefault();
             const codeHost = copyBtn.closest('.ai-code-block') || copyBtn.closest('pre');
             const codeElement = codeHost?.matches('pre')
                 ? codeHost.querySelector('code')

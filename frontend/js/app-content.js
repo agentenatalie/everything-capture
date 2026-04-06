@@ -346,6 +346,10 @@
             if (platform !== 'all') params.set('platform', platform);
             if (currentFolderScope === 'unfiled') {
                 params.set('folder_scope', 'unfiled');
+            } else if (currentFolderScope === 'favorites') {
+                params.set('folder_scope', 'favorites');
+            } else if (currentFolderScope === 'unread') {
+                params.set('folder_scope', 'unread');
             } else if (currentFolderScope === 'folder' && currentFolderId) {
                 params.set('folder_id', currentFolderId);
             }
@@ -1579,21 +1583,10 @@
         }
 
         function renderSyncBadges(item) {
-            const obsidianState = item?.obsidian_sync_state === 'partial'
-                ? 'partial'
-                : (item?.obsidian_sync_state === 'ready' ? 'ready' : (item?.obsidian_path ? 'ready' : 'idle'));
-            const obsidianClass = obsidianState === 'ready'
-                ? 'is-ready'
-                : (obsidianState === 'partial' ? 'is-partial' : 'is-idle');
-            const obsidianTitle = obsidianState === 'ready'
-                ? 'Obsidian已完全同步'
-                : (obsidianState === 'partial' ? 'Obsidian有更新待同步' : 'Obsidian未同步');
-            return `
-                <div class="knowledge-dots" aria-label="知识库状态">
-                    <span class="knowledge-dot notion ${item.notion_page_id ? 'is-ready' : 'is-idle'}" title="Notion${item.notion_page_id ? '已同步' : '未同步'}"></span>
-                    <span class="knowledge-dot obsidian ${obsidianClass}" title="${obsidianTitle}"></span>
-                </div>
-            `;
+            if (typeof renderItemStateButtons === 'function') {
+                return renderItemStateButtons(item);
+            }
+            return '';
         }
 
         function setNotePanelOpen(nextValue) {

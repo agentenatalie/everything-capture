@@ -80,6 +80,7 @@ class Item(Base):
     parsed_at = Column(DateTime, nullable=True)
     parse_retry_count = Column(Integer, nullable=False, default=0)
     last_viewed_at = Column(DateTime, nullable=True)
+    is_favorite = Column(Boolean, nullable=False, default=False, index=True)
 
     user = relationship("User", back_populates="items", lazy="joined")
     workspace = relationship("Workspace", back_populates="items", lazy="joined")

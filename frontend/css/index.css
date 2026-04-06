@@ -873,6 +873,48 @@
             background: #2a2c2e;
         }
 
+        .folder-item.is-favorites-scope {
+            color: #2a2c2e;
+        }
+
+        .folder-item.is-favorites-scope:hover {
+            background: #f3f4f6;
+            color: #2a2c2e;
+            border-color: rgba(229, 231, 235, 0.96);
+        }
+
+        .folder-item.is-favorites-scope.active {
+            background: #eef2f6;
+            color: #111827;
+            border-color: rgba(209, 213, 219, 0.98);
+            box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.6);
+        }
+
+        .folder-item.is-favorites-scope.active::before {
+            background: #2a2c2e;
+        }
+
+        .folder-item.is-unread-scope {
+            color: #2a2c2e;
+        }
+
+        .folder-item.is-unread-scope:hover {
+            background: #f3f4f6;
+            color: #2a2c2e;
+            border-color: rgba(229, 231, 235, 0.96);
+        }
+
+        .folder-item.is-unread-scope.active {
+            background: #eef2f6;
+            color: #111827;
+            border-color: rgba(209, 213, 219, 0.98);
+            box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.6);
+        }
+
+        .folder-item.is-unread-scope.active::before {
+            background: #2a2c2e;
+        }
+
         .folder-item-name {
             flex: 1;
             min-width: 0;
@@ -932,6 +974,30 @@
 
         .folder-chip.active {
             background: #ffffff;
+            color: #111827;
+        }
+
+        .folder-chip--favorites {
+            background: rgba(255, 255, 255, 0.55);
+            border-color: rgba(255, 255, 255, 0.42);
+            color: #556071;
+        }
+
+        .folder-chip--favorites.active {
+            background: #ffffff;
+            border-color: rgba(255, 255, 255, 0.42);
+            color: #111827;
+        }
+
+        .folder-chip--unread {
+            background: rgba(255, 255, 255, 0.55);
+            border-color: rgba(255, 255, 255, 0.42);
+            color: #556071;
+        }
+
+        .folder-chip--unread.active {
+            background: #ffffff;
+            border-color: rgba(255, 255, 255, 0.42);
             color: #111827;
         }
 
@@ -1343,34 +1409,88 @@
         .knowledge-dots {
             display: inline-flex;
             align-items: center;
-            gap: 8px;
+            gap: 0;
             flex-wrap: nowrap;
             flex-shrink: 0;
+        }
+
+        .knowledge-dots.is-compact {
+            gap: 5px;
         }
 
         .knowledge-dot {
             width: 8px;
             height: 8px;
+            padding: 0;
+            border: none;
             border-radius: 999px;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
             background: #cbd5e1;
-            box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.72);
-        }
-
-        .knowledge-dot.notion.is-ready {
-            background: #111111;
-        }
-
-        .knowledge-dot.obsidian.is-ready {
-            background: #6d28d9;
+            color: transparent;
+            cursor: default;
+            transition: background 0.18s ease, opacity 0.18s ease;
+            position: relative;
             box-shadow: none;
         }
 
-        .knowledge-dot.obsidian.is-partial {
-            background: #a78bfa;
+        .knowledge-dot.is-indicator {
+            cursor: default;
+            pointer-events: none;
         }
 
-        .knowledge-dot.is-idle {
-            background: #cbd5e1;
+        .knowledge-dot svg {
+            width: 15px;
+            height: 15px;
+            stroke: currentColor;
+            stroke-width: 1.9;
+            stroke-linecap: round;
+            stroke-linejoin: round;
+            flex-shrink: 0;
+        }
+
+        .knowledge-dots.is-compact .knowledge-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 999px;
+        }
+
+        .knowledge-dot.is-active.is-read {
+            background: #111111;
+        }
+
+        .knowledge-dot.is-active.is-favorite {
+            background: #fdc928;
+        }
+
+        .knowledge-dot:disabled {
+            opacity: 0.55;
+            cursor: default;
+        }
+
+        .knowledge-dot.is-loading svg {
+            opacity: 0;
+        }
+
+        .knowledge-dots.is-compact .knowledge-dot.is-loading {
+            animation: none;
+            box-shadow: none;
+        }
+
+        .knowledge-dots.is-compact .knowledge-dot.is-loading::after {
+            content: none;
+        }
+
+        .knowledge-dot.is-loading::after {
+            content: '';
+            position: absolute;
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            border: 2px solid rgba(203, 213, 225, 0.95);
+            border-top-color: #64748b;
+            animation: modal-icon-spin 0.6s linear infinite;
         }
 
         .inline-icon {
@@ -2299,6 +2419,13 @@
             flex-shrink: 0;
         }
 
+        .modal-icon-btn.item-state-toggle svg {
+            stroke: currentColor;
+            stroke-width: 1.85;
+            stroke-linecap: round;
+            stroke-linejoin: round;
+        }
+
         .modal-icon-btn.is-loading {
             pointer-events: none;
         }
@@ -2315,6 +2442,37 @@
             border: 2px solid #cbd5e1;
             border-top-color: #64748b;
             animation: modal-icon-spin 0.6s linear infinite;
+        }
+
+        .modal-footer-icons .knowledge-dots {
+            gap: 0;
+        }
+
+        .modal-icon-btn.item-state-toggle.is-active.is-read {
+            color: #111111;
+        }
+
+        .modal-icon-btn.item-state-toggle.is-active.is-favorite {
+            color: #fdc928;
+        }
+
+        .modal-icon-btn.sync-target-btn svg {
+            stroke: currentColor;
+            stroke-width: 1.8;
+            stroke-linecap: round;
+            stroke-linejoin: round;
+        }
+
+        .modal-icon-btn.sync-target-btn.is-notion.is-ready {
+            color: #111111;
+        }
+
+        .modal-icon-btn.sync-target-btn.is-obsidian.is-ready {
+            color: #6d28d9;
+        }
+
+        .modal-icon-btn.sync-target-btn.is-obsidian.is-partial {
+            color: #8b5cf6;
         }
 
         .parse-action-btn.is-loading::after {
@@ -3031,11 +3189,12 @@
         }
 
         .article-html a {
-            color: var(--accent);
+            color: #0071e3;
             text-decoration: none;
         }
 
         .article-html a:hover {
+            color: #0077ed;
             text-decoration: underline;
         }
 
@@ -3580,11 +3739,31 @@
         }
 
         .sidebar-user-copy {
+            display: flex;
+            align-items: center;
+            gap: 10px;
             min-width: 0;
             flex: 1;
             overflow: hidden;
             opacity: 1;
             transition: opacity 0.22s ease 0.08s;
+        }
+
+        .sidebar-user-copy::before {
+            content: '库';
+            display: grid;
+            place-items: center;
+            width: 28px;
+            height: 28px;
+            border-radius: 999px;
+            flex-shrink: 0;
+            font-size: 11px;
+            font-weight: 800;
+            line-height: 1;
+            color: #6b7280;
+            background: #e5e7eb;
+            border: none;
+            box-shadow: none;
         }
 
         .sidebar-user-meta {
@@ -4294,40 +4473,12 @@
         }
 
         .knowledge-dots {
-            gap: 5px;
+            gap: 6px;
         }
 
         .knowledge-dot {
             width: 8px;
             height: 8px;
-            border-radius: 50%;
-            background: #d1d5db;
-            box-shadow: none;
-            transition: transform 0.18s ease, background 0.18s ease, box-shadow 0.18s ease;
-        }
-
-        .knowledge-dot.notion.is-ready {
-            background: #2a2c2e;
-        }
-
-        .knowledge-dot.obsidian.is-ready {
-            background: #6d28d9;
-            box-shadow: none;
-        }
-
-        .knowledge-dot.obsidian.is-partial {
-            background: #a78bfa;
-        }
-
-        .knowledge-dot.is-processing {
-            background: #0f172a;
-            box-shadow: 0 0 0 4px rgba(15, 23, 42, 0.08);
-            animation: status-pulse 1.15s ease-in-out infinite;
-        }
-
-        .knowledge-dot.obsidian.is-processing {
-            background: #6d28d9;
-            box-shadow: 0 0 0 4px rgba(109, 40, 217, 0.12);
         }
 
         .activity-chips {
@@ -4486,6 +4637,7 @@
         }
 
         .folder-action-btn,
+        .favorite-action-btn,
         .card-footer-actions .delete-btn,
         .card-footer-actions .source-link {
             padding: 5px;
@@ -4511,6 +4663,48 @@
             border: none;
             box-shadow: none;
             color: #0071e3;
+        }
+
+        .favorite-action-btn svg,
+        .folder-action-btn svg,
+        .card-footer-actions .delete-btn svg,
+        .list-actions .delete-btn svg {
+            width: 16px;
+            height: 16px;
+            stroke: currentColor;
+            stroke-width: 1.9;
+            stroke-linecap: round;
+            stroke-linejoin: round;
+            fill: none;
+            display: block;
+            flex-shrink: 0;
+        }
+
+        .favorite-action-btn svg {
+            width: 16.5px;
+            height: 16.5px;
+            transform: translateX(0.4px);
+        }
+
+        .folder-action-btn svg {
+            transform: translateY(0.7px);
+        }
+
+        .favorite-action-btn:hover {
+            transform: none;
+            background: none;
+            border: none;
+            box-shadow: none;
+            color: #f0b90b;
+        }
+
+        .favorite-action-btn.is-active {
+            color: #fdc928;
+        }
+
+        .favorite-action-btn.is-loading {
+            pointer-events: none;
+            opacity: 0.6;
         }
 
         .folder-action-btn.is-processing:hover {
@@ -7649,9 +7843,9 @@
 
         .modal.is-fullscreen {
             --reader-content-width: 800px;
-            --reader-sidebar-default-width: 30vw;
+            --reader-sidebar-default-ratio: 0.30;
+            --reader-sidebar-max-ratio: 0.44;
             --reader-sidebar-min-width: 360px;
-            --reader-sidebar-max-width: 720px;
             --reader-carousel-width: 1120px;
             --reader-inline-gutter: clamp(18px, 3vw, 40px);
         }
@@ -7737,9 +7931,9 @@
         }
 
         .modal.is-fullscreen .reader-sidebar {
-            width: min(var(--reader-sidebar-default-width), 40vw);
+            width: max(var(--reader-sidebar-min-width), calc(100vw * var(--reader-sidebar-default-ratio)));
             min-width: var(--reader-sidebar-min-width);
-            max-width: var(--reader-sidebar-max-width);
+            max-width: max(var(--reader-sidebar-min-width), calc(100vw * var(--reader-sidebar-max-ratio)));
             border-left: 1px solid rgba(226, 232, 240, 0.94);
             background: #ffffff;
             display: flex;

@@ -177,13 +177,17 @@ def ensure_runtime_schema():
             connection.exec_driver_sql("ALTER TABLE items ADD COLUMN parse_retry_count INTEGER NOT NULL DEFAULT 0")
         if "last_viewed_at" not in item_columns:
             connection.exec_driver_sql("ALTER TABLE items ADD COLUMN last_viewed_at DATETIME")
+        if "is_favorite" not in item_columns:
+            connection.exec_driver_sql("ALTER TABLE items ADD COLUMN is_favorite BOOLEAN NOT NULL DEFAULT 0")
         connection.exec_driver_sql("CREATE INDEX IF NOT EXISTS idx_items_last_viewed_at ON items(last_viewed_at DESC)")
+        connection.exec_driver_sql("UPDATE items SET is_favorite = 0 WHERE is_favorite IS NULL")
         connection.exec_driver_sql(
             "UPDATE items SET parse_status = 'idle' WHERE parse_status IS NULL OR trim(parse_status) = ''"
         )
         connection.exec_driver_sql("CREATE INDEX IF NOT EXISTS idx_items_user_id ON items(user_id)")
         connection.exec_driver_sql("CREATE INDEX IF NOT EXISTS idx_items_workspace_id ON items(workspace_id)")
         connection.exec_driver_sql("CREATE INDEX IF NOT EXISTS idx_items_folder_id ON items(folder_id)")
+        connection.exec_driver_sql("CREATE INDEX IF NOT EXISTS idx_items_is_favorite ON items(is_favorite)")
         connection.exec_driver_sql("CREATE INDEX IF NOT EXISTS idx_items_parse_status ON items(parse_status)")
         connection.exec_driver_sql("CREATE INDEX IF NOT EXISTS idx_items_parse_started_at ON items(parse_started_at)")
         connection.exec_driver_sql("CREATE INDEX IF NOT EXISTS idx_items_parsed_at ON items(parsed_at)")

@@ -208,6 +208,8 @@
         let foldersData = [];
         let totalFolderCount = 0;
         let unfiledFolderCount = 0;
+        let favoriteFolderCount = 0;
+        let unreadFolderCount = 0;
         let currentFolderScope = 'all';
         let currentFolderId = null;
         let folderSearchQuery = '';
@@ -310,6 +312,8 @@
             foldersData = [];
             totalFolderCount = 0;
             unfiledFolderCount = 0;
+            favoriteFolderCount = 0;
+            unreadFolderCount = 0;
             latestVisibleCount = 0;
             latestReturnedCount = 0;
             latestTotalCount = 0;

@@ -1,3 +1,4 @@
+import datetime
 import os
 import sys
 import unittest
@@ -188,6 +189,49 @@ class FolderHierarchyTests(unittest.TestCase):
 
             self.assertEqual(folders_by_id[parent.id].item_count, 3)
             self.assertEqual(folders_by_id[child.id].item_count, 2)
+
+    def test_get_folders_returns_favorite_and_unread_counts(self) -> None:
+        with self.Session() as db:
+            db.add_all(
+                [
+                    Item(
+                        user_id=DEFAULT_USER_ID,
+                        source_url="https://example.com/favorite-unread",
+                        title="Favorite unread",
+                        canonical_text="body",
+                        platform="web",
+                        status="ready",
+                        is_favorite=True,
+                        last_viewed_at=None,
+                    ),
+                    Item(
+                        user_id=DEFAULT_USER_ID,
+                        source_url="https://example.com/favorite-read",
+                        title="Favorite read",
+                        canonical_text="body",
+                        platform="web",
+                        status="ready",
+                        is_favorite=True,
+                        last_viewed_at=datetime.datetime(2026, 4, 6, 9, 0, 0),
+                    ),
+                    Item(
+                        user_id=DEFAULT_USER_ID,
+                        source_url="https://example.com/read-only",
+                        title="Read only",
+                        canonical_text="body",
+                        platform="web",
+                        status="ready",
+                        is_favorite=False,
+                        last_viewed_at=datetime.datetime(2026, 4, 6, 10, 0, 0),
+                    ),
+                ]
+            )
+            db.commit()
+
+            response = get_folders(db)
+
+        self.assertEqual(response.favorite_count, 2)
+        self.assertEqual(response.unread_count, 1)
 
 
 if __name__ == "__main__":

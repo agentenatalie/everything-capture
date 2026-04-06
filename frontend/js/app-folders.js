@@ -32,6 +32,8 @@
 
         function getCurrentFolderLabel() {
             if (currentFolderScope === 'unfiled') return '未分类';
+            if (currentFolderScope === 'favorites') return '收藏夹';
+            if (currentFolderScope === 'unread') return '未读';
             if (currentFolderScope === 'folder') {
                 const folder = foldersData.find((entry) => entry.id === currentFolderId);
                 return folder ? `文件夹：${folder.name}` : '文件夹';
@@ -159,6 +161,9 @@
         function renderFolderNavItem(label, scope, count, folderId = null, options = {}) {
             const active = currentFolderScope === scope && (scope !== 'folder' || currentFolderId === folderId);
             const isMainFolder = scope === 'folder' && (options.level || 0) === 0 && Boolean(options.hasChildren);
+            const scopeClass = scope === 'favorites'
+                ? ' is-favorites-scope'
+                : (scope === 'unread' ? ' is-unread-scope' : '');
             const menuButton = options.menu
                 ? `<button class="folder-item-menu" type="button" onclick="openFolderContextMenu('${folderId}', event)">···</button>`
                 : '';
@@ -170,7 +175,7 @@
                 ? ` draggable="true" data-folder-id="${folderId}" data-folder-scope="${scope}" ondragstart="handleFolderDragStart(event, '${folderId}')" ondragend="handleFolderDragEnd()" ondragover="handleFolderDragOver(event, '${folderId}')" ondragleave="handleFolderDragLeave(event, '${folderId}')" ondrop="handleFolderDrop(event, '${folderId}')"`
                 : ` data-folder-scope="${scope}"`;
             return `
-                <div class="folder-item${active ? ' active' : ''}${isMainFolder ? ' is-main-folder' : ''}" role="button" tabindex="0" title="${escapeAttribute(label)}" style="${indent ? `padding-left:${12 + indent}px` : ''}" onclick="handleFolderNavActivate('${scope}', ${folderId ? `'${folderId}'` : 'null'})" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();handleFolderNavActivate('${scope}', ${folderId ? `'${folderId}'` : 'null'});}"${dragAttrs}${contextMenuAttr}>
+                <div class="folder-item${scopeClass}${active ? ' active' : ''}${isMainFolder ? ' is-main-folder' : ''}" role="button" tabindex="0" title="${escapeAttribute(label)}" style="${indent ? `padding-left:${12 + indent}px` : ''}" onclick="handleFolderNavActivate('${scope}', ${folderId ? `'${folderId}'` : 'null'})" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();handleFolderNavActivate('${scope}', ${folderId ? `'${folderId}'` : 'null'});}"${dragAttrs}${contextMenuAttr}>
                     <span class="folder-item-glyph" aria-hidden="true">${escapeHtml(glyph)}</span>
                     <span class="folder-item-name">${escapeHtml(label)}</span>
                     <span class="folder-item-count">${count}</span>
@@ -220,6 +225,8 @@
 
         function getFolderGlyph(label, scope) {
             if (scope === 'all') return '全';
+            if (scope === 'favorites') return '藏';
+            if (scope === 'unread') return '未';
             const normalized = String(label || '').trim();
             if (!normalized) return '文';
             return normalized[0].toUpperCase();
@@ -230,6 +237,8 @@
             const treeItems = buildFolderTree(foldersData);
             const allItems = [
                 { label: '全部内容', scope: 'all', count: totalFolderCount, _level: 0, _hasChildren: false },
+                { label: '收藏夹', scope: 'favorites', count: favoriteFolderCount, _level: 0, _hasChildren: false },
+                { label: '未读', scope: 'unread', count: unreadFolderCount, _level: 0, _hasChildren: false },
                 ...treeItems.map((f) => ({
                     label: f.name,
                     scope: 'folder',
@@ -255,12 +264,17 @@
 
             const mobileItems = [
                 { label: '全部', scope: 'all', count: totalFolderCount },
+                { label: '收藏夹', scope: 'favorites', count: favoriteFolderCount },
+                { label: '未读', scope: 'unread', count: unreadFolderCount },
                 ...foldersData.map((folder) => ({ label: folder.name, scope: 'folder', count: folder.item_count || 0, id: folder.id })),
             ];
             folderMobileStrip.innerHTML = mobileItems.map((item) => {
                 const active = currentFolderScope === item.scope && (item.scope !== 'folder' || currentFolderId === item.id);
+                const scopeClass = item.scope === 'favorites'
+                    ? ' folder-chip--favorites'
+                    : (item.scope === 'unread' ? ' folder-chip--unread' : '');
                 const folderId = item.id ? `'${item.id}'` : 'null';
-                return `<button class="folder-chip${active ? ' active' : ''}" type="button" onclick="setActiveFolder('${item.scope}', ${folderId})">${escapeHtml(item.label)} · ${item.count}</button>`;
+                return `<button class="folder-chip${scopeClass}${active ? ' active' : ''}" type="button" onclick="setActiveFolder('${item.scope}', ${folderId})">${escapeHtml(item.label)} · ${item.count}</button>`;
             }).join('') + '<button class="folder-chip" type="button" onclick="openCreateFolderPrompt()">+ 新建</button>';
         }
 
@@ -573,6 +587,8 @@
                 foldersData = Array.isArray(data.folders) ? data.folders : [];
                 totalFolderCount = Number(data.total_count || 0);
                 unfiledFolderCount = Number(data.unfiled_count || 0);
+                favoriteFolderCount = Number(data.favorite_count || 0);
+                unreadFolderCount = Number(data.unread_count || 0);
                 if (mobileCaptureSelectedFolderIds.length) {
                     mobileCaptureSelectedFolderIds = mobileCaptureSelectedFolderIds.filter((folderId) => foldersData.some((folder) => folder.id === folderId));
                     persistMobileCaptureSelectedFolder();

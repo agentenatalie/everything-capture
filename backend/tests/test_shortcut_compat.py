@@ -13,12 +13,13 @@ from sqlalchemy.orm import sessionmaker
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
 from database import Base  # noqa: E402
-from models import Folder, Item, User  # noqa: E402
-from routers.ingest import _queue_capture_postprocess, _resolve_extract_url, _store_shared_text_capture, execute_extract_request, ingest_page  # noqa: E402
+from models import Folder, Item, ItemTagLink, Settings, Tag, User  # noqa: E402
+from routers.ingest import _queue_capture_postprocess, _resolve_extract_url, _store_shared_text_capture, background_auto_tag, execute_extract_request, ingest_page  # noqa: E402
 from routers.phone_webapp import build_phone_extract_item_finalizer  # noqa: E402
+from security import encrypt_secret  # noqa: E402
 from schemas import ClientInfo, ExtractRequest, IngestRequest, PhoneExtractRequest  # noqa: E402
 from services.extractor import ExtractResult  # noqa: E402
-from tenant import DEFAULT_USER_EMAIL, DEFAULT_USER_ID, DEFAULT_USER_NAME  # noqa: E402
+from tenant import DEFAULT_USER_EMAIL, DEFAULT_USER_ID, DEFAULT_USER_NAME, DEFAULT_WORKSPACE_ID  # noqa: E402
 
 
 class _BackgroundTasksStub:
@@ -229,6 +230,60 @@ class ShortcutCompatibilityTests(unittest.TestCase):
             self.assertIsNotNone(saved_item)
             self.assertEqual(saved_item.parse_status, "processing")
             self.assertIsNotNone(saved_item.parse_started_at)
+
+    def test_background_auto_tag_creates_ai_tags_when_enabled(self) -> None:
+        item_id = "auto-tag-item"
+        with self.Session() as db:
+            db.add(
+                Settings(
+                    user_id=DEFAULT_USER_ID,
+                    workspace_id=DEFAULT_WORKSPACE_ID,
+                    ai_api_key=encrypt_secret("test-key"),
+                    ai_base_url="https://api.example.com/v1",
+                    ai_model="gpt-test",
+                    ai_auto_tag_enabled=True,
+                )
+            )
+            db.add(
+                Item(
+                    id=item_id,
+                    user_id=DEFAULT_USER_ID,
+                    workspace_id=DEFAULT_WORKSPACE_ID,
+                    title="AI 设计工作流",
+                    source_url="https://example.com/ai-design",
+                    canonical_text="这篇内容讨论 AI 生成 UI 之后，如何通过设计系统和组件约束来自动打标签。",
+                    extracted_text="额外的解析正文",
+                    platform="web",
+                    status="ready",
+                )
+            )
+            db.commit()
+
+        with patch("routers.ingest.SessionLocal", self.Session), patch(
+            "routers.ingest.create_chat_completion",
+            new=AsyncMock(
+                return_value={
+                    "choices": [
+                        {
+                            "message": {
+                                "role": "assistant",
+                                "content": "<think>先分析内容</think>\n标签：\n- AI设计\n- VibeCoding\n- 设计系统\n输入内容：忽略这一行",
+                            }
+                        }
+                    ]
+                }
+            ),
+        ):
+            background_auto_tag(item_id, DEFAULT_USER_ID)
+
+        with self.Session() as db:
+            tags = db.query(Tag).filter(Tag.user_id == DEFAULT_USER_ID).order_by(Tag.name.asc()).all()
+            tag_names = [tag.name for tag in tags]
+            self.assertEqual(tag_names, ["AI设计", "VibeCoding", "设计系统"])
+
+            links = db.query(ItemTagLink).filter(ItemTagLink.item_id == item_id).all()
+            self.assertEqual(len(links), 3)
+            self.assertEqual(sorted(link.source for link in links), ["ai", "ai", "ai"])
 
 
 if __name__ == "__main__":

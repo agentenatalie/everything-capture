@@ -1679,64 +1679,74 @@
             return refMap;
         }
 
-        // Walk the source markdown and replace `[N]` references with opaque
-        // placeholders BEFORE markdown rendering. We skip fenced code blocks and
-        // inline code spans so refs inside code stay literal. The placeholder
-        // uses a null-byte sentinel that survives escapeHtml and won't appear
-        // in user content, then gets swapped to a <button> after rendering.
-        function _injectCitationPlaceholders(source, refMap) {
-            const text = String(source || '');
-            const tokens = [];
-            if (!text || !refMap || !Object.keys(refMap).length) {
-                return { text, tokens };
-            }
-            let out = '';
-            let i = 0;
-            const len = text.length;
-            while (i < len) {
-                // fenced code block ```...```
-                if (text.startsWith('```', i)) {
-                    const end = text.indexOf('```', i + 3);
-                    if (end === -1) { out += text.slice(i); break; }
-                    out += text.slice(i, end + 3);
-                    i = end + 3;
-                    continue;
-                }
-                // inline code `...`
-                if (text[i] === '`') {
-                    const end = text.indexOf('`', i + 1);
-                    if (end === -1) { out += text[i]; i += 1; continue; }
-                    out += text.slice(i, end + 1);
-                    i = end + 1;
-                    continue;
-                }
-                // [N] citation reference
-                if (text[i] === '[') {
-                    const rest = text.slice(i, i + 6);
-                    const m = /^\[(\d{1,3})\]/.exec(rest);
-                    if (m) {
-                        const num = m[1];
-                        const referenceIndex = parseInt(num, 10);
-                        const citation = refMap[referenceIndex];
-                        if (citation && citation.library_item_id) {
-                            const tokenIdx = tokens.length;
-                            tokens.push({ num, citation });
-                            out += `\x00AICITE${tokenIdx}\x00`;
-                            i += m[0].length;
-                            continue;
-                        }
-                    }
-                }
-                out += text[i];
-                i += 1;
-            }
-            return { text: out, tokens };
-        }
+        function _linkifyCitationRefs(html, content, citations) {
+            if (!Array.isArray(citations) || !citations.length) return html;
+            const refMap = _buildCitationRefMap(content, citations);
+            if (!Object.keys(refMap).length) return html;
 
-        function _renderCitationButtonHtml(num, citation) {
-            const id = escapeAttribute(String(citation.library_item_id));
-            const title = escapeAttribute(citation.title || `引用 ${num}`);
-            return `<button class="ai-citation-ref" type="button" data-ai-citation-id="${id}" title="${title}">[${escapeHtml(num)}]</button>`;
+            const host = document.createElement('div');
+            host.innerHTML = String(html || '');
+
+            // Only wrap the citation numbers the model already rendered, and do
+            // it at the text-node layer so markdown markup stays untouched.
+            const walker = document.createTreeWalker(host, window.NodeFilter?.SHOW_TEXT ?? 4);
+            const textNodes = [];
+            let currentNode = walker.nextNode();
+            while (currentNode) {
+                textNodes.push(currentNode);
+                currentNode = walker.nextNode();
+            }
+
+            textNodes.forEach((textNode) => {
+                const parentEl = textNode.parentElement;
+                if (!parentEl) return;
+                if (parentEl.closest('pre, code, a, button, script, style')) return;
+
+                const rawText = textNode.nodeValue || '';
+                if (!/\[(\d{1,3})\]/.test(rawText)) return;
+
+                const fragment = document.createDocumentFragment();
+                const pattern = /\[(\d{1,3})\]/g;
+                let lastIndex = 0;
+                let hasReplacement = false;
+                let match;
+
+                while ((match = pattern.exec(rawText)) !== null) {
+                    const fullMatch = match[0];
+                    const num = match[1];
+                    const start = match.index;
+                    const end = start + fullMatch.length;
+                    const referenceIndex = parseInt(num, 10);
+                    const citation = refMap[referenceIndex];
+
+                    if (!citation || !citation.library_item_id) {
+                        continue;
+                    }
+
+                    if (start > lastIndex) {
+                        fragment.appendChild(document.createTextNode(rawText.slice(lastIndex, start)));
+                    }
+
+                    const button = document.createElement('button');
+                    button.className = 'ai-citation-ref';
+                    button.type = 'button';
+                    button.setAttribute('data-ai-citation-id', String(citation.library_item_id));
+                    button.setAttribute('title', citation.title || `引用 ${num}`);
+                    button.textContent = fullMatch;
+                    fragment.appendChild(button);
+
+                    lastIndex = end;
+                    hasReplacement = true;
+                }
+
+                if (!hasReplacement) return;
+                if (lastIndex < rawText.length) {
+                    fragment.appendChild(document.createTextNode(rawText.slice(lastIndex)));
+                }
+                textNode.parentNode?.replaceChild(fragment, textNode);
+            });
+
+            return host.innerHTML;
         }
 
         function renderAssistantMessage(entry, options = {}) {
@@ -1757,25 +1767,10 @@
             const thinkingMarkup = renderThinkingBlock(thinking);
 
             const displayContent = answer || entry.content || '';
-            // Pre-process: swap [N] citation refs for opaque placeholders, then
-            // string-substitute back to <button> after markdown rendering. This
-            // avoids walking the rendered DOM (which used to drop characters
-            // when refs straddled inline nodes or had no matching citation).
-            let citationTokens = [];
-            let renderSource = displayContent;
+            let markdownHtml = renderMarkdown(displayContent);
             if (citations.length) {
-                const refMap = _buildCitationRefMap(displayContent, entry.citations);
-                if (Object.keys(refMap).length) {
-                    const injected = _injectCitationPlaceholders(displayContent, refMap);
-                    renderSource = injected.text;
-                    citationTokens = injected.tokens;
-                }
+                markdownHtml = _linkifyCitationRefs(markdownHtml, displayContent, entry.citations);
             }
-            let markdownHtml = renderMarkdown(renderSource);
-            citationTokens.forEach((token, idx) => {
-                const button = _renderCitationButtonHtml(token.num, token.citation);
-                markdownHtml = markdownHtml.split(`\x00AICITE${idx}\x00`).join(button);
-            });
 
             const copyBtnMarkup = (!entry.isError && displayContent.trim())
                 ? `<button class="ai-msg-copy-btn" type="button" data-ai-copy-msg aria-label="复制" title="复制">${AI_CODE_COPY_ICON}</button>`

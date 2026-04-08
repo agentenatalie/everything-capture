@@ -26,8 +26,60 @@ router = APIRouter(
 
 import asyncio
 from routers.connect import sync_to_notion, sync_to_obsidian
+from services.ai_client import create_chat_completion, extract_assistant_message
 
 HTTP_URL_PATTERN = re.compile(r"https?://[^\s<>'\"`]+", re.IGNORECASE)
+AUTO_TAG_SPLIT_PATTERN = re.compile(r"[\n,，、;；]+")
+AUTO_TAG_LIST_PREFIX_PATTERN = re.compile(r"^(?:标签[:：]\s*|[-*•]\s*|\d+[\.\)\]:：、]\s*)")
+AUTO_TAG_REASONING_BLOCK_PATTERN = re.compile(r"<think\b[^>]*>[\s\S]*?</think>", re.IGNORECASE)
+AUTO_TAG_INVALID_SUBSTRINGS = (
+    "分析请求",
+    "输入内容",
+    "输出要求",
+    "标签建议",
+    "建议标签",
+    "content",
+    "analysis",
+    "request",
+)
+
+
+def _extract_auto_tag_message_text(payload: dict) -> str:
+    message = extract_assistant_message(payload)
+    content = message.get("content")
+    if isinstance(content, str):
+        return content.strip()
+    if isinstance(content, list):
+        parts: list[str] = []
+        for block in content:
+            if isinstance(block, dict) and block.get("type") == "text":
+                text = str(block.get("text") or "").strip()
+                if text:
+                    parts.append(text)
+        return "\n".join(parts).strip()
+    return ""
+
+
+def _normalize_auto_tag_name(raw_name: str) -> str:
+    cleaned_name = AUTO_TAG_LIST_PREFIX_PATTERN.sub("", str(raw_name or "").strip())
+    cleaned_name = AUTO_TAG_REASONING_BLOCK_PATTERN.sub("", cleaned_name)
+    cleaned_name = re.sub(r"\s+", " ", cleaned_name).strip().strip("\"'`“”‘’[]()（）")
+    return cleaned_name.strip()
+
+
+def _is_valid_auto_tag_name(tag_name: str) -> bool:
+    value = str(tag_name or "").strip()
+    if not value:
+        return False
+    if len(value) > 24:
+        return False
+    if any(token in value.lower() for token in AUTO_TAG_INVALID_SUBSTRINGS):
+        return False
+    if any(char in value for char in "<>{}[]:*"):
+        return False
+    if any(char in value for char in ("：", ":", "。", "；", ";", "，", ",")):
+        return False
+    return True
 
 def background_auto_sync(item_id: str, user_id: str):
     db = SessionLocal()
@@ -86,11 +138,20 @@ def background_auto_tag(item_id: str, user_id: str) -> None:
             if not api_key:
                 return
 
-            item = db.query(Item).filter(Item.id == item_id).first()
+            item = db.query(Item).filter(Item.id == item_id, Item.user_id == user_id).first()
             if not item:
                 return
 
-            text_for_tagging = ((item.title or "") + "\n" + (item.canonical_text or ""))[:2000]
+            text_for_tagging = "\n".join(
+                part.strip()
+                for part in (
+                    item.title or "",
+                    item.canonical_text or "",
+                    item.extracted_text or "",
+                    item.ocr_text or "",
+                )
+                if str(part or "").strip()
+            )[:4000]
             if len(text_for_tagging.strip()) < 20:
                 return
 
@@ -99,27 +160,47 @@ def background_auto_tag(item_id: str, user_id: str) -> None:
             tag_name_to_id = {t.name.lower(): t.id for t in existing_tags}
 
             prompt = (
-                "根据以下内容，建议1-3个标签。"
-                "优先从已有标签中选择，必要时才创建新标签。"
-                "只返回标签名，用逗号分隔，不要解释。\n\n"
+                "你是一个标签生成器。请根据内容生成 1-3 个简短标签。\n"
+                "优先复用已有标签，必要时才创建新标签。\n"
+                "严格要求：只输出最终标签，每行一个，不要编号，不要解释，不要标题，不要分析过程。\n"
+                "每个标签尽量控制在 2-12 个字或等价短语内。\n\n"
                 f"已有标签：{', '.join(existing_tag_names) if existing_tag_names else '无'}\n\n"
                 f"内容：\n{text_for_tagging}"
             )
 
-            from services.ai_client import call_chat_completion
             base_url = settings.ai_base_url or "https://api.openai.com/v1"
             model = settings.ai_model or "gpt-4o-mini"
-            response_text = call_chat_completion(
-                api_key=api_key,
-                base_url=base_url,
-                model=model,
-                messages=[{"role": "user", "content": prompt}],
-                max_tokens=100,
+            response_payload = asyncio.run(
+                create_chat_completion(
+                    api_key=api_key,
+                    base_url=base_url,
+                    model=model,
+                    temperature=0.0,
+                    messages=[{"role": "user", "content": prompt}],
+                    timeout_seconds=60.0,
+                )
             )
+            response_text = _extract_auto_tag_message_text(response_payload)
             if not response_text:
                 return
 
-            suggested_names = [n.strip() for n in response_text.split(",") if n.strip()][:3]
+            suggested_names: list[str] = []
+            seen_names: set[str] = set()
+            for raw_name in AUTO_TAG_SPLIT_PATTERN.split(response_text):
+                cleaned_name = _normalize_auto_tag_name(raw_name)
+                if not cleaned_name:
+                    continue
+                if not _is_valid_auto_tag_name(cleaned_name):
+                    continue
+                lowered_name = cleaned_name.lower()
+                if lowered_name in seen_names:
+                    continue
+                seen_names.add(lowered_name)
+                suggested_names.append(cleaned_name)
+                if len(suggested_names) >= 3:
+                    break
+            if not suggested_names:
+                return
 
             for tag_name in suggested_names:
                 tag_lower = tag_name.lower()

@@ -9,7 +9,7 @@ Capture URLs, articles, social media, videos, and text from any device — extra
 [![Python](https://img.shields.io/badge/Python-3.11+-3776AB?style=flat-square&logo=python&logoColor=white)](https://python.org)
 [![FastAPI](https://img.shields.io/badge/FastAPI-009688?style=flat-square&logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com)
 [![SQLite](https://img.shields.io/badge/SQLite-WAL_+_FTS5-003B57?style=flat-square&logo=sqlite&logoColor=white)](https://sqlite.org)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow?style=flat-square)](./LICENSE)
+[![License: AGPL v3](https://img.shields.io/badge/License-AGPL%20v3-red?style=flat-square)](./LICENSE)
 [![Platform](https://img.shields.io/badge/Platform-macOS_|_Linux-lightgrey?style=flat-square&logo=apple&logoColor=white)](https://github.com/agentenatalie/everything-capture)
 [![GitHub stars](https://img.shields.io/github/stars/agentenatalie/everything-capture?style=flat-square&logo=github)](https://github.com/agentenatalie/everything-capture/stargazers)
 [![GitHub last commit](https://img.shields.io/github/last-commit/agentenatalie/everything-capture?style=flat-square)](https://github.com/agentenatalie/everything-capture/commits/main)
@@ -212,4 +212,6 @@ PYTHONPATH="$(pwd)/.." python -m pytest ../capture_service/tests/ -v
 
 ## License
 
-[MIT](./LICENSE)
+This project is licensed under the [GNU Affero General Public License v3.0 only](./LICENSE) (`AGPL-3.0-only`).
+
+If you deploy or provide a modified version of this software over a network, you must also provide the complete corresponding source code to users interacting with it, as required by AGPLv3.

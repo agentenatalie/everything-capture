@@ -1,3 +1,10 @@
+        /*
+         * Everything Capture — frontend stylesheet.
+         * This software is licensed under Elastic License 2.0; see the LICENSE file.
+         * Unauthorized use for hosted or managed services is strictly prohibited.
+         * For commercial or SaaS licensing, contact:
+         * https://github.com/agentenatalie
+         */
         /* Everything Capture — main stylesheet */
         :root {
             --bg-base: #ffffff;
@@ -3750,20 +3757,7 @@
         }
 
         .sidebar-user-copy::before {
-            content: '库';
-            display: grid;
-            place-items: center;
-            width: 28px;
-            height: 28px;
-            border-radius: 999px;
-            flex-shrink: 0;
-            font-size: 11px;
-            font-weight: 800;
-            line-height: 1;
-            color: #6b7280;
-            background: #e5e7eb;
-            border: none;
-            box-shadow: none;
+            content: none;
         }
 
         .sidebar-user-meta {

@@ -1,3 +1,10 @@
+        /*
+         * Everything Capture — frontend AI module.
+         * This software is licensed under Elastic License 2.0; see the LICENSE file.
+         * Unauthorized use for hosted or managed services is strictly prohibited.
+         * For commercial or SaaS licensing, contact:
+         * https://github.com/agentenatalie
+         */
         const askAiBtn = document.getElementById('askAiBtn');
         const askAiOverlay = document.getElementById('askAiOverlay');
         const closeAskAiModal = document.getElementById('closeAskAiModal');

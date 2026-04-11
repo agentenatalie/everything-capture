@@ -9,7 +9,7 @@
 [![Python](https://img.shields.io/badge/Python-3.11+-3776AB?style=flat-square&logo=python&logoColor=white)](https://python.org)
 [![FastAPI](https://img.shields.io/badge/FastAPI-009688?style=flat-square&logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com)
 [![SQLite](https://img.shields.io/badge/SQLite-WAL_+_FTS5-003B57?style=flat-square&logo=sqlite&logoColor=white)](https://sqlite.org)
-[![License: AGPL v3](https://img.shields.io/badge/License-AGPL%20v3-red?style=flat-square)](./LICENSE)
+[![License: Elastic 2.0](https://img.shields.io/badge/License-Elastic%202.0-orange?style=flat-square)](./LICENSE)
 [![Platform](https://img.shields.io/badge/Platform-macOS_|_Linux-lightgrey?style=flat-square&logo=apple&logoColor=white)](https://github.com/agentenatalie/everything-capture)
 [![GitHub stars](https://img.shields.io/github/stars/agentenatalie/everything-capture?style=flat-square&logo=github)](https://github.com/agentenatalie/everything-capture/stargazers)
 [![GitHub last commit](https://img.shields.io/github/last-commit/agentenatalie/everything-capture?style=flat-square)](https://github.com/agentenatalie/everything-capture/commits/main)
@@ -212,6 +212,10 @@ PYTHONPATH="$(pwd)/.." python -m pytest ../capture_service/tests/ -v
 
 ## 许可证
 
-本项目采用 [GNU Affero General Public License v3.0 only](./LICENSE)（`AGPL-3.0-only`）授权。
+本仓库采用 [Elastic License 2.0](./LICENSE)（`Elastic-2.0`）作为公开的 source-available 社区许可。
 
-如果你修改后通过网络对外提供该软件或相关服务，必须按 AGPLv3 的要求，向与该服务交互的用户提供完整对应源代码。
+在公开许可下，你不能把本软件作为托管服务、代运营服务或 SaaS 直接提供给第三方使用。
+
+如果你需要托管/SaaS、白标、OEM 或其他超出 Elastic-2.0 的商业权利，需要单独取得商业授权。见 [COMMERCIAL-LICENSING.md](./COMMERCIAL-LICENSING.md)。
+
+这属于 source-available 授权，不是 OSI 意义上的开源许可证。

@@ -19,7 +19,7 @@ logger = logging.getLogger(__name__)
 _ffmpeg_path: str | None = None
 _ocr_helper_path: str | None = None
 SWIFT_MEDIA_EXTRACT_TIMEOUT_SECONDS = max(30, int(os.getenv("EC_SWIFT_MEDIA_EXTRACT_TIMEOUT_SECONDS", "120")))
-MLX_WHISPER_TRANSCRIBE_TIMEOUT_SECONDS = max(30, int(os.getenv("EC_MLX_WHISPER_TIMEOUT_SECONDS", "180")))
+MLX_WHISPER_TRANSCRIBE_TIMEOUT_SECONDS = max(30, int(os.getenv("EC_MLX_WHISPER_TIMEOUT_SECONDS", "1800")))
 
 _TRADITIONAL_PHRASE_REPLACEMENTS: tuple[tuple[str, str], ...] = (
     ("融資融券", "融资融券"),
@@ -772,9 +772,9 @@ from services.content_extraction import _find_ffmpeg
 activate_component_runtime(LOCAL_TRANSCRIPTION_COMPONENT_ID)
 try:
     import mlx_whisper  # type: ignore[import]
-except ImportError:
-    print(json.dumps({"text": "", "segments": []}, ensure_ascii=False))
-    raise SystemExit(0)
+except ImportError as exc:
+    print(f"mlx_whisper import failed: {exc}", file=sys.stderr)
+    raise SystemExit(2)
 
 ffmpeg = _find_ffmpeg()
 ffmpeg_dir = str(Path(ffmpeg).parent)
@@ -806,10 +806,11 @@ print(json.dumps({"text": str(result.get("text", "")).strip(), "segments": segme
             timeout=MLX_WHISPER_TRANSCRIBE_TIMEOUT_SECONDS,
         )
         if completed.returncode != 0:
-            logger.debug(
-                "mlx-whisper transcription failed for %s: %s",
+            logger.warning(
+                "mlx-whisper 转录失败 %s (exit %s): %s",
                 video_path.name,
-                (completed.stderr or completed.stdout or f"exit {completed.returncode}").strip(),
+                completed.returncode,
+                (completed.stderr or completed.stdout or "").strip()[-500:] or "no output",
             )
             return ""
 
@@ -824,8 +825,15 @@ print(json.dumps({"text": str(result.get("text", "")).strip(), "segments": segme
             source="transcript",
             segments=segments or None,
         )
-    except (json.JSONDecodeError, subprocess.TimeoutExpired) as exc:
-        logger.debug("mlx-whisper transcription failed for %s: %s", video_path.name, exc)
+    except subprocess.TimeoutExpired:
+        logger.warning(
+            "mlx-whisper 转录超时 %s（%ds）；可调 EC_MLX_WHISPER_TIMEOUT_SECONDS 增大上限",
+            video_path.name,
+            MLX_WHISPER_TRANSCRIBE_TIMEOUT_SECONDS,
+        )
+        return ""
+    except json.JSONDecodeError as exc:
+        logger.warning("mlx-whisper 输出解析失败 %s: %s", video_path.name, exc)
         return ""
 
 

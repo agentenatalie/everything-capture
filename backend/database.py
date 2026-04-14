@@ -222,6 +222,14 @@ def ensure_runtime_schema():
             connection.exec_driver_sql(
                 "ALTER TABLE media ADD COLUMN workspace_id VARCHAR REFERENCES workspaces(id)"
             )
+        if "storage_backend" not in media_columns:
+            connection.exec_driver_sql("ALTER TABLE media ADD COLUMN storage_backend VARCHAR")
+        if "storage_key" not in media_columns:
+            connection.exec_driver_sql("ALTER TABLE media ADD COLUMN storage_key VARCHAR")
+        if "storage_etag" not in media_columns:
+            connection.exec_driver_sql("ALTER TABLE media ADD COLUMN storage_etag VARCHAR")
+        if "storage_uploaded_at" not in media_columns:
+            connection.exec_driver_sql("ALTER TABLE media ADD COLUMN storage_uploaded_at DATETIME")
         connection.exec_driver_sql(
             """
             UPDATE media
@@ -246,6 +254,8 @@ def ensure_runtime_schema():
         )
         connection.exec_driver_sql("CREATE INDEX IF NOT EXISTS idx_media_user_id ON media(user_id)")
         connection.exec_driver_sql("CREATE INDEX IF NOT EXISTS idx_media_workspace_id ON media(workspace_id)")
+        connection.exec_driver_sql("CREATE INDEX IF NOT EXISTS idx_media_storage_backend ON media(storage_backend)")
+        connection.exec_driver_sql("CREATE INDEX IF NOT EXISTS idx_media_storage_key ON media(storage_key)")
 
         folder_columns = _table_columns(connection, "folders")
         if "user_id" not in folder_columns:

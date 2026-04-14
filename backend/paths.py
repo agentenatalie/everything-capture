@@ -75,6 +75,18 @@ LOGS_DIR = Path(
     os.getenv("EC_LOGS_DIR")
     or str((Path.home() / "Library" / "Logs" / APP_NAME) if IS_DESKTOP_MODE else (DATA_ROOT / "logs"))
 ).expanduser().resolve()
+MEDIA_STORAGE_BACKEND = (os.getenv("EC_MEDIA_STORAGE_BACKEND") or "local").strip().lower() or "local"
+MEDIA_OFFLOAD_TYPES = frozenset(
+    part.strip().lower()
+    for part in (os.getenv("EC_MEDIA_OFFLOAD_TYPES") or "video").split(",")
+    if part.strip()
+)
+MEDIA_S3_BUCKET = (os.getenv("EC_MEDIA_S3_BUCKET") or "").strip()
+MEDIA_S3_ENDPOINT = (os.getenv("EC_MEDIA_S3_ENDPOINT") or "").strip()
+MEDIA_S3_REGION = (os.getenv("EC_MEDIA_S3_REGION") or "auto").strip() or "auto"
+MEDIA_S3_ACCESS_KEY_ID = (os.getenv("EC_MEDIA_S3_ACCESS_KEY_ID") or "").strip()
+MEDIA_S3_SECRET_ACCESS_KEY = (os.getenv("EC_MEDIA_S3_SECRET_ACCESS_KEY") or "").strip()
+MEDIA_SIGNED_URL_TTL_SECONDS = max(60, int(os.getenv("EC_MEDIA_SIGNED_URL_TTL_SECONDS", "900")))
 
 # Backward-compatible alias: existing code does `STATIC_DIR / local_path` where
 # local_path = "media/users/{uid}/{item_id}/file.jpg".  Since DATA_ROOT contains

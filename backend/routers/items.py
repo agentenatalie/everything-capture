@@ -6,6 +6,7 @@ import threading
 import time
 import logging
 import zipfile
+import mimetypes
 from collections import OrderedDict
 from dataclasses import dataclass
 from datetime import datetime, timedelta
@@ -13,11 +14,11 @@ from pathlib import Path
 from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Response
-from fastapi.responses import StreamingResponse
+from fastapi.responses import FileResponse, RedirectResponse, StreamingResponse
 from sqlalchemy import func, or_, text
 from sqlalchemy.orm import Session
 from database import SessionLocal, get_db
-from models import AiConversation, Folder, Highlight, Item, ItemFolderLink, ItemPageNote, ItemTagLink, Tag
+from models import AiConversation, Folder, Highlight, Item, ItemFolderLink, ItemPageNote, ItemTagLink, Media, Tag
 from schemas import (
     BulkFolderUpdateRequest,
     BulkFolderUpdateResponse,
@@ -40,8 +41,17 @@ from schemas import (
     ItemTagUpdateRequest,
     MediaResponse,
 )
-from paths import STATIC_DIR
 from services.content_extraction import ContentExtractionError, parse_item_content
+from services.media_storage import (
+    build_media_content_url,
+    cleanup_media_local_artifacts,
+    cleanup_relative_paths,
+    delete_remote_media,
+    materialize_media_file,
+    media_read_redirect_url,
+    offload_media_file,
+    resolve_local_media_path,
+)
 from tenant import get_current_user_id
 from app_settings import USE_FTS5_SEARCH
 
@@ -242,6 +252,12 @@ def normalize_platform_filter(platform: Optional[str]) -> str:
     return PLATFORM_ALIASES.get(value, value or "all")
 
 
+def _media_public_url(media: Media) -> str:
+    if media.type == "video" and media.id:
+        return build_media_content_url(media.id)
+    return f"/static/{media.local_path}" if media.local_path else (media.original_url or "")
+
+
 def serialize_items(items: list[Item]) -> list[ItemResponse]:
     results = []
     from routers.connect import _obsidian_sync_state
@@ -252,7 +268,7 @@ def serialize_items(items: list[Item]) -> list[ItemResponse]:
             for m in sorted(item.media, key=lambda x: x.display_order):
                 media_list.append(MediaResponse(
                     type=m.type,
-                    url=f"/static/{m.local_path}" if m.local_path else (m.original_url or ""),
+                    url=_media_public_url(m),
                     original_url=m.original_url or "",
                     display_order=m.display_order,
                     inline_position=m.inline_position if m.inline_position is not None else -1.0,
@@ -488,26 +504,7 @@ def sync_item_folder_assignments(item: Item, folders: list[Folder]) -> None:
 
 
 def _cleanup_item_media_files(local_paths: list[str]) -> None:
-    checked_dirs: set[str] = set()
-    for relative_path in {path for path in local_paths if path}:
-        absolute_path = STATIC_DIR / relative_path
-        if absolute_path.exists():
-            try:
-                absolute_path.unlink()
-            except OSError:
-                continue
-
-        current_dir = absolute_path.parent
-        while current_dir != STATIC_DIR and current_dir.exists():
-            dir_key = str(current_dir)
-            if dir_key in checked_dirs:
-                break
-            checked_dirs.add(dir_key)
-            try:
-                current_dir.rmdir()
-            except OSError:
-                break
-            current_dir = current_dir.parent
+    cleanup_relative_paths(local_paths)
 
 
 def _store_item_parse_result(item: Item, parse_result) -> None:
@@ -541,6 +538,19 @@ def parse_item_content_for_item(item: Item) -> None:
     _store_item_parse_result(item, parse_result)
 
 
+def _offload_item_videos(item: Item) -> list[Media]:
+    offloaded_media: list[Media] = []
+    for media in item.media or []:
+        if str(getattr(media, "storage_backend", "") or "").strip().lower() == "s3" and getattr(media, "storage_key", None):
+            continue
+        try:
+            if offload_media_file(media):
+                offloaded_media.append(media)
+        except Exception as exc:
+            logger.warning("视频云端归档失败 %s: %s", getattr(media, "id", "unknown"), exc)
+    return offloaded_media
+
+
 def background_parse_item_content(item_id: str, user_id: str) -> None:
     with SessionLocal() as db:
         item = db.query(Item).filter(Item.id == item_id, Item.user_id == user_id).first()
@@ -553,8 +563,11 @@ def background_parse_item_content(item_id: str, user_id: str) -> None:
 
         try:
             parse_item_content_for_item(item)
+            offloaded_media = _offload_item_videos(item)
             item.parse_retry_count = 0  # 成功后重置重试计数
             db.commit()
+            if offloaded_media:
+                cleanup_media_local_artifacts(offloaded_media)
         except Exception as exc:
             db.rollback()
             item = db.query(Item).filter(Item.id == item_id, Item.user_id == user_id).first()
@@ -1445,7 +1458,10 @@ def parse_item_content_endpoint(item_id: str, db: Session = Depends(get_db)):
 
     try:
         parse_item_content_for_item(item)
+        offloaded_media = _offload_item_videos(item)
         db.commit()
+        if offloaded_media:
+            cleanup_media_local_artifacts(offloaded_media)
         db.refresh(item)
         return serialize_items([item])[0]
     except ContentExtractionError as exc:
@@ -1462,6 +1478,26 @@ def parse_item_content_endpoint(item_id: str, db: Session = Depends(get_db)):
             _store_item_parse_failure(item, "Content parsing failed")
             db.commit()
         raise HTTPException(status_code=500, detail="Content parsing failed") from exc
+
+
+@router.get("/media/{media_id}/content")
+def get_media_content(media_id: str, db: Session = Depends(get_db)):
+    user_id = get_current_user_id()
+    media = db.query(Media).filter(Media.id == media_id, Media.user_id == user_id).first()
+    if not media:
+        raise HTTPException(status_code=404, detail="Media not found")
+
+    local_path = resolve_local_media_path(media)
+    if local_path is not None:
+        media_type = mimetypes.guess_type(local_path.name)[0] or "application/octet-stream"
+        return FileResponse(str(local_path), media_type=media_type, filename=local_path.name)
+
+    try:
+        target_url = media_read_redirect_url(media)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail="Media file not found") from exc
+
+    return RedirectResponse(url=target_url, status_code=307)
 
 
 @router.patch("/items/{item_id}/content", response_model=ItemResponse)
@@ -1789,10 +1825,12 @@ def delete_item(item_id: str, db: Session = Depends(get_db)):
     if not item:
         raise HTTPException(status_code=404, detail="Item not found")
 
-    local_paths = [media.local_path for media in item.media if media.local_path]
+    media_entries = list(item.media or [])
     db.delete(item)
     db.commit()
-    _cleanup_item_media_files(local_paths)
+    cleanup_media_local_artifacts(media_entries)
+    for media in media_entries:
+        delete_remote_media(media)
     return None
 
 
@@ -1872,15 +1910,14 @@ def export_item_zip(item_id: str, db: Session = Depends(get_db)):
 
         media_idx = 0
         for m in sorted(item.media, key=lambda x: x.display_order):
-            if not m.local_path:
+            try:
+                with materialize_media_file(m) as materialized_path:
+                    ext = materialized_path.suffix or '.bin'
+                    arc_name = f"media/{m.type}_{media_idx:03d}{ext}"
+                    zf.write(str(materialized_path), arc_name)
+                    media_idx += 1
+            except FileNotFoundError:
                 continue
-            abs_path = STATIC_DIR / m.local_path
-            if not abs_path.exists():
-                continue
-            ext = abs_path.suffix or '.bin'
-            arc_name = f"media/{m.type}_{media_idx:03d}{ext}"
-            zf.write(str(abs_path), arc_name)
-            media_idx += 1
 
     buf.seek(0)
     safe_title = _sanitize_filename(title)

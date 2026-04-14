@@ -19,6 +19,7 @@ backend/venv/
 venv/
 ENV/
 env/
+.local/
 backend/.local/
 **/__pycache__/
 *.py[cod]
@@ -46,6 +47,7 @@ desktop/**/*.dmg
 .env.*
 .python-version
 *.log
+logs/
 
 # Local planning / notes
 plans/
@@ -70,4 +72,3 @@ CLAUDE.md
 .impeccable.md
 logo-concepts.html
 logo-viewfinder-bw.html
-

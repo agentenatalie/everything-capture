@@ -4,6 +4,7 @@ import sys
 import tempfile
 import unittest
 from contextlib import contextmanager
+from pathlib import Path
 from unittest.mock import patch
 
 from fastapi.testclient import TestClient
@@ -68,6 +69,31 @@ def load_main_with_temp_data_dir():
 
 
 class MainSinglePortTests(unittest.TestCase):
+    def _create_item_with_media(self, item_id: str, media_id: str, *, storage_backend: str | None = None, storage_key: str | None = None):
+        from database import SessionLocal
+        from models import Item, Media
+
+        with SessionLocal() as db:
+            item = Item(id=item_id, title="Video Item", source_url="https://example.com/video", platform="web", status="ready")
+            db.add(item)
+            db.flush()
+            media = Media(
+                id=media_id,
+                item_id=item.id,
+                type="video",
+                original_url="https://cdn.example.com/video.mp4",
+                local_path=f"media/users/local-default-user/{item.id}/video_000.mp4",
+                storage_backend=storage_backend,
+                storage_key=storage_key,
+                display_order=0,
+            )
+            db.add(media)
+            db.commit()
+        return {
+            "id": media_id,
+            "local_path": f"media/users/local-default-user/{item_id}/video_000.mp4",
+        }
+
     def test_root_serves_frontend_html(self) -> None:
         with load_main_with_temp_data_dir() as main_module:
             with TestClient(main_module.app) as client:
@@ -110,6 +136,53 @@ class MainSinglePortTests(unittest.TestCase):
                 response = client.get("/static/media/does-not-exist.png")
 
         self.assertEqual(response.status_code, 404)
+
+    def test_media_content_route_serves_local_video_file(self) -> None:
+        with load_main_with_temp_data_dir() as main_module:
+            import paths
+
+            media = self._create_item_with_media("item-local-video", "media-local-video")
+            local_file = paths.STATIC_DIR / media["local_path"]
+            local_file.parent.mkdir(parents=True, exist_ok=True)
+            local_file.write_bytes(b"local-video")
+
+            with TestClient(main_module.app) as client:
+                response = client.get(f"/api/media/{media['id']}/content")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.content, b"local-video")
+
+    def test_media_content_route_redirects_remote_video(self) -> None:
+        with load_main_with_temp_data_dir() as main_module:
+            media = self._create_item_with_media(
+                "item-remote-video",
+                "media-remote-video",
+                storage_backend="s3",
+                storage_key="media/users/local-default-user/item-remote-video/video_000.mp4",
+            )
+
+            with patch("routers.items.media_read_redirect_url", return_value="https://example.com/presigned.mp4"):
+                with TestClient(main_module.app) as client:
+                    response = client.get(f"/api/media/{media['id']}/content", follow_redirects=False)
+
+        self.assertEqual(response.status_code, 307)
+        self.assertEqual(response.headers.get("location"), "https://example.com/presigned.mp4")
+
+    def test_delete_item_route_triggers_remote_media_cleanup(self) -> None:
+        with load_main_with_temp_data_dir() as main_module:
+            media = self._create_item_with_media(
+                "item-delete-video",
+                "media-delete-video",
+                storage_backend="s3",
+                storage_key="media/users/local-default-user/item-delete-video/video_000.mp4",
+            )
+
+            with patch("routers.items.delete_remote_media") as delete_remote_media:
+                with TestClient(main_module.app) as client:
+                    response = client.delete("/api/items/item-delete-video")
+
+        self.assertEqual(response.status_code, 204)
+        delete_remote_media.assert_called_once()
 
 
 if __name__ == "__main__":

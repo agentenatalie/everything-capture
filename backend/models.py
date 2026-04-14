@@ -106,6 +106,10 @@ class Media(Base):
     file_size = Column(Integer, default=0)
     display_order = Column(Integer, default=0)
     inline_position = Column(Float, default=-1.0)  # 0.0-1.0 fractional position within article body; -1 = unknown
+    storage_backend = Column(String, nullable=True)
+    storage_key = Column(String, nullable=True)
+    storage_etag = Column(String, nullable=True)
+    storage_uploaded_at = Column(DateTime, nullable=True)
 
     user = relationship("User", back_populates="media", lazy="joined")
     workspace = relationship("Workspace", back_populates="media", lazy="joined")

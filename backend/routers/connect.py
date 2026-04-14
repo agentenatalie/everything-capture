@@ -11,6 +11,7 @@ import logging
 from paths import STATIC_DIR
 from pydantic import BaseModel, Field
 from security import decrypt_secret, encrypt_secret
+from services.media_storage import build_media_content_url, materialize_media_file
 from tenant import get_current_user_id
 
 logger = logging.getLogger(__name__)
@@ -286,7 +287,9 @@ def _fallback_structured_blocks(item: Item) -> list[dict]:
     for media in sorted(item.media, key=lambda entry: (entry.display_order, entry.original_url or "")):
         if media.type not in {"image", "cover", "video"}:
             continue
-        media_url = f"/static/{media.local_path}" if media.local_path else media.original_url
+        media_url = build_media_content_url(media.id) if media.type == "video" and media.id else (
+            f"/static/{media.local_path}" if media.local_path else media.original_url
+        )
         if not media_url:
             continue
         blocks.append({"type": media.type, "url": media_url})
@@ -300,14 +303,14 @@ def _normalize_media_url(src: str | None, base_url: str | None = None) -> str:
     src = src.strip()
     if not src or src.startswith(("data:", "blob:")):
         return ""
-    if src.startswith("/static/"):
+    if src.startswith("/static/") or src.startswith("/api/media/"):
         return src
     if src.startswith("//"):
         return f"https:{src}"
     if src.startswith("/") and base_url:
         parsed = urlparse(base_url)
         return f"{parsed.scheme}://{parsed.netloc}{src}"
-    if src.startswith("http") or src.startswith("/static/"):
+    if src.startswith("http") or src.startswith("/static/") or src.startswith("/api/media/"):
         return src
     return ""
 
@@ -556,6 +559,8 @@ def _media_lookup(item: Item) -> dict[str, object]:
     for media in item.media:
         if media.local_path:
             lookup[f"/static/{media.local_path}"] = media
+        if media.id:
+            lookup[build_media_content_url(media.id)] = media
         if media.original_url:
             lookup[media.original_url] = media
     return lookup
@@ -1156,6 +1161,8 @@ def _obsidian_media_references(item: Item) -> dict[str, str]:
         if media.original_url:
             references[media.original_url] = vault_path
         references[f"/static/{media.local_path}"] = vault_path
+        if media.id:
+            references[build_media_content_url(media.id)] = vault_path
     return references
 
 
@@ -1905,19 +1912,19 @@ async def _sync_item_to_obsidian(
                 for media in referenced_media:
                     if not media.local_path:
                         continue
-                    local_file_path = STATIC_DIR / media.local_path
-                    if not os.path.exists(local_file_path):
-                        continue
-
                     filename = os.path.basename(media.local_path)
                     vault_path = f"{media_folder}/{filename}"
-                    with open(local_file_path, "rb") as file_handle:
-                        upload_response = await client.put(
-                            f"{url_base}/vault/{_encode_obsidian_vault_path(vault_path)}",
-                            headers=_obsidian_headers(obsidian_api_key, "application/octet-stream"),
-                            content=file_handle.read(),
-                            timeout=120.0,
-                        )
+                    try:
+                        with materialize_media_file(media) as local_file_path:
+                            with open(local_file_path, "rb") as file_handle:
+                                upload_response = await client.put(
+                                    f"{url_base}/vault/{_encode_obsidian_vault_path(vault_path)}",
+                                    headers=_obsidian_headers(obsidian_api_key, "application/octet-stream"),
+                                    content=file_handle.read(),
+                                    timeout=120.0,
+                                )
+                    except FileNotFoundError:
+                        continue
                     if upload_response.status_code not in [200, 201, 204]:
                         logger.error("Failed to upload media to Obsidian: %s", upload_response.text)
                         continue
@@ -1925,6 +1932,8 @@ async def _sync_item_to_obsidian(
                     if media.original_url:
                         media_references[media.original_url] = vault_path
                     media_references[f"/static/{media.local_path}"] = vault_path
+                    if media.id:
+                        media_references[build_media_content_url(media.id)] = vault_path
 
                 full_content = _build_obsidian_note(item, media_references)
                 current_note_hash = _obsidian_note_hash(full_content)

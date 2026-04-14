@@ -13,6 +13,7 @@ from models import Item, Media, Settings
 from schemas import IngestRequest, IngestResponse, ExtractRequest, ExtractResponse
 from routers.items import _mark_item_parse_processing, background_parse_item_content
 from services.extractor import _SAFE_ATTRS, _SAFE_TAGS, extract_content
+from services.media_storage import build_media_content_url
 from services.downloader import download_media_list, probe_video_duration_seconds
 from tenant import get_current_user_id
 from bs4 import BeautifulSoup
@@ -439,7 +440,12 @@ async def _download_and_apply_media_updates(
             inline_position=dl.get("inline_position", -1.0),
         )
         db.add(media_record)
-        url_map[dl["original_url"]] = f"/static/{dl['local_path']}" if dl["local_path"] else dl["original_url"]
+        db.flush()
+        if dl["type"] == "video" and media_record.id:
+            resolved_url = build_media_content_url(media_record.id)
+        else:
+            resolved_url = f"/static/{dl['local_path']}" if dl["local_path"] else dl["original_url"]
+        url_map[dl["original_url"]] = resolved_url
 
     localized_blocks = _replace_media_urls_in_blocks(content_blocks, url_map)
     if localized_blocks is not None:

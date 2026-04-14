@@ -285,7 +285,7 @@
 
         function resolveMediaUrl(url) {
             if (!url) return url;
-            if (url.startsWith('/static/')) {
+            if (url.startsWith('/static/') || url.startsWith('/api/')) {
                 return (window.API_BASE_URL || '') + url;
             }
             return url;

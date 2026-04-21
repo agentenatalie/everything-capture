@@ -2,8 +2,11 @@ import asyncio
 import json
 import os
 import sys
+import tempfile
 import unittest
+import zipfile
 from datetime import datetime
+from pathlib import Path
 from unittest.mock import patch
 
 from sqlalchemy import create_engine
@@ -12,7 +15,7 @@ from sqlalchemy.orm import sessionmaker
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
-from models import Folder, Item, ItemTagLink, Settings, Tag  # noqa: E402
+from models import Folder, Item, ItemFolderLink, ItemTagLink, Media, Settings, Tag  # noqa: E402
 from routers import ai as ai_router  # noqa: E402
 from schemas import (  # noqa: E402
     AiAskRequest,
@@ -141,6 +144,13 @@ class AiRouteTests(unittest.TestCase):
     def test_ask_ai_returns_answer_and_citations(self) -> None:
         request = AiAskRequest(question="我之前保存过哪些关于 AI UI 设计的内容？", top_k=4)
 
+        answer_text = "你保存过两类和 AI UI 设计相关的内容：[1] 关于 impeccable 打磨界面，[2] 关于 Component Gallery 帮助描述组件。"
+        create_payload = {
+            "choices": [
+                {"message": {"role": "assistant", "content": answer_text}}
+            ]
+        }
+
         with self.Session() as db:
             with patch.object(ai_router, "get_current_user_id", return_value="local-default-user"), patch.object(
                 ai_router,
@@ -148,8 +158,12 @@ class AiRouteTests(unittest.TestCase):
                 return_value=self._make_rag_context(),
             ), patch.object(
                 ai_router,
-                "chat_completion",
-                return_value="你保存过两类和 AI UI 设计相关的内容：[1] 关于 impeccable 打磨界面，[2] 关于 Component Gallery 帮助描述组件。",
+                "_retrieve_relevant_memories",
+                return_value=[],
+            ), patch.object(
+                ai_router,
+                "create_chat_completion",
+                return_value=create_payload,
             ):
                 response = asyncio.run(ai_router.ask_ai(request, db=db))
 
@@ -871,6 +885,167 @@ class AiRouteTests(unittest.TestCase):
         self.assertEqual(result["status"], "pending_approval")
         self.assertEqual(result["working_directory"], os.path.expanduser("~"))
         self.assertEqual(event.status, "pending")
+
+    def test_export_items_to_zip_packages_media_only_from_exact_folder(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+            export_dir = temp_path / "exports"
+            export_dir.mkdir(parents=True, exist_ok=True)
+            first_media_path = temp_path / "cloud.webp"
+            second_media_path = temp_path / "rabbit.png"
+            outside_media_path = temp_path / "outside.webp"
+            first_media_path.write_bytes(b"cloud-image")
+            second_media_path.write_bytes(b"rabbit-image")
+            outside_media_path.write_bytes(b"outside-image")
+
+            with self.Session() as db:
+                folder = Folder(
+                    id="folder-cartoon",
+                    user_id="local-default-user",
+                    workspace_id="local-default-workspace",
+                    name="AI Cartoon",
+                )
+                item_one = Item(
+                    id="item-cartoon-1",
+                    user_id="local-default-user",
+                    workspace_id="local-default-workspace",
+                    title="Cloud Mascot",
+                    source_url="https://example.com/cloud",
+                    platform="xiaohongshu",
+                    parse_status="completed",
+                    status="ready",
+                )
+                item_two = Item(
+                    id="item-cartoon-2",
+                    user_id="local-default-user",
+                    workspace_id="local-default-workspace",
+                    title="Rabbit IP",
+                    source_url="https://example.com/rabbit",
+                    platform="xiaohongshu",
+                    parse_status="completed",
+                    status="ready",
+                )
+                outside_item = Item(
+                    id="item-outside-folder",
+                    user_id="local-default-user",
+                    workspace_id="local-default-workspace",
+                    title="AI Cartoon title match only",
+                    source_url="https://example.com/outside",
+                    platform="xiaohongshu",
+                    parse_status="completed",
+                    status="ready",
+                )
+                db.add_all([folder, item_one, item_two, outside_item])
+                db.flush()
+                db.add_all(
+                    [
+                        ItemFolderLink(item_id=item_one.id, folder_id=folder.id),
+                        ItemFolderLink(item_id=item_two.id, folder_id=folder.id),
+                    ]
+                )
+                media_one = Media(
+                    id="media-cartoon-1",
+                    user_id="local-default-user",
+                    workspace_id="local-default-workspace",
+                    item_id=item_one.id,
+                    type="image",
+                    local_path="media/cloud.webp",
+                    display_order=0,
+                )
+                media_two = Media(
+                    id="media-cartoon-2",
+                    user_id="local-default-user",
+                    workspace_id="local-default-workspace",
+                    item_id=item_two.id,
+                    type="image",
+                    local_path="media/rabbit.png",
+                    display_order=0,
+                )
+                outside_media = Media(
+                    id="media-outside-folder",
+                    user_id="local-default-user",
+                    workspace_id="local-default-workspace",
+                    item_id=outside_item.id,
+                    type="image",
+                    local_path="media/outside.webp",
+                    display_order=0,
+                )
+                db.add_all([media_one, media_two, outside_media])
+                db.commit()
+
+                media_paths = {
+                    media_one.id: first_media_path,
+                    media_two.id: second_media_path,
+                    outside_media.id: outside_media_path,
+                }
+
+                from contextlib import contextmanager
+
+                @contextmanager
+                def fake_materialize_media_file(media):
+                    yield media_paths[media.id]
+
+                with patch("paths.EXPORTS_DIR", export_dir), patch.object(
+                    ai_router,
+                    "materialize_media_file",
+                    side_effect=fake_materialize_media_file,
+                ):
+                    result, event, _, _ = asyncio.run(
+                        ai_router._execute_agent_tool(
+                            tool_name="export_items_to_zip",
+                            arguments={
+                                "folder_name": "AI Cartoon",
+                                "export_mode": "media",
+                                "format": "zip_individual",
+                                "output_filename": "AI_Cartoon_media.zip",
+                            },
+                            db=db,
+                            user_id="local-default-user",
+                            snapshot=self._make_snapshot(),
+                            agent_permissions=["execute_commands"],
+                            ai_config={"api_key": "test-ai-key", "base_url": "https://api.example.com/v1", "model": "test-model"},
+                        )
+                    )
+
+            self.assertEqual(result["status"], "ok")
+            self.assertEqual(result["exported_count"], 2)
+            self.assertEqual(result["exported_media_count"], 2)
+            self.assertEqual(result["skipped_media_count"], 0)
+            self.assertEqual(event.status, "completed")
+
+            archive_path = export_dir / "AI_Cartoon_media.zip"
+            self.assertTrue(archive_path.exists())
+            with zipfile.ZipFile(archive_path) as archive:
+                archive_names = archive.namelist()
+
+            self.assertTrue(any(name.endswith(".webp") for name in archive_names))
+            self.assertTrue(any(name.endswith(".png") for name in archive_names))
+            self.assertFalse(any(name.endswith("content.md") for name in archive_names))
+            self.assertFalse(any("outside-folder" in name for name in archive_names))
+            self.assertIn("2 个媒体文件", event.summary)
+
+    def test_export_items_to_zip_fails_for_unknown_folder_name(self) -> None:
+        with self.Session() as db:
+            result, event, _, _ = asyncio.run(
+                ai_router._execute_agent_tool(
+                    tool_name="export_items_to_zip",
+                    arguments={
+                        "folder_name": "Missing Folder",
+                        "export_mode": "media",
+                        "output_filename": "missing-folder.zip",
+                    },
+                    db=db,
+                    user_id="local-default-user",
+                    snapshot=self._make_snapshot(),
+                    agent_permissions=["execute_commands"],
+                    ai_config={"api_key": "test-ai-key", "base_url": "https://api.example.com/v1", "model": "test-model"},
+                )
+            )
+
+        self.assertEqual(result["status"], "error")
+        self.assertIn("Unknown folders", result["message"])
+        self.assertEqual(event.status, "failed")
+        self.assertIn("找不到文件夹", event.summary)
 
     def test_run_plan_and_execute_executes_all_planned_calls_without_fixed_step_cap(self) -> None:
         executed_indexes: list[int] = []

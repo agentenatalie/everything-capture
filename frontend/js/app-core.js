@@ -227,7 +227,9 @@
         let collapsedFolderIds = new Set(JSON.parse(localStorage.getItem('collapsedFolderIds') || '[]'));
         let folderPickerTargetIds = [];
         let folderPickerSelectedIds = new Set();
+        let selectedLibraryItemIds = new Set();
         let draggedLibraryItemId = null;
+        let draggedLibraryItemIds = [];
         let draggedFolderId = null;
         let currentFolderDropTargetId = null;
         let currentFolderDropMode = '';
@@ -267,6 +269,10 @@
         let lastCommandExtractSignature = '';
         let lastCommandExtractAt = 0;
         const MOBILE_CAPTURE_SELECTED_FOLDER_STORAGE_KEY = 'everything-capture-mobile-folder-selection-v1';
+        const ITEM_MULTI_DRAG_DATA_TYPE = 'application/x-everything-capture-item-list';
+        const USE_META_KEY_FOR_LIBRARY_MULTISELECT = /Mac|iPhone|iPad|iPod/i.test(
+            navigator.platform || navigator.userAgent || ''
+        );
         let mobileCaptureSelectedFolderIds = (() => {
             try {
                 const raw = window.localStorage.getItem(MOBILE_CAPTURE_SELECTED_FOLDER_STORAGE_KEY);
@@ -317,6 +323,9 @@
             filteredEntries = [];
             commandSearchResults = [];
             foldersData = [];
+            selectedLibraryItemIds = new Set();
+            draggedLibraryItemId = null;
+            draggedLibraryItemIds = [];
             totalFolderCount = 0;
             unfiledFolderCount = 0;
             favoriteFolderCount = 0;

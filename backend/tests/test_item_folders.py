@@ -7,7 +7,7 @@ import unittest
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
 from models import Folder, Item, ItemFolderLink  # noqa: E402
-from routers.items import normalize_requested_folder_ids, serialize_items, sync_item_folder_assignments  # noqa: E402
+from routers.items import merge_requested_folder_ids, normalize_requested_folder_ids, serialize_items, sync_item_folder_assignments  # noqa: E402
 
 
 class ItemFolderTests(unittest.TestCase):
@@ -29,6 +29,29 @@ class ItemFolderTests(unittest.TestCase):
 
         self.assertEqual(item.folder_id, "folder-a")
         self.assertEqual([link.folder_id for link in item.folder_links], ["folder-a", "folder-b"])
+
+    def test_merge_requested_folder_ids_prepends_new_folders_without_losing_existing_ones(self) -> None:
+        item = Item(id="item-1", folder_id="folder-old")
+        folder_old = Folder(id="folder-old", name="Old")
+        folder_keep = Folder(id="folder-keep", name="Keep")
+        item.folder_links = [
+            ItemFolderLink(
+                item_id="item-1",
+                folder_id="folder-keep",
+                folder=folder_keep,
+                created_at=datetime.datetime(2026, 3, 9, 12, 2, 0),
+            ),
+            ItemFolderLink(
+                item_id="item-1",
+                folder_id="folder-old",
+                folder=folder_old,
+                created_at=datetime.datetime(2026, 3, 9, 12, 1, 0),
+            ),
+        ]
+
+        merged = merge_requested_folder_ids(item, ["folder-new", "folder-keep"])
+
+        self.assertEqual(merged, ["folder-new", "folder-keep", "folder-old"])
 
     def test_serialize_items_exposes_all_folder_names(self) -> None:
         item = Item(

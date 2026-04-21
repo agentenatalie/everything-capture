@@ -846,6 +846,7 @@
                 nextItems.forEach((item) => cacheItemById(item));
                 itemsData = nextItems;
                 filteredEntries = itemsData;
+                syncLibrarySelectionWithEntries(filteredEntries);
                 latestTotalCount = totalCount;
                 latestVisibleCount = visibleCount;
                 latestReturnedCount = returnedCount || itemsData.length;
@@ -906,6 +907,207 @@
                 const views = await res.json();
                 renderRecentViews(views);
             } catch (e) { /* silent */ }
+        }
+
+        function isLibraryMultiSelectModifier(event) {
+            if (!event) return false;
+            return USE_META_KEY_FOR_LIBRARY_MULTISELECT
+                ? Boolean(event.metaKey)
+                : Boolean(event.metaKey || event.ctrlKey);
+        }
+
+        function isLibraryItemSelected(itemId) {
+            return selectedLibraryItemIds.has(String(itemId || '').trim());
+        }
+
+        function getSelectedLibraryItemIds() {
+            return Array.from(selectedLibraryItemIds);
+        }
+
+        function syncLibrarySelectionChrome() {
+            document.body.classList.toggle('library-selection-active', selectedLibraryItemIds.size > 0);
+        }
+
+        function patchRenderedLibrarySelectionById(itemId) {
+            const currentNode = findRenderedItemNode(itemId);
+            if (!currentNode) return false;
+            currentNode.classList.toggle('is-selected', isLibraryItemSelected(itemId));
+            return true;
+        }
+
+        function clearLibraryItemSelection(options = {}) {
+            const { render = true } = options;
+            if (!selectedLibraryItemIds.size) {
+                draggedLibraryItemIds = [];
+                syncLibrarySelectionChrome();
+                return;
+            }
+            const changedIds = Array.from(selectedLibraryItemIds);
+            selectedLibraryItemIds.clear();
+            draggedLibraryItemIds = [];
+            syncLibrarySelectionChrome();
+            if (render) {
+                changedIds.forEach((itemId) => patchRenderedLibrarySelectionById(itemId));
+            }
+        }
+
+        function cancelLibrarySelectionInteraction(options = {}) {
+            const { render = true } = options;
+            const hadSelection = selectedLibraryItemIds.size > 0;
+            const hadDragState = Boolean(
+                draggedLibraryItemId
+                || draggedLibraryItemIds.length
+                || currentFolderDropTargetId
+                || activeItemDragPreview
+                || document.body.classList.contains('item-dragging')
+            );
+            if (!hadSelection && !hadDragState) {
+                return false;
+            }
+            clearLibraryItemSelection({ render });
+            draggedLibraryItemId = null;
+            draggedLibraryItemIds = [];
+            document.body.classList.remove('item-dragging');
+            clearFolderDropIndicator();
+            clearItemDragPreview();
+            return true;
+        }
+
+        function toggleLibraryItemSelection(itemId) {
+            const normalizedId = String(itemId || '').trim();
+            if (!normalizedId) return;
+            if (selectedLibraryItemIds.has(normalizedId)) {
+                selectedLibraryItemIds.delete(normalizedId);
+            } else {
+                selectedLibraryItemIds.add(normalizedId);
+            }
+            syncLibrarySelectionChrome();
+            patchRenderedLibrarySelectionById(normalizedId);
+        }
+
+        function syncLibrarySelectionWithEntries(entries = filteredEntries) {
+            const visibleIds = new Set((entries || []).map((entry) => String(entry?.id || '').trim()).filter(Boolean));
+            let changed = false;
+            for (const itemId of Array.from(selectedLibraryItemIds)) {
+                if (visibleIds.has(itemId)) continue;
+                selectedLibraryItemIds.delete(itemId);
+                changed = true;
+            }
+            if (changed) {
+                draggedLibraryItemIds = draggedLibraryItemIds.filter((itemId) => selectedLibraryItemIds.has(itemId));
+            }
+            syncLibrarySelectionChrome();
+        }
+
+        function handleLibraryItemClick(event, itemId) {
+            if (isLibraryMultiSelectModifier(event)) {
+                event?.preventDefault?.();
+                event?.stopPropagation?.();
+                toggleLibraryItemSelection(itemId);
+                return;
+            }
+            if (selectedLibraryItemIds.size) {
+                clearLibraryItemSelection({ render: true });
+            }
+            handleItemPrimaryAction(itemId);
+        }
+
+        function buildLocallyUpdatedFolderItem(item, folderIds = []) {
+            const normalizedFolderIds = Array.from(new Set(
+                (Array.isArray(folderIds) ? folderIds : [])
+                    .map((value) => String(value || '').trim())
+                    .filter(Boolean)
+            ));
+            const resolvedFolders = normalizedFolderIds
+                .map((folderId) => getFolderById(folderId))
+                .filter(Boolean);
+            const folderNames = resolvedFolders.map((folder) => folder.name).filter(Boolean);
+            return {
+                ...item,
+                folder_id: normalizedFolderIds[0] || null,
+                folder_name: folderNames[0] || null,
+                folder_ids: normalizedFolderIds,
+                folder_names: folderNames,
+                folder_count: normalizedFolderIds.length,
+            };
+        }
+
+        function getCurrentScopeDescendantFolderIds(folderId) {
+            const normalizedFolderId = String(folderId || '').trim();
+            if (!normalizedFolderId) return new Set();
+            const descendantIds = new Set([normalizedFolderId]);
+            const queue = [normalizedFolderId];
+            while (queue.length) {
+                const currentId = queue.shift();
+                const children = foldersData
+                    .filter((folder) => String(folder?.parent_id || '').trim() === currentId)
+                    .map((folder) => String(folder.id || '').trim())
+                    .filter(Boolean);
+                children.forEach((childId) => {
+                    if (descendantIds.has(childId)) return;
+                    descendantIds.add(childId);
+                    queue.push(childId);
+                });
+            }
+            return descendantIds;
+        }
+
+        function itemMatchesCurrentFolderScope(item) {
+            if (!item) return false;
+            const itemFolderIds = Array.isArray(item.folder_ids)
+                ? item.folder_ids.map((value) => String(value || '').trim()).filter(Boolean)
+                : [];
+            if (currentFolderScope === 'unfiled') {
+                return itemFolderIds.length === 0;
+            }
+            if (currentFolderScope === 'folder' && currentFolderId) {
+                const allowedFolderIds = getCurrentScopeDescendantFolderIds(currentFolderId);
+                return itemFolderIds.some((folderId) => allowedFolderIds.has(folderId));
+            }
+            return true;
+        }
+
+        function applyLocalFolderSnapshots(updatedItems = []) {
+            const normalizedItems = Array.isArray(updatedItems) ? updatedItems.filter(Boolean) : [];
+            if (!normalizedItems.length) return;
+
+            let listChanged = false;
+            const changedIds = [];
+            for (const nextItem of normalizedItems) {
+                const previousItem = getItemById(nextItem.id);
+                if (!previousItem) continue;
+
+                const itemId = String(nextItem.id || '').trim();
+                const previousVisible = filteredEntries.some((entry) => String(entry.id || '').trim() === itemId);
+                const nextVisible = itemMatchesCurrentFolderScope(nextItem);
+
+                mergeUpdatedItem(nextItem);
+                changedIds.push(itemId);
+
+                if (previousVisible && !nextVisible) {
+                    filteredEntries = filteredEntries.filter((entry) => String(entry.id || '').trim() !== itemId);
+                    listChanged = true;
+                    continue;
+                }
+
+                if (currentOpenItemId === nextItem.id) {
+                    refreshOpenModalChrome(nextItem, { preserveSidebarTab: true });
+                }
+            }
+
+            syncLibrarySelectionWithEntries(filteredEntries);
+
+            if (listChanged) {
+                syncLibraryStatsForCurrentEntries();
+                renderItems(filteredEntries);
+                syncRecentViewsSectionState();
+                return;
+            }
+
+            changedIds.forEach((itemId) => {
+                patchRenderedItemsById(itemId);
+                patchRenderedLibrarySelectionById(itemId);
+            });
         }
 
         function renderRecentViews(views) {
@@ -1090,7 +1292,8 @@
             activeItemDragPreview = null;
         }
 
-        function buildItemDragPreview(item) {
+        function buildItemDragPreview(item, options = {}) {
+            const { selectedCount = 1 } = options;
             clearItemDragPreview();
 
             const preview = document.createElement('div');
@@ -1125,6 +1328,13 @@
             platformPill.className = 'item-drag-preview-pill';
             platformPill.textContent = platformDisplayLabel(item);
             meta.appendChild(platformPill);
+
+            if (selectedCount > 1) {
+                const countChip = document.createElement('span');
+                countChip.className = 'item-drag-preview-chip is-selection';
+                countChip.textContent = `${selectedCount} 条`;
+                meta.appendChild(countChip);
+            }
 
             if (item?.parse_status === 'processing') {
                 const chip = document.createElement('span');
@@ -1276,6 +1486,7 @@
             const length = item.canonical_text ? item.canonical_text.length : 0;
             const thumb = getItemThumbnail(item);
             const activeClass = currentOpenItemId === item.id ? ' is-active' : '';
+            const selectedClass = isLibraryItemSelected(item.id) ? ' is-selected' : '';
             const processingClass = item.parse_status === 'processing' ? ' is-processing' : '';
             const displayTitle = getDisplayItemTitle(item);
             const fullTitle = String(item.title || displayTitle || '无标题').trim();
@@ -1285,7 +1496,7 @@
                 ? `<div class="list-thumb"><img src="${escapeAttribute(resolveMediaUrl(thumb.url))}" loading="lazy" decoding="async" fetchpriority="low" alt=""></div>`
                 : `<div class="list-thumb"></div>`;
             return `
-                <div class="list-row${activeClass}${processingClass}" data-item-id="${escapeAttribute(item.id || '')}" draggable="true" ondragstart="handleItemDragStart(event, '${item.id}')" ondragend="handleLibraryDragEnd(event)" onclick="handleItemPrimaryAction('${item.id}')">
+                <div class="list-row${activeClass}${selectedClass}${processingClass}" data-item-id="${escapeAttribute(item.id || '')}" draggable="true" ondragstart="handleItemDragStart(event, '${item.id}')" ondragend="handleLibraryDragEnd(event)" onclick="handleLibraryItemClick(event, '${item.id}')">
                     <div class="list-main">
                         ${thumbHtml}
                         <div class="list-content">
@@ -1319,6 +1530,7 @@
 
         function renderCardMarkup(item) {
             const activeClass = currentOpenItemId === item.id ? ' is-active' : '';
+            const selectedClass = isLibraryItemSelected(item.id) ? ' is-selected' : '';
             const processingClass = item.parse_status === 'processing' ? ' is-processing' : '';
             const displayTitle = getDisplayItemTitle(item);
             const title = escapeHtml(displayTitle);
@@ -1330,7 +1542,7 @@
             const safeSourceUrl = escapeAttribute(item.source_url || '');
 
             return `
-                <div class="card${activeClass}${processingClass}" data-item-id="${escapeAttribute(item.id || '')}" draggable="true" ondragstart="handleItemDragStart(event, '${item.id}')" ondragend="handleLibraryDragEnd(event)" onclick="handleItemPrimaryAction('${item.id}')">
+                <div class="card${activeClass}${selectedClass}${processingClass}" data-item-id="${escapeAttribute(item.id || '')}" draggable="true" ondragstart="handleItemDragStart(event, '${item.id}')" ondragend="handleLibraryDragEnd(event)" onclick="handleLibraryItemClick(event, '${item.id}')">
                     ${renderCardPreview(item)}
                     <div class="card-content">
                         <div class="card-meta-row">
@@ -2714,17 +2926,28 @@
                 event.preventDefault();
                 return;
             }
-            draggedLibraryItemId = itemId;
+            const normalizedItemId = String(itemId || '').trim();
+            const selectedIds = getSelectedLibraryItemIds();
+            const draggingSelectedGroup = selectedIds.includes(normalizedItemId) && selectedIds.length > 1;
+            if (selectedIds.length && !selectedIds.includes(normalizedItemId)) {
+                clearLibraryItemSelection({ render: true });
+            }
+
+            const draggedItemIds = draggingSelectedGroup ? selectedIds : [normalizedItemId];
+            draggedLibraryItemId = normalizedItemId;
+            draggedLibraryItemIds = draggedItemIds;
             document.body.classList.add('item-dragging');
             event.dataTransfer.effectAllowed = 'move';
-            event.dataTransfer.setData(ITEM_DRAG_DATA_TYPE, itemId);
-            event.dataTransfer.setData('text/plain', itemId);
-            const dragPreview = buildItemDragPreview(item);
+            event.dataTransfer.setData(ITEM_DRAG_DATA_TYPE, normalizedItemId);
+            event.dataTransfer.setData(ITEM_MULTI_DRAG_DATA_TYPE, JSON.stringify(draggedItemIds));
+            event.dataTransfer.setData('text/plain', draggedItemIds.join(','));
+            const dragPreview = buildItemDragPreview(item, { selectedCount: draggedItemIds.length });
             event.dataTransfer.setDragImage(dragPreview, 26, 22);
         }
 
         function handleLibraryDragEnd() {
             draggedLibraryItemId = null;
+            draggedLibraryItemIds = [];
             document.body.classList.remove('item-dragging');
             clearFolderDropIndicator();
             clearItemDragPreview();
@@ -2905,6 +3128,7 @@
             }
             if (folderPickerOverlay.classList.contains('active')) {
                 closeFolderPickerDialog();
+                cancelLibrarySelectionInteraction({ render: true });
                 return true;
             }
             if (commandOverlay.classList.contains('active')) {
@@ -2967,6 +3191,11 @@
                 return;
             }
             if (isEditableLibraryEscapeTarget(document.activeElement)) {
+                return;
+            }
+            if (cancelLibrarySelectionInteraction({ render: true })) {
+                e.preventDefault();
+                e.stopImmediatePropagation();
                 return;
             }
             if (clearActiveLibraryFilters()) {

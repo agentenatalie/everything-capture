@@ -78,9 +78,21 @@
         }
 
         function openFolderPickerForItem(itemId, title = '管理文件夹') {
-            const item = itemsData.find((entry) => entry.id === itemId) || commandSearchResults.find((entry) => entry.id === itemId);
-            const preferredFolderIds = Array.isArray(item?.folder_ids) ? item.folder_ids : [];
-            openFolderPicker([itemId], preferredFolderIds, title);
+            const normalizedItemId = String(itemId || '').trim();
+            const selectedItemIds = typeof getSelectedLibraryItemIds === 'function'
+                ? getSelectedLibraryItemIds()
+                : [];
+            const targetItemIds = selectedItemIds.includes(normalizedItemId) && selectedItemIds.length > 1
+                ? selectedItemIds
+                : [normalizedItemId];
+            const item = itemsData.find((entry) => entry.id === normalizedItemId) || commandSearchResults.find((entry) => entry.id === normalizedItemId);
+            const preferredFolderIds = targetItemIds.length > 1
+                ? getSharedFolderIds(targetItemIds)
+                : (Array.isArray(item?.folder_ids) ? item.folder_ids : []);
+            const pickerTitle = targetItemIds.length > 1 && title === '管理文件夹'
+                ? `管理 ${targetItemIds.length} 条内容的文件夹`
+                : title;
+            openFolderPicker(targetItemIds, preferredFolderIds, pickerTitle);
         }
 
         function renderFolderActionButton(item) {
@@ -401,30 +413,90 @@
             return 'inside';
         }
 
-        async function moveItemToFolder(itemId, folderId) {
-            const item = getItemById(itemId);
-            const folder = getFolderById(folderId);
-            if (!item || !folder) return;
+        function normalizeDraggedItemIds(itemIds = []) {
+            return Array.from(new Set(
+                (Array.isArray(itemIds) ? itemIds : [itemIds])
+                    .map((value) => String(value || '').trim())
+                    .filter(Boolean)
+            ));
+        }
 
-            const existingFolderIds = Array.isArray(item.folder_ids) ? item.folder_ids.filter(Boolean) : [];
-            const nextFolderIds = [folderId, ...existingFolderIds.filter((entry) => entry !== folderId)];
-            if (item.folder_id === folderId && nextFolderIds.length === existingFolderIds.length) {
+        function getDraggedLibraryItemIdsFromEvent(event) {
+            const rawMultiIds = event?.dataTransfer?.getData(ITEM_MULTI_DRAG_DATA_TYPE) || '';
+            if (rawMultiIds) {
+                try {
+                    const parsed = JSON.parse(rawMultiIds);
+                    const normalizedIds = normalizeDraggedItemIds(parsed);
+                    if (normalizedIds.length) return normalizedIds;
+                } catch (error) {
+                    console.warn('Failed to parse dragged item ids', error);
+                }
+            }
+            if (draggedLibraryItemIds.length) {
+                return normalizeDraggedItemIds(draggedLibraryItemIds);
+            }
+            return normalizeDraggedItemIds(event?.dataTransfer?.getData(ITEM_DRAG_DATA_TYPE) || draggedLibraryItemId);
+        }
+
+        async function moveItemsToFolder(itemIds, folderId) {
+            const normalizedItemIds = normalizeDraggedItemIds(itemIds);
+            const folder = getFolderById(folderId);
+            if (!normalizedItemIds.length || !folder) return;
+
+            const targetItems = normalizedItemIds.map((itemId) => getItemById(itemId)).filter(Boolean);
+            const updatedItems = targetItems.map((item) => {
+                const existingFolderIds = Array.isArray(item.folder_ids) ? item.folder_ids.filter(Boolean) : [];
+                return buildLocallyUpdatedFolderItem(item, [folderId, ...existingFolderIds.filter((entry) => entry !== folderId)]);
+            });
+            const hasAnyChange = updatedItems.some((item, index) => {
+                const previousItem = targetItems[index];
+                const previousFolderIds = Array.isArray(previousItem?.folder_ids) ? previousItem.folder_ids.filter(Boolean) : [];
+                return JSON.stringify(item.folder_ids || []) !== JSON.stringify(previousFolderIds);
+            });
+            if (!hasAnyChange) {
                 showToast(`已在文件夹「${folder.name}」中`, 'info');
                 return;
             }
 
-            const response = await fetch(`/api/items/${itemId}/folder`, {
-                method: 'PATCH',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ folder_ids: nextFolderIds }),
-            });
-            const data = await response.json().catch(() => ({}));
-            if (!response.ok) {
-                throw new Error(data.detail || '拖入文件夹失败');
+            if (normalizedItemIds.length === 1) {
+                const item = targetItems[0];
+                const response = await fetch(`/api/items/${normalizedItemIds[0]}/folder`, {
+                    method: 'PATCH',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ folder_ids: updatedItems[0]?.folder_ids || [] }),
+                });
+                const data = await response.json().catch(() => ({}));
+                if (!response.ok) {
+                    throw new Error(data.detail || '拖入文件夹失败');
+                }
+                applyLocalFolderSnapshots([data?.id ? data : updatedItems[0]]);
+            } else {
+                const response = await fetch('/api/items/bulk-folder', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        item_ids: normalizedItemIds,
+                        folder_ids: [folderId],
+                        append: true,
+                    }),
+                });
+                const data = await response.json().catch(() => ({}));
+                if (!response.ok) {
+                    throw new Error(data.detail || '批量拖入文件夹失败');
+                }
+                applyLocalFolderSnapshots(updatedItems);
             }
 
-            showToast(`已放入「${folder.name}」`, 'success');
-            await Promise.all([fetchFolders(), fetchItems()]);
+            if (typeof clearLibraryItemSelection === 'function') {
+                clearLibraryItemSelection({ render: true });
+            }
+            showToast(
+                normalizedItemIds.length > 1
+                    ? `已将 ${normalizedItemIds.length} 条内容放入「${folder.name}」`
+                    : `已放入「${folder.name}」`,
+                'success'
+            );
+            await fetchFolders();
         }
 
         function buildReorderedFolderIds(sourceFolderId, targetFolderId, dropMode, parentId = null) {
@@ -529,7 +601,12 @@
         }
 
         function handleFolderDragOver(event, folderId) {
-            const hasItemDrag = Boolean(draggedLibraryItemId || hasDragDataType(event, ITEM_DRAG_DATA_TYPE));
+            const hasItemDrag = Boolean(
+                draggedLibraryItemId
+                || draggedLibraryItemIds.length
+                || hasDragDataType(event, ITEM_DRAG_DATA_TYPE)
+                || hasDragDataType(event, ITEM_MULTI_DRAG_DATA_TYPE)
+            );
             const hasFolderDrag = Boolean(draggedFolderId || hasDragDataType(event, FOLDER_DRAG_DATA_TYPE));
             if (!hasItemDrag && !hasFolderDrag) return;
             if (hasFolderDrag && draggedFolderId === folderId) return;
@@ -558,7 +635,7 @@
 
         async function handleFolderDrop(event, folderId) {
             event.preventDefault();
-            const droppedItemId = event.dataTransfer?.getData(ITEM_DRAG_DATA_TYPE) || draggedLibraryItemId;
+            const droppedItemIds = getDraggedLibraryItemIdsFromEvent(event);
             const droppedFolderId = event.dataTransfer?.getData(FOLDER_DRAG_DATA_TYPE) || draggedFolderId;
             const dropMode = droppedFolderId
                 ? resolveFolderDropMode(event, droppedFolderId, folderId)
@@ -566,8 +643,8 @@
             clearFolderDropIndicator();
 
             try {
-                if (droppedItemId) {
-                    await moveItemToFolder(droppedItemId, folderId);
+                if (droppedItemIds.length) {
+                    await moveItemsToFolder(droppedItemIds, folderId);
                     return;
                 }
                 if (droppedFolderId && droppedFolderId !== folderId) {
@@ -581,8 +658,12 @@
                 showToast(error.message, 'error');
             } finally {
                 draggedLibraryItemId = null;
+                draggedLibraryItemIds = [];
                 draggedFolderId = null;
                 document.body.classList.remove('item-dragging', 'folder-reordering');
+                if (typeof clearItemDragPreview === 'function') {
+                    clearItemDragPreview();
+                }
             }
         }
 
@@ -933,17 +1014,30 @@
                         headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify({ item_ids: folderPickerTargetIds, folder_ids: folderIds }),
                     });
-                    const data = await response.json();
+                    const data = await response.json().catch(() => ({}));
                     if (!response.ok) throw new Error(data.detail || '批量归类失败');
+                    const updatedItems = folderPickerTargetIds
+                        .map((itemId) => getItemById(itemId))
+                        .filter(Boolean)
+                        .map((item) => buildLocallyUpdatedFolderItem(item, folderIds));
+                    applyLocalFolderSnapshots(updatedItems);
+                    if (typeof clearLibraryItemSelection === 'function') {
+                        clearLibraryItemSelection({ render: true });
+                    }
                     showToast(`已整理 ${data.updated_count} 条内容`, 'success');
                 } else if (folderPickerTargetIds.length === 1) {
+                    const targetItem = getItemById(folderPickerTargetIds[0]);
                     const response = await fetch(`/api/items/${folderPickerTargetIds[0]}/folder`, {
                         method: 'PATCH',
                         headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify({ folder_ids: folderIds }),
                     });
-                    const data = await response.json();
+                    const data = await response.json().catch(() => ({}));
                     if (!response.ok) throw new Error(data.detail || '归类失败');
+                    applyLocalFolderSnapshots([data?.id ? data : buildLocallyUpdatedFolderItem(targetItem, folderIds)]);
+                    if (typeof clearLibraryItemSelection === 'function') {
+                        clearLibraryItemSelection({ render: true });
+                    }
                     const toastLabel = Array.isArray(data.folder_names) && data.folder_names.length
                         ? data.folder_names.join('、')
                         : '无文件夹';
@@ -953,7 +1047,7 @@
                     return;
                 }
                 closeFolderPickerDialog();
-                await Promise.all([fetchFolders(), fetchItems()]);
+                await fetchFolders();
             } catch (error) {
                 setFolderPickerActionState(false);
                 showToast(error.message, 'error');

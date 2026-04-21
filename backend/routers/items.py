@@ -273,29 +273,7 @@ def serialize_items(items: list[Item]) -> list[ItemResponse]:
                     display_order=m.display_order,
                     inline_position=m.inline_position if m.inline_position is not None else -1.0,
                 ))
-        primary_folder_id = getattr(item, "folder_id", None)
-        ordered_folder_links = sorted(
-            [
-                link
-                for link in (item.folder_links or [])
-                if getattr(link, "folder", None) is not None
-            ],
-            key=lambda link: (
-                0 if primary_folder_id and link.folder_id == primary_folder_id else 1,
-                getattr(link, "created_at", None) or datetime.min,
-                (link.folder.name or "").lower(),
-                link.folder_id,
-            ),
-        )
-        if not ordered_folder_links and item.folder:
-            ordered_folder_links = [
-                ItemFolderLink(
-                    item_id=item.id,
-                    folder_id=item.folder.id,
-                    folder=item.folder,
-                    created_at=getattr(item, "created_at", None),
-                )
-            ]
+        ordered_folder_links = _ordered_item_folder_links(item)
         folder_ids = [link.folder_id for link in ordered_folder_links]
         folder_names = [link.folder.name for link in ordered_folder_links if link.folder and link.folder.name]
         primary_folder_id = folder_ids[0] if folder_ids else None
@@ -467,6 +445,38 @@ def normalize_requested_folder_ids(folder_id: Optional[str], folder_ids: Optiona
         normalized.append(value)
         seen.add(value)
     return normalized
+
+
+def _ordered_item_folder_links(item: Item) -> list[ItemFolderLink]:
+    primary_folder_id = getattr(item, "folder_id", None)
+    ordered_folder_links = sorted(
+        [
+            link
+            for link in (item.folder_links or [])
+            if getattr(link, "folder", None) is not None
+        ],
+        key=lambda link: (
+            0 if primary_folder_id and link.folder_id == primary_folder_id else 1,
+            getattr(link, "created_at", None) or datetime.min,
+            (link.folder.name or "").lower(),
+            link.folder_id,
+        ),
+    )
+    if not ordered_folder_links and item.folder:
+        ordered_folder_links = [
+            ItemFolderLink(
+                item_id=item.id,
+                folder_id=item.folder.id,
+                folder=item.folder,
+                created_at=getattr(item, "created_at", None),
+            )
+        ]
+    return ordered_folder_links
+
+
+def merge_requested_folder_ids(item: Item, requested_folder_ids: list[str]) -> list[str]:
+    existing_folder_ids = [link.folder_id for link in _ordered_item_folder_links(item)]
+    return normalize_requested_folder_ids(None, [*requested_folder_ids, *existing_folder_ids])
 
 
 def resolve_folders(db: Session, user_id: str, folder_ids: list[str]) -> list[Folder]:
@@ -1429,16 +1439,38 @@ def bulk_update_item_folder(
         raise HTTPException(status_code=400, detail="item_ids is required")
 
     requested_folder_ids = normalize_requested_folder_ids(request.folder_id, request.folder_ids)
-    folders = resolve_folders(db, user_id, requested_folder_ids)
     items = db.query(Item).filter(Item.user_id == user_id, Item.id.in_(item_ids)).all()
     if not items:
         raise HTTPException(status_code=404, detail="Items not found")
 
     now = datetime.utcnow()
-    for item in items:
-        sync_item_folder_assignments(item, folders)
-    for folder in folders:
-        folder.updated_at = now
+    if request.append:
+        all_folder_ids = set(requested_folder_ids)
+        merged_folder_ids_by_item: dict[str, list[str]] = {}
+        for item in items:
+            merged_folder_ids = merge_requested_folder_ids(item, requested_folder_ids)
+            merged_folder_ids_by_item[item.id] = merged_folder_ids
+            all_folder_ids.update(merged_folder_ids)
+
+        folders = db.query(Folder).filter(Folder.user_id == user_id, Folder.id.in_(all_folder_ids)).all() if all_folder_ids else []
+        folders_by_id = {folder.id: folder for folder in folders}
+        missing_ids = [folder_id for folder_id in all_folder_ids if folder_id not in folders_by_id]
+        if missing_ids:
+            raise HTTPException(status_code=404, detail="Folder not found")
+
+        touched_folder_ids: set[str] = set()
+        for item in items:
+            merged_folder_ids = merged_folder_ids_by_item[item.id]
+            sync_item_folder_assignments(item, [folders_by_id[folder_id] for folder_id in merged_folder_ids])
+            touched_folder_ids.update(merged_folder_ids)
+        for folder_id in touched_folder_ids:
+            folders_by_id[folder_id].updated_at = now
+    else:
+        folders = resolve_folders(db, user_id, requested_folder_ids)
+        for item in items:
+            sync_item_folder_assignments(item, folders)
+        for folder in folders:
+            folder.updated_at = now
 
     db.commit()
     return BulkFolderUpdateResponse(updated_count=len(items))

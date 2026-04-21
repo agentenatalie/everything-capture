@@ -4185,6 +4185,12 @@
             box-shadow: inset 2px 0 0 rgba(15, 23, 42, 0.08);
         }
 
+        .list-row.is-selected,
+        .list-row.is-selected:hover {
+            background: #eff6ff;
+            box-shadow: inset 3px 0 0 rgba(59, 130, 246, 0.78);
+        }
+
         .card.is-active {
             background: #ffffff;
         }
@@ -4210,6 +4216,14 @@
             border-color: #d1d5db;
             box-shadow: 0 18px 32px -24px rgba(15, 23, 42, 0.24);
             transform: translateY(-4px);
+        }
+
+        .card.is-selected,
+        .card.is-selected:hover {
+            background: #ffffff;
+            border-color: #93c5fd;
+            box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.16), 0 18px 32px -24px rgba(15, 23, 42, 0.18);
+            transform: none;
         }
 
         .card[draggable="true"],
@@ -4312,6 +4326,11 @@
         .item-drag-preview-chip {
             background: var(--parse-bg);
             color: var(--parse-accent);
+        }
+
+        .item-drag-preview-chip.is-selection {
+            background: #dbeafe;
+            color: #1d4ed8;
         }
 
         .item-drag-preview-chip-pulse {

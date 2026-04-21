@@ -16,7 +16,7 @@ from urllib.parse import urlparse
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import StreamingResponse
-from sqlalchemy import func, or_
+from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
 
 from database import get_db
@@ -52,6 +52,7 @@ from services.ai_client import (
     stream_chat_completion,
 )
 import logging
+from services.media_storage import materialize_media_file
 
 from services.ai_defaults import (
     AI_AGENT_DEFAULT_CAN_EXECUTE_COMMANDS,
@@ -107,6 +108,8 @@ _RAG_EMBED_BATCH_SIZE = 24
 _RAG_CONTEXT_SNIPPET_LIMIT = 420
 
 _SEMANTIC_INDEX_CACHE: dict[str, tuple[str, "SemanticChunkIndex"]] = {}
+_MEMORY_EMBED_CACHE: dict[tuple[str, str, str], tuple[str, list[list[float]]]] = {}
+_ASK_AI_MAX_TOOL_ITERATIONS = 3
 
 # ── Computer command approval system ──────────────────────────────────
 _pending_approvals: dict[str, dict[str, Any]] = {}
@@ -1155,6 +1158,206 @@ def _load_ai_memories(db: Session, user_id: str) -> list[AiMemory]:
     )
 
 
+async def _retrieve_relevant_memories(
+    db: Session,
+    user_id: str,
+    ai_config: dict[str, str],
+    question: str,
+    top_k: int = 5,
+    threshold: float = 0.25,
+) -> list[AiMemory]:
+    memories = _load_ai_memories(db, user_id)
+    if not memories:
+        return []
+
+    signature = "|".join(
+        f"{m.id}:{m.updated_at.isoformat() if m.updated_at else ''}" for m in memories
+    )
+    cache_key = (
+        user_id,
+        ai_config.get("base_url") or "",
+        ai_config.get("embedding_model") or "",
+    )
+    cached = _MEMORY_EMBED_CACHE.get(cache_key)
+    if cached and cached[0] == signature:
+        embeddings = cached[1]
+    else:
+        try:
+            embeddings = await _embed_texts(ai_config, [m.content for m in memories])
+        except AiClientError:
+            return []
+        if len(embeddings) != len(memories):
+            return []
+        _MEMORY_EMBED_CACHE[cache_key] = (signature, embeddings)
+
+    try:
+        query_vector = await _embed_query(ai_config, question)
+    except AiClientError:
+        return []
+
+    scored = [
+        (memory, _embedding_cosine(query_vector, emb))
+        for memory, emb in zip(memories, embeddings)
+    ]
+    scored.sort(key=lambda pair: pair[1], reverse=True)
+    return [memory for memory, score in scored[:top_k] if score >= threshold]
+
+
+def _format_relevant_memories_block(memories: list[AiMemory]) -> str:
+    if not memories:
+        return ""
+    type_labels = {"learned": "学到的", "preference": "用户偏好", "correction": "纠正"}
+    lines = [
+        "\n\n【关于用户的已知信息】以下是与本次问题相关的用户背景，来自过往交互积累。"
+        "请结合这些信息理解问题（例如用户提到\"我的项目\"时据此判断所指）：",
+    ]
+    for m in memories:
+        label = type_labels.get(m.type, m.type)
+        lines.append(f"- [{m.id}] [{label}] {m.content}")
+    return "\n".join(lines)
+
+
+def _ask_ai_memory_tool_guidance() -> str:
+    return (
+        "\n\n【记忆维护】你有 save_memory 和 delete_memory 两个工具，可在回答同时顺手维护长期记忆。"
+        "\n- 观察到用户的偏好、分类习惯、项目/实体名称、兴趣领域，或用户对你回答的纠正时，"
+        "主动 save_memory（type 选 learned/preference/correction 之一）。"
+        "\n- 发现已有的某条记忆已经过时或不准确，用 delete_memory 加上对应的记忆 ID 删掉，再保存新的。"
+        "\n- 不需要每轮都调用：只在观察到新的、可复用的信息时调用。没新信息就直接回答。"
+        "\n- 记忆操作对用户无感，不要在正文里提「我已保存记忆」之类的废话；正常回答即可。"
+    )
+
+
+def _ask_ai_memory_tools_schema() -> list[dict[str, Any]]:
+    return [
+        {
+            "type": "function",
+            "function": {
+                "name": "save_memory",
+                "description": (
+                    "Save a durable fact about the user (preference, habit, project/entity name, "
+                    "correction). Use when you observe something reusable in future interactions."
+                ),
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "content": {
+                            "type": "string",
+                            "description": "What to remember. Concise and specific.",
+                        },
+                        "type": {
+                            "type": "string",
+                            "enum": ["learned", "preference", "correction"],
+                        },
+                    },
+                    "required": ["content", "type"],
+                    "additionalProperties": False,
+                },
+            },
+        },
+        {
+            "type": "function",
+            "function": {
+                "name": "delete_memory",
+                "description": "Delete an outdated or wrong memory entry by its ID.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {"memory_id": {"type": "string"}},
+                    "required": ["memory_id"],
+                    "additionalProperties": False,
+                },
+            },
+        },
+    ]
+
+
+async def _run_ask_ai_with_memory_tools(
+    *,
+    db: Session,
+    user_id: str,
+    ai_config: dict[str, str],
+    system_prompt: str,
+    user_content: str,
+) -> str:
+    stub_snapshot = KnowledgeBaseSnapshot(root_path=None, notes=[], loaded_at=datetime.utcnow())
+    messages: list[dict[str, Any]] = [
+        {"role": "system", "content": system_prompt},
+        {"role": "user", "content": user_content},
+    ]
+    tools = _ask_ai_memory_tools_schema()
+    allowed_tools = {"save_memory", "delete_memory"}
+
+    for _ in range(_ASK_AI_MAX_TOOL_ITERATIONS):
+        payload = await create_chat_completion(
+            api_key=ai_config["api_key"],
+            base_url=ai_config["base_url"],
+            model=ai_config["model"],
+            messages=messages,
+            tools=tools,
+            tool_choice="auto",
+        )
+        assistant_message = extract_assistant_message(payload)
+        tool_calls = extract_tool_calls(assistant_message)
+        assistant_text = extract_message_text(assistant_message, allow_empty=True)
+
+        if not tool_calls:
+            return assistant_text
+
+        messages.append(
+            {
+                "role": "assistant",
+                "content": assistant_message.get("content"),
+                "tool_calls": tool_calls,
+            }
+        )
+
+        for tool_call in tool_calls:
+            tool_id = _clean_optional_string(tool_call.get("id")) or "tool-call"
+            function_payload = tool_call.get("function") or {}
+            tool_name = _clean_optional_string(function_payload.get("name")) or ""
+            raw_arguments = function_payload.get("arguments") or "{}"
+
+            if tool_name not in allowed_tools:
+                result = {"status": "error", "message": f"Tool {tool_name} is not available in ask_ai."}
+            else:
+                try:
+                    arguments = json.loads(raw_arguments) if isinstance(raw_arguments, str) else {}
+                except json.JSONDecodeError:
+                    result = {"status": "error", "message": "Invalid JSON arguments"}
+                else:
+                    result, _event, _notes, _updated = await _execute_agent_tool(
+                        tool_name=tool_name,
+                        arguments=arguments,
+                        db=db,
+                        user_id=user_id,
+                        snapshot=stub_snapshot,
+                        agent_permissions=[],
+                        ai_config=ai_config,
+                    )
+
+            messages.append(
+                {
+                    "role": "tool",
+                    "tool_call_id": tool_id,
+                    "name": tool_name,
+                    "content": json.dumps(result, ensure_ascii=False, default=str),
+                }
+            )
+
+    messages.append(
+        {
+            "role": "system",
+            "content": "停止继续调用工具。基于已有上下文给出最终简洁回答。",
+        }
+    )
+    return await chat_completion(
+        api_key=ai_config["api_key"],
+        base_url=ai_config["base_url"],
+        model=ai_config["model"],
+        messages=messages,
+    )
+
+
 def _format_memories_for_prompt(memories: list[AiMemory]) -> str:
     if not memories:
         return (
@@ -1287,9 +1490,11 @@ def _assistant_agent_system_prompt(agent_permissions: list[str], memories: list[
         "当用户要求'打包''导出''下载''整理成文档'内容时：\n"
         "1. 必须使用 export_items_to_zip 工具，不要自己搜索后在回复里摘要。\n"
         "2. 用户要求的是完整内容，不是摘要或开头。该工具会导出全部正文。\n"
-        "3. 用户要一个文件时，用 format='merged_md' 合并成单个 markdown。\n"
-        "4. 用户要分开的文件时，用 format='zip_individual' 打包成 zip。\n"
-        "5. 导出完成后，告诉用户下载链接，不要在回复中重复粘贴内容。\n"
+        "3. 用户明确提到某个文件夹时，把文件夹名放到 folder_name，不要错放到 query。\n"
+        "4. 用户要图片/视频原文件时，用 export_mode='media'；用户要文本和媒体一起时，用 export_mode='all'。\n"
+        "5. 用户要一个文本文件时，用 format='merged_md' 合并成单个 markdown。\n"
+        "6. 用户要分开的文件或任何媒体导出时，用 zip；媒体导出默认就是 zip。\n"
+        "7. 导出完成后，告诉用户下载链接，不要在回复中重复粘贴内容。\n"
         "\n"
         f"当前可用权限：{readable_permissions}。"
     )
@@ -3073,16 +3278,22 @@ def _build_agent_tools(agent_permissions: list[str]) -> list[dict[str, Any]]:
                 "function": {
                     "name": "export_items_to_zip",
                     "description": (
-                        "Export saved items' COMPLETE text content to downloadable files in one step. "
-                        "Filters by query AND/OR platform AND/OR content_type simultaneously. "
-                        "IMPORTANT: Always includes the COMPLETE text, never truncated or summarized. "
-                        "Use format='merged_md' to create a single consolidated markdown file. "
+                        "Export saved items' COMPLETE content to downloadable files in one step. "
+                        "Filters by folder_name AND/OR query AND/OR platform AND/OR content_type simultaneously. "
+                        "Supports text export, media-only export, or mixed text+media export. "
+                        "IMPORTANT: text exports always include the COMPLETE text, never truncated or summarized. "
+                        "Use format='merged_md' to create a single consolidated markdown file for text exports. "
+                        "Use export_mode='media' when the user wants original images/videos instead of text. "
                         "IMPORTANT: output_filename must describe the content (e.g. '量化视频汇总.md'), never use generic names like 'export.md'. "
                         "When user asks for '打包/导出/下载/整理成文档', ALWAYS use this tool."
                     ),
                     "parameters": {
                         "type": "object",
                         "properties": {
+                            "folder_name": {
+                                "type": "string",
+                                "description": "Exact folder name filter. Supports comma-separated names, e.g. 'AI Cartoon' or 'AI Cartoon,Vibe Design'.",
+                            },
                             "query": {"type": "string", "description": "Search query to find items (e.g. 'github', 'AI', '量化', '股票')"},
                             "platform": {
                                 "type": "string",
@@ -3095,10 +3306,15 @@ def _build_agent_tools(agent_permissions: list[str]) -> list[dict[str, Any]]:
                             },
                             "item_ids": {"type": "array", "items": {"type": "string"}, "description": "Specific item IDs to export"},
                             "output_filename": {"type": "string", "description": "Output filename — MUST describe content, e.g. '量化视频汇总.md', 'GitHub项目合集.zip'. Never use generic 'export.md'."},
+                            "export_mode": {
+                                "type": "string",
+                                "enum": ["text", "media", "all"],
+                                "description": "text: export text content only (default). media: export original media files only. all: export text files plus media files in one zip.",
+                            },
                             "format": {
                                 "type": "string",
                                 "enum": ["merged_md", "merged_txt", "zip_individual"],
-                                "description": "merged_md: single markdown (default). merged_txt: single text. zip_individual: ZIP with separate files.",
+                                "description": "merged_md: single markdown (default, text mode only). merged_txt: single text (text mode only). zip_individual: ZIP with separate files. Media/all modes always output ZIP.",
                             },
                             "limit": {"type": "integer", "minimum": 1, "maximum": 100, "description": "Max items to export (default 50)"},
                         },
@@ -3268,6 +3484,149 @@ def _resolve_tool_target_folders(
             seen_ids.add(folder.id)
 
     return ordered, missing_names
+
+
+def _split_csv_tool_argument(value: object, *, limit: int = 20) -> list[str]:
+    raw_values = value if isinstance(value, list) else [value]
+    parts: list[str] = []
+    seen: set[str] = set()
+    for raw_value in raw_values:
+        text = _clean_optional_string(raw_value)
+        if not text:
+            continue
+        for chunk in re.split(r"[,，\n]+", text):
+            cleaned = _clean_optional_string(chunk)
+            if not cleaned or cleaned in seen:
+                continue
+            parts.append(cleaned)
+            seen.add(cleaned)
+            if len(parts) >= limit:
+                return parts
+    return parts
+
+
+def _resolve_export_folder_ids(
+    db: Session,
+    user_id: str,
+    folder_names: list[str],
+) -> tuple[list[str], list[str]]:
+    requested_names = [name for name in folder_names if _clean_optional_string(name)]
+    if not requested_names:
+        return [], []
+
+    available_folders = db.query(Folder).filter(Folder.user_id == user_id).all()
+    folders_by_name: dict[str, list[Folder]] = {}
+    for folder in available_folders:
+        normalized_name = _clean_optional_string(folder.name)
+        if not normalized_name:
+            continue
+        folders_by_name.setdefault(normalized_name.lower(), []).append(folder)
+
+    resolved_ids: list[str] = []
+    seen_ids: set[str] = set()
+    missing_names: list[str] = []
+    for raw_name in requested_names:
+        normalized_name = raw_name.strip().lower()
+        matches = folders_by_name.get(normalized_name) or []
+        if not matches:
+            missing_names.append(raw_name)
+            continue
+        for folder in matches:
+            if folder.id in seen_ids:
+                continue
+            resolved_ids.append(folder.id)
+            seen_ids.add(folder.id)
+    return resolved_ids, missing_names
+
+
+def _sanitize_export_path_segment(value: str | None, fallback: str = "export") -> str:
+    cleaned = re.sub(r'[\\/:*?"<>|\r\n]+', "_", str(value or ""))
+    cleaned = re.sub(r"\s+", " ", cleaned).strip(" .")
+    return cleaned[:120] or fallback
+
+
+def _build_item_full_text(item: Item, index: int, is_markdown: bool) -> str:
+    """Build COMPLETE text for one item — never truncated."""
+    parts: list[str] = []
+    title = item.title or "无标题"
+    if is_markdown:
+        parts.append(f"# {index}. {title}\n")
+        parts.append(f"- **来源**: {item.source_url or '未知'}")
+        parts.append(f"- **平台**: {item.platform or '未知'}")
+        parts.append(f"- **保存时间**: {item.created_at}")
+        if _extract_item_folder_names(item):
+            parts.append(f"- **文件夹**: {', '.join(_extract_item_folder_names(item))}")
+        parts.append("")
+        parts.append("---\n")
+    else:
+        parts.append(f"{'=' * 80}")
+        parts.append(f"[{index}] {title}")
+        parts.append(f"来源: {item.source_url or '未知'}")
+        parts.append(f"平台: {item.platform or '未知'}")
+        parts.append(f"保存时间: {item.created_at}")
+        parts.append(f"{'=' * 80}\n")
+
+    if item.canonical_text:
+        parts.append(item.canonical_text)
+
+    if item.extracted_text:
+        separator = "\n\n## 提取文本\n" if is_markdown else "\n\n--- 提取文本 ---\n"
+        parts.append(separator)
+        parts.append(item.extracted_text)
+
+    if item.ocr_text:
+        separator = "\n\n## OCR 文本\n" if is_markdown else "\n\n--- OCR 文本 ---\n"
+        parts.append(separator)
+        parts.append(item.ocr_text)
+
+    frame_texts: list[object] = []
+    try:
+        frame_texts = json.loads(item.frame_texts_json) if item.frame_texts_json else []
+    except (json.JSONDecodeError, TypeError):
+        frame_texts = []
+    if frame_texts:
+        separator = "\n\n## 视频字幕/帧文本\n" if is_markdown else "\n\n--- 视频字幕/帧文本 ---\n"
+        parts.append(separator)
+        for frame_text in frame_texts:
+            if isinstance(frame_text, dict):
+                timestamp = _clean_optional_string(frame_text.get("timestamp"))
+                text = _clean_optional_string(frame_text.get("text") or frame_text.get("content"))
+                if text:
+                    parts.append(f"[{timestamp}] {text}" if timestamp else text)
+            elif isinstance(frame_text, str):
+                parts.append(frame_text)
+
+    if hasattr(item, "page_notes") and item.page_notes:
+        for page_note in item.page_notes:
+            if page_note.content and page_note.content.strip():
+                separator = (
+                    f"\n\n## 内容分析: {page_note.title}\n"
+                    if is_markdown
+                    else f"\n\n--- 内容分析: {page_note.title} ---\n"
+                )
+                parts.append(separator)
+                parts.append(page_note.content)
+
+    parts.append("\n")
+    return "\n".join(parts)
+
+
+def _guess_export_media_filename(media: object, media_index: int) -> str:
+    local_name = Path(str(getattr(media, "local_path", "") or "")).name
+    original_url = str(getattr(media, "original_url", "") or "").strip()
+    original_name = Path(urlparse(original_url).path).name if original_url else ""
+    source_name = local_name or original_name
+
+    suffix = Path(source_name).suffix
+    stem = Path(source_name).stem if source_name else ""
+    if not suffix and original_url:
+        suffix = Path(urlparse(original_url).path).suffix
+    if not suffix:
+        suffix = ".bin"
+
+    media_type = _clean_optional_string(getattr(media, "type", None)) or "media"
+    safe_stem = _sanitize_export_path_segment(stem, fallback=media_type)
+    return f"{media_index:03d}_{safe_stem}{suffix}"
 
 
 def _resolve_tool_target_tags(
@@ -3785,28 +4144,51 @@ async def _execute_agent_tool(
             return result, AiToolEventResponse(name=tool_name, status="failed", summary="没有开放命令执行权限"), [], []
 
         import zipfile
-        from pathlib import Path
         from paths import EXPORTS_DIR
 
+        folder_names = _split_csv_tool_argument(arguments.get("folder_name") or arguments.get("folder_names"), limit=20)
         query = _clean_optional_string(arguments.get("query"))
         platform = _clean_optional_string(arguments.get("platform"))
         content_type = _clean_optional_string(arguments.get("content_type")) or "all"
-        item_ids_raw = arguments.get("item_ids") or []
-        export_format = _clean_optional_string(arguments.get("format")) or "merged_md"
+        export_mode = (_clean_optional_string(arguments.get("export_mode")) or "text").lower()
+        if export_mode not in {"text", "media", "all"}:
+            export_mode = "text"
+        item_ids = _split_csv_tool_argument(arguments.get("item_ids"), limit=200)
+        requested_format = _clean_optional_string(arguments.get("format")) or "merged_md"
+        if requested_format not in {"merged_md", "merged_txt", "zip_individual"}:
+            requested_format = "merged_md"
         export_limit = max(1, min(int(arguments.get("limit") or 50), 100))
+        effective_format = "zip_individual" if export_mode in {"media", "all"} else requested_format
 
-        # Determine default output filename based on format
-        default_filenames = {"merged_md": "export.md", "merged_txt": "export.txt", "zip_individual": "export.zip"}
-        output_filename = _clean_optional_string(arguments.get("output_filename")) or default_filenames.get(export_format, "export.md")
+        default_filenames = {
+            ("text", "merged_md"): "export.md",
+            ("text", "merged_txt"): "export.txt",
+            ("text", "zip_individual"): "export.zip",
+            ("media", "zip_individual"): "export_media.zip",
+            ("all", "zip_individual"): "export_bundle.zip",
+        }
+        output_filename = (
+            _clean_optional_string(arguments.get("output_filename"))
+            or default_filenames.get((export_mode, effective_format))
+            or "export.zip"
+        )
 
         try:
-            # Build base query
             q = db.query(Item).filter(Item.user_id == user_id, Item.status == "ready")
 
-            if item_ids_raw:
-                q = q.filter(Item.id.in_(item_ids_raw))
+            if item_ids:
+                q = q.filter(Item.id.in_(item_ids))
             else:
-                # --- Platform filter ---
+                if folder_names:
+                    folder_ids, missing_folder_names = _resolve_export_folder_ids(db, user_id, folder_names)
+                    if missing_folder_names:
+                        missing_text = "、".join(missing_folder_names)
+                        result = {"status": "error", "message": f"Unknown folders: {missing_text}"}
+                        return result, AiToolEventResponse(name=tool_name, status="failed", summary=f"找不到文件夹：{missing_text}"), [], []
+
+                    linked_item_ids = select(ItemFolderLink.item_id).where(ItemFolderLink.folder_id.in_(folder_ids))
+                    q = q.filter(or_(Item.folder_id.in_(folder_ids), Item.id.in_(linked_item_ids)))
+
                 if platform:
                     platforms = [p.strip().lower() for p in platform.split(",") if p.strip()]
                     platform_conditions = []
@@ -3819,17 +4201,14 @@ async def _execute_agent_tool(
                     if platform_conditions:
                         q = q.filter(or_(*platform_conditions))
 
-                # --- Content type filter ---
                 if content_type == "video":
                     q = q.filter(Item.platform.in_(["douyin", "xiaohongshu"]))
                 elif content_type == "article":
                     q = q.filter(Item.platform.in_(["wechat", "generic", "web"]))
 
-                # --- Query/keyword filter (applied ON TOP of platform filter, not replacing it) ---
                 if query:
                     from routers.items import rank_search_rows
 
-                    # Get candidate IDs from the already-filtered query
                     filtered_ids_q = q.with_entities(Item.id).all()
                     filtered_id_set = {row[0] for row in filtered_ids_q}
 
@@ -3841,11 +4220,8 @@ async def _execute_agent_tool(
                         )
                         ranked_ids = rank_search_rows(candidate_rows, query)[:export_limit]
 
-                        # Fallback: if compound query matches nothing, try splitting into sub-terms
                         if not ranked_ids and len(query) > 2:
-                            # Split by whitespace/punctuation first
                             sub_terms = [w.strip() for w in re.split(r'[\s,，、/\-_]+', query) if len(w.strip()) > 1]
-                            # If still one big term, use 2-char sliding window (works for Chinese)
                             if len(sub_terms) <= 1:
                                 sub_terms = [query[i:i+2] for i in range(0, len(query) - 1)]
                             for sub in sub_terms:
@@ -3865,74 +4241,12 @@ async def _execute_agent_tool(
 
             EXPORTS_DIR.mkdir(parents=True, exist_ok=True)
             exported_titles: list[str] = []
+            exported_media_count = 0
+            skipped_media_count = 0
+            zip_output = effective_format == "zip_individual"
 
-            def _build_item_full_text(item: Item, index: int, is_markdown: bool) -> str:
-                """Build COMPLETE text for one item — never truncated."""
-                parts: list[str] = []
-                title = item.title or "无标题"
-                if is_markdown:
-                    parts.append(f"# {index}. {title}\n")
-                    parts.append(f"- **来源**: {item.source_url or '未知'}")
-                    parts.append(f"- **平台**: {item.platform or '未知'}")
-                    parts.append(f"- **保存时间**: {item.created_at}")
-                    if _extract_item_folder_names(item):
-                        parts.append(f"- **文件夹**: {', '.join(_extract_item_folder_names(item))}")
-                    parts.append("")
-                    parts.append("---\n")
-                else:
-                    parts.append(f"{'='*80}")
-                    parts.append(f"[{index}] {title}")
-                    parts.append(f"来源: {item.source_url or '未知'}")
-                    parts.append(f"平台: {item.platform or '未知'}")
-                    parts.append(f"保存时间: {item.created_at}")
-                    parts.append(f"{'='*80}\n")
-
-                # FULL canonical_text — no truncation
-                if item.canonical_text:
-                    parts.append(item.canonical_text)
-
-                # FULL extracted_text (OCR, subtitles, etc.)
-                if item.extracted_text:
-                    separator = "\n\n## 提取文本\n" if is_markdown else "\n\n--- 提取文本 ---\n"
-                    parts.append(separator)
-                    parts.append(item.extracted_text)
-
-                # FULL OCR text
-                if item.ocr_text:
-                    separator = "\n\n## OCR 文本\n" if is_markdown else "\n\n--- OCR 文本 ---\n"
-                    parts.append(separator)
-                    parts.append(item.ocr_text)
-
-                # Frame texts (video subtitles/transcripts)
-                frame_texts = []
-                try:
-                    frame_texts = json.loads(item.frame_texts_json) if item.frame_texts_json else []
-                except (json.JSONDecodeError, TypeError):
-                    pass
-                if frame_texts:
-                    separator = "\n\n## 视频字幕/帧文本\n" if is_markdown else "\n\n--- 视频字幕/帧文本 ---\n"
-                    parts.append(separator)
-                    for ft in frame_texts:
-                        if isinstance(ft, dict):
-                            ts = ft.get("timestamp", "")
-                            txt = ft.get("text", "")
-                            parts.append(f"[{ts}] {txt}" if ts else txt)
-                        elif isinstance(ft, str):
-                            parts.append(ft)
-
-                # Page notes (user's content analysis / AI analysis)
-                if hasattr(item, "page_notes") and item.page_notes:
-                    for pn in item.page_notes:
-                        if pn.content and pn.content.strip():
-                            separator = f"\n\n## 内容分析: {pn.title}\n" if is_markdown else f"\n\n--- 内容分析: {pn.title} ---\n"
-                            parts.append(separator)
-                            parts.append(pn.content)
-
-                parts.append("\n")
-                return "\n".join(parts)
-
-            if export_format in ("merged_md", "merged_txt"):
-                is_md = export_format == "merged_md"
+            if not zip_output:
+                is_md = effective_format == "merged_md"
                 merged_parts: list[str] = []
 
                 for i, item in enumerate(items):
@@ -3943,24 +4257,59 @@ async def _execute_agent_tool(
                 out_path = EXPORTS_DIR / output_filename
                 out_path.write_text(merged_content, encoding="utf-8")
 
-            else:  # zip_individual
+            else:
                 if not output_filename.endswith(".zip"):
                     output_filename += ".zip"
                 out_path = EXPORTS_DIR / output_filename
                 with zipfile.ZipFile(str(out_path), "w", zipfile.ZIP_DEFLATED) as zf:
                     for i, item in enumerate(items):
-                        content = _build_item_full_text(item, i + 1, is_markdown=True)
-                        safe_title = re.sub(r'[\\/:*?"<>|]', '_', (item.title or f"item_{i}")[:80])
-                        filename = f"{i+1:02d}_{safe_title}.md"
-                        zf.writestr(filename, content)
+                        safe_title = _sanitize_export_path_segment(item.title or f"item_{i + 1}", fallback=f"item_{i + 1}")
+                        item_root = f"{i + 1:02d}_{safe_title}_{item.id[:8]}"
+
+                        if export_mode in {"text", "all"}:
+                            content = _build_item_full_text(item, i + 1, is_markdown=True)
+                            zf.writestr(f"{item_root}/content.md", content)
+
+                        if export_mode in {"media", "all"}:
+                            media_written_for_item = 0
+                            for media_index, media in enumerate(
+                                sorted(item.media or [], key=lambda entry: (entry.display_order, entry.id or "")),
+                                start=1,
+                            ):
+                                try:
+                                    with materialize_media_file(media) as materialized_path:
+                                        export_name = _guess_export_media_filename(media, media_index)
+                                        zf.write(str(materialized_path), f"{item_root}/media/{export_name}")
+                                        exported_media_count += 1
+                                        media_written_for_item += 1
+                                except FileNotFoundError:
+                                    skipped_media_count += 1
+                            if export_mode == "media" and media_written_for_item == 0:
+                                zf.writestr(
+                                    f"{item_root}/README.txt",
+                                    "This item has no downloadable local media available.\n",
+                                )
+
                         exported_titles.append(item.title or item.id)
 
             download_url = f"/api/ai/exports/{output_filename}"
-            summary = f"已导出 {len(items)} 条完整内容到 {output_filename}"
+            if export_mode == "media":
+                summary = f"已导出 {len(items)} 条内容的 {exported_media_count} 个媒体文件到 {output_filename}"
+                if skipped_media_count:
+                    summary += f"（跳过 {skipped_media_count} 个缺失媒体）"
+            elif export_mode == "all":
+                summary = f"已导出 {len(items)} 条内容及 {exported_media_count} 个媒体文件到 {output_filename}"
+                if skipped_media_count:
+                    summary += f"（跳过 {skipped_media_count} 个缺失媒体）"
+            else:
+                summary = f"已导出 {len(items)} 条完整内容到 {output_filename}"
             result = {
                 "status": "ok",
                 "exported_count": len(items),
+                "export_mode": export_mode,
                 "exported_titles": exported_titles[:30],
+                "exported_media_count": exported_media_count,
+                "skipped_media_count": skipped_media_count,
                 "download_url": download_url,
                 "output": summary,
             }
@@ -4322,7 +4671,8 @@ _PLAN_AND_EXECUTE_SYSTEM_PROMPT = (
     "4. 如果用户只是提问（不需要执行操作），返回空数组 []。\n"
     "5. 只输出 JSON 数组，不要解释。\n"
     "\n"
-    "【关键：正确拆分 query / content_type / platform 参数】\n"
+    "【关键：正确拆分 folder_name / query / content_type / platform 参数】\n"
+    "用户明确提到文件夹名时→ 放到 folder_name，不要放到 query。\n"
     "用户说的'视频'→ content_type='video'，不要放到 query 里。\n"
     "用户说的'文章'→ content_type='article'。\n"
     "用户说的'GitHub'→ platform='github'。\n"
@@ -4330,6 +4680,8 @@ _PLAN_AND_EXECUTE_SYSTEM_PROMPT = (
     "用户说的'小红书'→ platform='xiaohongshu'。\n"
     "用户说的'微信'→ platform='wechat'。\n"
     "query 只放主题关键词，不要混入内容类型或平台。\n"
+    "用户要原图/原视频/媒体文件→ export_mode='media'。\n"
+    "用户要文本和媒体一起→ export_mode='all'。\n"
     "\n"
     "【关键：output_filename 必须根据任务内容命名】\n"
     "不要用 export.md / export.zip 这种通用名，要根据用户请求的主题命名文件。\n"
@@ -4344,6 +4696,9 @@ _PLAN_AND_EXECUTE_SYSTEM_PROMPT = (
     "\n"
     "用户：'把所有股票相关的抖音视频导出'\n"
     "→ [{\"name\":\"export_items_to_zip\",\"arguments\":{\"query\":\"股票\",\"platform\":\"douyin\",\"format\":\"merged_md\",\"output_filename\":\"抖音股票视频合集.md\"}}]\n"
+    "\n"
+    "用户：'把 AI Cartoon 里所有图片导出成 zip'\n"
+    "→ [{\"name\":\"export_items_to_zip\",\"arguments\":{\"folder_name\":\"AI Cartoon\",\"export_mode\":\"media\",\"format\":\"zip_individual\",\"output_filename\":\"AI_Cartoon_media.zip\"}}]\n"
 )
 
 
@@ -5023,18 +5378,19 @@ async def ask_ai(request: AiAskRequest, db: Session = Depends(get_db)):
         "回答具体问题时请基于这些详细内容，引用时使用 [编号] 格式。若信息不够，请直接说明缺口。\n\n"
         f"{rag_context.context_text}"
     )
+    relevant_memories = await _retrieve_relevant_memories(db, user_id, ai_config, question)
+    system_prompt = (
+        _ask_ai_system_prompt()
+        + _format_relevant_memories_block(relevant_memories)
+        + _ask_ai_memory_tool_guidance()
+    )
     try:
-        answer = await chat_completion(
-            api_key=ai_config["api_key"],
-            base_url=ai_config["base_url"],
-            model=ai_config["model"],
-            messages=[
-                {"role": "system", "content": _ask_ai_system_prompt()},
-                {
-                    "role": "user",
-                    "content": "\n".join(user_content_parts),
-                },
-            ],
+        answer = await _run_ask_ai_with_memory_tools(
+            db=db,
+            user_id=user_id,
+            ai_config=ai_config,
+            system_prompt=system_prompt,
+            user_content="\n".join(user_content_parts),
         )
     except AiClientError as exc:
         raise _ai_request_failed(exc) from exc

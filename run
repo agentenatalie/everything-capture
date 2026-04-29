@@ -106,6 +106,8 @@ start_capture_worker() {
   echo "Starting capture processing worker for $CAPTURE_SERVICE_URL"
   env PYTHONPATH="$PYTHONPATH_VALUE" "$VENV_PYTHON" "$ROOT_DIR/backend/processing_worker.py" \
     --interval "${CAPTURE_WORKER_INTERVAL:-15}" \
+    --idle-interval "${CAPTURE_WORKER_IDLE_INTERVAL:-600}" \
+    --idle-after "${CAPTURE_WORKER_IDLE_AFTER:-3}" \
     >>"$WORKER_LOG_FILE" 2>&1 &
   WORKER_PID="$!"
   echo "$WORKER_PID" > "$WORKER_PID_FILE"

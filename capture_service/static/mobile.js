@@ -28,9 +28,9 @@ const queueTotalCount = document.getElementById('queueTotalCount');
 
 const MOBILE_CAPTURE_SELECTED_FOLDER_STORAGE_KEY = 'everything-capture-mobile-folder-selection-v1';
 const CAPTURE_HISTORY_STORAGE_KEY = 'everything-capture-history-v1';
-const CAPTURE_STATUS_POLL_INTERVAL_MS = 3000;
+const CAPTURE_STATUS_POLL_INTERVAL_MS = 5000;
 const CAPTURE_STATUS_POLL_MAX_DURATION_MS = 10 * 60 * 1000;
-const BACKEND_STATUS_POLL_INTERVAL_MS = 15000;
+const BACKEND_STATUS_POLL_INTERVAL_MS = 60000;
 const BACKEND_CONNECTED_GRACE_MS = 10 * 60 * 1000;
 
 let foldersData = [];
@@ -277,6 +277,12 @@ async function fetchBackendStatus({ silent = false } = {}) {
 function scheduleBackendStatusPolling() {
     if (backendStatusPollTimer) {
         window.clearTimeout(backendStatusPollTimer);
+        backendStatusPollTimer = null;
+    }
+
+    if (typeof document !== 'undefined' && document.hidden) {
+        // Pause polling when the tab is hidden so the queue DB can scale to zero.
+        return;
     }
 
     backendStatusPollTimer = window.setTimeout(async () => {
@@ -934,6 +940,10 @@ document.addEventListener('visibilitychange', () => {
         fetchBackendStatus({ silent: true }).catch(() => {});
         warmCaptureService().catch(() => {});
         tryAutofillFromClipboard().catch(() => {});
+        scheduleBackendStatusPolling();
+    } else if (backendStatusPollTimer) {
+        window.clearTimeout(backendStatusPollTimer);
+        backendStatusPollTimer = null;
     }
 });
 

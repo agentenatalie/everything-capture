@@ -130,6 +130,19 @@ def _release_stale_processing_items(db: Session) -> int:
     return len(stale_items)
 
 
+_LAST_STALE_RELEASE_AT: datetime | None = None
+
+
+def _maybe_release_stale_processing_items(db: Session, *, min_interval_seconds: int = 300) -> int:
+    global _LAST_STALE_RELEASE_AT
+    now = datetime.utcnow()
+    if _LAST_STALE_RELEASE_AT is not None and (now - _LAST_STALE_RELEASE_AT).total_seconds() < min_interval_seconds:
+        return 0
+    released = _release_stale_processing_items(db)
+    _LAST_STALE_RELEASE_AT = now
+    return released
+
+
 def _build_status_counts(db: Session) -> dict[str, int]:
     rows = db.query(CaptureItem.status, func.count(CaptureItem.id)).group_by(CaptureItem.status).all()
     status_counts = {status: count for status, count in rows}
@@ -338,7 +351,7 @@ def list_items(
     limit: int = Query(default=50, ge=1, le=200),
     db: Session = Depends(get_db),
 ):
-    _release_stale_processing_items(db)
+    _maybe_release_stale_processing_items(db)
 
     query = db.query(CaptureItem)
     if status_filter == "waiting":
@@ -357,7 +370,7 @@ def list_items(
 
 @app.get("/api/items/{item_id}", response_model=CaptureItemResponse, dependencies=[Depends(_require_service_token)])
 def get_item(item_id: str, db: Session = Depends(get_db)):
-    _release_stale_processing_items(db)
+    _maybe_release_stale_processing_items(db)
     item = db.query(CaptureItem).filter(CaptureItem.id == item_id).first()
     if not item:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Capture item not found")
@@ -366,7 +379,7 @@ def get_item(item_id: str, db: Session = Depends(get_db)):
 
 @app.post("/api/items/{item_id}/claim", response_model=CaptureClaimResponse, dependencies=[Depends(_require_service_token)])
 def claim_item(item_id: str, request: CaptureClaimRequest, db: Session = Depends(get_db)):
-    _release_stale_processing_items(db)
+    _release_stale_processing_items(db)  # claim path runs the authoritative stale-lease sweep
     item = db.query(CaptureItem).filter(CaptureItem.id == item_id).first()
     if not item:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Capture item not found")

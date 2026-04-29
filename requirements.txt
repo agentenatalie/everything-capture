@@ -9,6 +9,7 @@ cryptography>=46.0.0
 python-dotenv>=1.2.0
 python-multipart>=0.0.22
 tzdata>=2025.2
+aiosmtpd>=1.4.6
 
 # Content extraction
 trafilatura>=2.0.0

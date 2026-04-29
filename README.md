@@ -2,9 +2,9 @@
 
 # Everything Capture
 
-**Local-first content capture & personal knowledge base**
+**本地优先的内容采集与个人知识库**
 
-Capture URLs, articles, social media, videos, and text from any device — extract, store, and organize everything on your own machine.
+从任何设备抓取网址、文章、社交媒体帖子、视频和文本 — 提取、存储、整理，全部在你自己的机器上完成。
 
 [![Python](https://img.shields.io/badge/Python-3.11+-3776AB?style=flat-square&logo=python&logoColor=white)](https://python.org)
 [![FastAPI](https://img.shields.io/badge/FastAPI-009688?style=flat-square&logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com)
@@ -14,43 +14,43 @@ Capture URLs, articles, social media, videos, and text from any device — extra
 [![GitHub stars](https://img.shields.io/github/stars/agentenatalie/everything-capture?style=flat-square&logo=github)](https://github.com/agentenatalie/everything-capture/stargazers)
 [![GitHub last commit](https://img.shields.io/github/last-commit/agentenatalie/everything-capture?style=flat-square)](https://github.com/agentenatalie/everything-capture/commits/main)
 
-[中文文档](./README_CN.md) · [Landing Page](https://agentenatalie.github.io/everything-capture/)
+[English](./README.md) · [项目主页](https://agentenatalie.github.io/everything-capture/)
 
 </div>
 
 ---
 
-## Why
+## 为什么做这个
 
-Most "read-it-later" services store your data on their servers. Everything Capture keeps **all content, media, and metadata in a local SQLite database** on your machine. The AI assistant reads from that local `app.db` item library itself; Obsidian is only an optional sync/export target, not the assistant's default retrieval source. An optional cloud capture service lets your phone queue items, but the heavy extraction always runs locally.
+大多数「稍后阅读」服务把你的数据存在他们的服务器上。Everything Capture 把**所有内容、媒体和元数据存在你本机的 SQLite 数据库**里。AI 助手默认直接读取这份本地 `app.db` 条目库本身；Obsidian 只是一个可选同步 / 导出目标，不是默认检索源。可选的云端采集服务允许手机提交链接，但真正的内容提取始终在本地运行。
 
-## Features
+## 功能
 
-| | Feature | Description |
+| | 功能 | 说明 |
 |---|---|---|
-| 📥 | **Multi-source capture** | Web UI (paste URL or ⌘K command palette), server-side extraction API |
-| 📄 | **Smart extraction** | Articles, social posts (Xiaohongshu, Douyin, Twitter/X, WeChat), images, videos |
-| 💾 | **Local media storage** | All media (images, videos, covers) downloaded to your disk |
-| 🔍 | **Full-text search** | SQLite FTS5 trigram index for fast Chinese + English search |
-| 🗂️ | **Folder organization** | Nested folders, drag-to-nest/reorder, multi-folder assignment, rollup counts |
-| 🤖 | **AI assistant** | Chat & agent mode with knowledge base Q&A, content analysis, auto-organization |
-| 🎙️ | **Local transcription** | On-device speech-to-text via mlx-whisper (Apple Silicon) |
-| 👁️ | **OCR** | Image text extraction + QR code detection via macOS Vision framework |
-| 📤 | **Optional sync/export** | Push items to Notion or Obsidian; these are optional outputs, not the primary AI retrieval source |
-| 📱 | **Cloud inbox** | Optional — deploy a lightweight capture service for mobile/Shortcuts submissions (self-hosted) |
-| 🖥️ | **Desktop app** | *Coming soon* — macOS .app bundle with PyInstaller, code-signed and notarized |
+| 📥 | **多端采集** | Web UI（粘贴链接或 ⌘K 命令面板）、服务端 URL 提取 API |
+| 📄 | **智能提取** | 文章正文、社交媒体（小红书、抖音、Twitter/X、微信公众号）、图片、视频 |
+| 💾 | **本地媒体存储** | 所有媒体（图片、视频、封面）下载到本地磁盘 |
+| 🔍 | **全文搜索** | SQLite FTS5 trigram 索引，中英文混合高速搜索 |
+| 🗂️ | **文件夹整理** | 多层嵌套、拖拽移入/排序、多文件夹归类、父文件夹聚合计数 |
+| 🤖 | **AI 助手** | 对话与 Agent 模式，知识库问答、内容分析、自动整理 |
+| 🎙️ | **本地语音转录** | 设备端 mlx-whisper 语音转文字（Apple Silicon） |
+| 👁️ | **OCR 识别** | macOS Vision 框架提取图片文字 + 识别二维码 |
+| 📤 | **可选同步 / 导出** | 推送到 Notion 或 Obsidian；它们是可选输出，不是 AI 的主检索来源 |
+| 📱 | **云端收件箱** | 可选 — 自行部署轻量采集服务，手机/快捷指令投递链接 |
+| 🖥️ | **桌面应用** | *开发中* — macOS .app 打包，支持代码签名和公证 |
 
-## Quick Start
+## 快速开始
 
-### One-line install (recommended)
+### 一键安装（推荐）
 
 ```bash
 curl -O https://raw.githubusercontent.com/agentenatalie/everything-capture/main/setup.sh && bash setup.sh
 ```
 
-This automatically installs Python 3, ffmpeg, downloads the code, sets up dependencies, and starts the app.
+自动完成 Python 3 安装、ffmpeg 安装、代码下载、依赖安装和服务启动。
 
-### Manual install
+### 手动安装
 
 ```bash
 git clone https://github.com/agentenatalie/everything-capture.git
@@ -60,162 +60,162 @@ backend/venv/bin/pip install -r requirements.txt
 ./run
 ```
 
-Open **http://localhost:8000** in your browser.
+浏览器访问 **http://localhost:8000** 即可使用。
 
-### System requirements
+### 系统依赖
 
-| Dependency | Purpose | Install |
+| 依赖 | 用途 | 安装方式 |
 |---|---|---|
-| Python 3.11+ | Backend runtime | `brew install python3` / `apt install python3` |
-| ffmpeg | Video transcription & subtitle extraction | `brew install ffmpeg` / `apt install ffmpeg` |
-| Swift (macOS built-in) | Image OCR + QR code detection | `xcode-select --install` |
+| Python 3.11+ | 后端运行时 | `brew install python3` / `apt install python3` |
+| ffmpeg | 视频转录、字幕提取 | `brew install ffmpeg` / `apt install ffmpeg` |
+| Swift（macOS 自带） | 图片 OCR + 二维码识别 | `xcode-select --install` |
 
-> **Note:** `mlx` and `mlx-whisper` (for local speech-to-text) are only installed on macOS Apple Silicon. Other platforms skip them automatically.
+> **注意：** `mlx` 和 `mlx-whisper`（本地语音转文字）仅在 macOS Apple Silicon 上安装，其他平台自动跳过，不影响其他功能。
 
-## Architecture
+## 架构
 
 ```
-Desktop browser / Web UI
-    → backend/ (FastAPI on :8000, serves UI + API)
+桌面浏览器 / Web UI
+    → backend/ (FastAPI :8000，同时提供 UI 和 API)
     → ../everything-capture-data/app.db + media/
 
-Phone / Share Sheet / Shortcuts
-    → optional cloud capture_service/
-    → pending queue
-    → local processing_worker polls & extracts
+手机 / 分享菜单 / 快捷指令
+    → 可选云端 capture_service/
+    → 待处理队列
+    → 本地 processing_worker 轮询提取
     → ../everything-capture-data/app.db + media/
 ```
 
-## Project Structure
+## 项目结构
 
 ```
 everything-capture/
-├── backend/                FastAPI API, extraction engine, sync, AI
-│   ├── routers/            API route modules (items, ingest, ai, folders, settings, connect)
-│   ├── services/           Business logic (extractor, downloader, ai_client, knowledge_base)
-│   ├── models.py           SQLAlchemy ORM models
-│   ├── database.py         DB setup, migrations, FTS5 indexes
-│   └── main.py             App entry point
-├── frontend/               Vanilla HTML/CSS/JS SPA (no build tools)
-│   ├── index.html          Single-page app entry
-│   ├── css/index.css       All styles
-│   └── js/                 app-core, app-items, app-ai, app-folders, etc.
-├── capture_service/        Deployable cloud capture inbox (optional)
-├── desktop/                macOS .app packaging (PyInstaller + DMG)
-│   ├── launcher/           App launcher with backend lifecycle management
-│   ├── spec/               Build specs, manifests, entitlements
-│   └── scripts/            Build, sign, notarize, release scripts
-├── docs/                   Landing page (static site)
-├── logo/                   SVG logo assets
-├── setup.sh                One-line installer script
-├── run                     Dev start script (backend + frontend + worker)
-└── requirements.txt        Python dependencies
+├── backend/                FastAPI API、提取引擎、同步、AI
+│   ├── routers/            API 路由模块（items, ingest, ai, folders, settings, connect）
+│   ├── services/           业务逻辑（extractor, downloader, ai_client, knowledge_base）
+│   ├── models.py           SQLAlchemy ORM 模型
+│   ├── database.py         数据库初始化、迁移、FTS5 索引
+│   └── main.py             应用入口
+├── frontend/               纯 HTML/CSS/JS 单页应用（无构建工具）
+│   ├── index.html          SPA 入口
+│   ├── css/index.css       全部样式
+│   └── js/                 app-core, app-items, app-ai, app-folders 等
+├── capture_service/        可独立部署的云端采集收件箱（可选）
+├── desktop/                macOS .app 打包（PyInstaller + DMG）
+│   ├── launcher/           桌面启动器，管理后端子进程生命周期
+│   ├── spec/               构建规格、manifest、签名配置
+│   └── scripts/            构建、签名、公证、发布脚本
+├── docs/                   项目落地页（纯静态站点）
+├── logo/                   SVG Logo 资源
+├── setup.sh                一键安装脚本
+├── run                     开发启动脚本（后端 + 前端 + worker）
+└── requirements.txt        Python 依赖
 ```
 
-## Data Storage
+## 数据存储
 
-All data lives **outside** the repo in a sibling directory:
+所有数据存储在仓库**外部**的同级目录中：
 
 ```
 ../everything-capture-data/
-├── app.db              SQLite database (WAL mode)
-├── media/              Downloaded images, videos, covers
-├── .local/master.key   Fernet encryption key for API secrets
-├── exports/            AI sandbox exports
-└── components/         Installed optional components
+├── app.db              SQLite 数据库（WAL 模式）
+├── media/              下载的图片、视频、封面
+├── .local/master.key   Fernet 加密主密钥
+├── exports/            AI 沙盒导出文件
+└── components/         已安装的可选组件
 ```
 
-Override with env vars: `DATA_DIR`, `SQLITE_PATH`, `MEDIA_DIR`, `EXPORTS_DIR`.
+可通过环境变量覆盖：`DATA_DIR`、`SQLITE_PATH`、`MEDIA_DIR`、`EXPORTS_DIR`。
 
-The local `app.db` in this data directory is the primary knowledge source for AI retrieval and citations.
+其中本地 `app.db` 是 AI 检索与引用的主知识源。
 
-## Folder Hierarchy
+## 文件夹层级
 
-- Folders support multi-level nesting.
-- Drag a folder onto another folder to make it a subfolder.
-- Drag near the top or bottom edge of a folder row to reorder siblings.
-- Parent folders show the unique content count of the whole subtree, not just directly linked items.
-- Clicking a top-level folder toggles its subfolder list immediately and focuses the parent folder itself, without adding extra chevron UI.
+- 文件夹支持多层嵌套。
+- 把一个文件夹拖到另一个文件夹上，会直接变成它的子文件夹。
+- 拖到文件夹行的上边缘或下边缘时，会在同级里重新排序。
+- 父文件夹显示的是整个子树的唯一内容总数，不只是自己直接包含的内容。
+- 点击顶层文件夹时，会立刻在展开和收起之间切换，并同时切到这个 main folder 本身，而且不会额外显示小三角。
 
-## Mobile / Cloud Capture (Optional, Self-hosted)
+## 手机端 / 云端采集（可选，需自行部署）
 
-To capture from your phone or iOS Shortcuts, deploy the lightweight `capture_service/` yourself:
+如需从手机或 iOS 快捷指令采集，需自行部署轻量的 `capture_service/`：
 
 ```bash
 backend/venv/bin/python scripts/prepare_capture_vercel_deploy.py ./deploy_output
 cd deploy_output && vercel
 ```
 
-Then configure locally:
+然后在本地配置：
 
 ```bash
 mkdir -p backend/.local
 echo 'CAPTURE_SERVICE_URL="https://your-deployment.vercel.app"' > backend/.local/capture_service.env
 ```
 
-The local `processing_worker` automatically pulls from the cloud queue when you run `./run`.
+运行 `./run` 时，本地 `processing_worker` 会自动从云端队列拉取任务。
 
-See [capture_service/README.md](./capture_service/README.md) for details.
+详见 [capture_service/README.md](./capture_service/README.md)。
 
-## Integrations
+## 可选集成
 
-Configure through the web UI settings — no config files needed:
+在 Web UI 设置页面中配置，无需手动编辑配置文件：
 
-| Integration | Purpose |
+| 集成 | 用途 |
 |---|---|
-| **Notion** | Sync items to a Notion database (OAuth) |
-| **Obsidian** | Optional Markdown export via Obsidian REST API plugin |
-| **AI** (OpenAI-compatible) | Knowledge base Q&A, content analysis, auto-organization |
+| **Notion** | 同步条目到 Notion 数据库（OAuth 授权） |
+| **Obsidian** | 通过 Obsidian REST API 插件做可选 Markdown 导出 |
+| **AI**（OpenAI 兼容） | 知识库问答、内容分析、自动整理 |
 
-All API keys are encrypted at rest with Fernet.
+所有 API 密钥使用 Fernet 加密存储。
 
-## AI Features
+## AI 功能
 
-The built-in AI assistant supports two modes:
+内置 AI 助手支持两种模式：
 
-- **Chat mode** — Conversational Q&A with knowledge base context, content analysis
-- **Agent mode** — Tool-calling with search, folder management, sync, export, sandbox execution, and system commands
+- **对话模式** — 知识库上下文问答、内容分析
+- **Agent 模式** — 工具调用：搜索、文件夹管理、同步、导出、沙盒执行、系统命令
 
-Knowledge source: the assistant reads Everything Capture's own local `app.db` item records and extracted text. Obsidian sync is optional and not part of the default retrieval pipeline.
+知识源说明：助手默认读取 Everything Capture 自己的本地 `app.db` 条目与解析文本。Obsidian 同步只是可选输出，不属于默认检索链路。
 
-The **Reader sidebar AI** uses agent mode automatically — it decides whether to use tools based on your request, no manual mode switching needed.
+**阅读器侧栏 AI** 自动使用 Agent 模式 — 根据你的请求自动判断是否需要调用工具，无需手动切换模式。
 
-**System command execution** — The agent can run commands on your computer (git clone, brew install, etc.) with a per-command approval popup. You see the exact command and must click "Allow" before it runs. The agent interprets each command's output before deciding the next step.
+**系统命令执行** — Agent 可以在你的电脑上执行命令（git clone、brew install 等），每条命令需要通过弹窗逐一审批。你会看到完整命令内容，点击「允许」后才会执行。Agent 会解读每条命令的输出后再决定下一步操作。
 
-**Persistent AI memory** — The agent learns and remembers your preferences across conversations. It observes how you organize folders, what topics you care about, and how you like responses — then applies that knowledge automatically. When organizing content, it first studies your existing folder structure and classification patterns before making any assignments. Corrections are saved immediately so the same mistake doesn't happen twice.
+**AI 持久记忆** — Agent 会跨对话记住你的偏好。它会观察你的文件夹组织方式、关注的主题领域和喜欢的回答风格，然后自动应用这些知识。整理内容时，它会先学习你现有的分类习惯再动手操作。你的纠正会被立即记住，不会犯同样的错误。
 
-Supports reasoning/thinking models with `<think>` tag streaming. Works with any OpenAI-compatible API (OpenAI, Claude, local models, etc.).
+支持 reasoning/思维链模型的 `<think>` 标签流式输出。兼容任意 OpenAI 兼容 API（OpenAI、Claude、本地模型等）。
 
-## Configuration
+## 配置项
 
-| Env Variable | Default | Description |
+| 环境变量 | 默认值 | 说明 |
 |---|---|---|
-| `DATA_DIR` | `../everything-capture-data/` | Root data directory |
-| `SQLITE_PATH` | `$DATA_DIR/app.db` | Database path |
-| `MEDIA_DIR` | `$DATA_DIR/media/` | Media storage path |
-| `CAPTURE_SERVICE_URL` | *(none)* | Cloud capture service URL |
-| `CAPTURE_SERVICE_TOKEN` | *(none)* | Cloud service auth token |
-| `RUN_RELOAD` | `1` | Enable uvicorn hot-reload |
-| `USE_FTS5_SEARCH` | `true` | Enable FTS5 full-text search |
-| `EVERYTHING_CAPTURE_FRONTEND_ORIGIN` | *(none)* | Frontend origin override for OAuth / reverse proxy |
+| `DATA_DIR` | `../everything-capture-data/` | 数据根目录 |
+| `SQLITE_PATH` | `$DATA_DIR/app.db` | 数据库路径 |
+| `MEDIA_DIR` | `$DATA_DIR/media/` | 媒体存储路径 |
+| `CAPTURE_SERVICE_URL` | *（无）* | 云端采集服务地址 |
+| `CAPTURE_SERVICE_TOKEN` | *（无）* | 采集服务认证 token |
+| `RUN_RELOAD` | `1` | 启用 uvicorn 热重载 |
+| `USE_FTS5_SEARCH` | `true` | 启用 FTS5 全文搜索 |
+| `EVERYTHING_CAPTURE_FRONTEND_ORIGIN` | *（无）* | 反向代理或 OAuth 回调场景下的前端地址覆盖 |
 
-## Development
+## 开发
 
 ```bash
-# Run backend tests
+# 运行后端测试
 cd backend && source venv/bin/activate
 PYTHONPATH="$(pwd)/..:$(pwd)" python -m pytest tests/ -v
 
-# Run capture service tests
+# 运行 capture service 测试
 PYTHONPATH="$(pwd)/.." python -m pytest ../capture_service/tests/ -v
 ```
 
-## License
+## 许可证
 
-This repository is source-available under the [Elastic License 2.0](./LICENSE) (`Elastic-2.0`).
+本仓库采用 [Elastic License 2.0](./LICENSE)（`Elastic-2.0`）作为公开的 source-available 社区许可。
 
-You may not provide this software to third parties as a hosted or managed service under the public license.
+在公开许可下，你不能把本软件作为托管服务、代运营服务或 SaaS 直接提供给第三方使用。
 
-Hosted/managed/SaaS, white-label, OEM, or other commercial rights beyond Elastic-2.0 require a separate commercial license. See [COMMERCIAL-LICENSING.md](./COMMERCIAL-LICENSING.md).
+如果你需要托管/SaaS、白标、OEM 或其他超出 Elastic-2.0 的商业权利，需要单独取得商业授权。见 [COMMERCIAL-LICENSING.md](./COMMERCIAL-LICENSING.md)。
 
-This is source-available licensing, not an OSI-approved open source license.
+这属于 source-available 授权，不是 OSI 意义上的开源许可证。

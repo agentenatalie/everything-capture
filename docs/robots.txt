@@ -1,0 +1,51 @@
+# Everything Capture public AI/search discovery policy.
+# Important topics: local-first knowledge base, content capture, web clipping,
+# AI assistant, AI knowledge base, Xiaohongshu, Douyin, WeChat, YouTube,
+# Bilibili, Zhihu, OCR, transcription, and full-text search.
+
+User-agent: *
+Allow: /
+
+User-agent: Googlebot
+Allow: /
+
+User-agent: bingbot
+Allow: /
+
+User-agent: DuckDuckBot
+Allow: /
+
+User-agent: Applebot
+Allow: /
+
+User-agent: Baiduspider
+Allow: /
+
+User-agent: Bytespider
+Allow: /
+
+User-agent: GPTBot
+Allow: /
+
+User-agent: OAI-SearchBot
+Allow: /
+
+User-agent: ChatGPT-User
+Allow: /
+
+User-agent: ClaudeBot
+Allow: /
+
+User-agent: Claude-SearchBot
+Allow: /
+
+User-agent: PerplexityBot
+Allow: /
+
+User-agent: Perplexity-User
+Allow: /
+
+User-agent: Google-Extended
+Allow: /
+
+Sitemap: https://agentenatalie.github.io/everything-capture/sitemap.xml

@@ -28,63 +28,67 @@
 
 大多数「稍后阅读」服务把你的数据存在他们的服务器上。Everything Capture 把**所有内容、媒体和元数据存在你本机的 SQLite 数据库**里。AI 助手默认直接读取这份本地 `app.db` 条目库本身；Obsidian 只是一个可选同步 / 导出目标，不是默认检索源。可选的云端采集服务允许手机提交链接，但真正的内容提取始终在本地运行。
 
-## 产品截图
+## 核心功能
 
-Everything Capture 把采集、搜索、阅读、图谱和 AI 问答放在同一个本地应用里。
+### 快捷采集
+
+从剪贴板、分享文本或页面内容中识别链接，直接进入本地解析队列。Web UI 支持粘贴链接、`⌘K` 命令面板和服务端 URL 提取 API；可选云端收件箱可以接收手机 / 快捷指令提交的链接。
+
+<p align="center">
+  <img src="./docs/images/readme/capture.gif" alt="快捷采集面板" width="920">
+</p>
+
+### 阅读与内容分析
+
+文章正文、社交媒体帖子、小红书 / 抖音 / Twitter(X) / 微信公众号内容、图片和视频都会被解析成本地条目。阅读器把原文、媒体、解析正文、笔记和 AI 侧栏放在同一个工作区里，读的时候就能追问、总结和整理。
+
+<p align="center">
+  <img src="./docs/images/readme/reader.gif" alt="阅读器与内容分析侧栏" width="920">
+</p>
+
+### 本地内容库
+
+所有内容、媒体和元数据都保存在本机：图片、视频、封面会下载到本地磁盘，条目进入 SQLite 数据库。SQLite FTS5 trigram 索引支持中英文混合全文搜索，文件夹、标签和平台筛选可以一起使用。
 
 <p align="center">
   <img src="./docs/images/readme/dashboard.png" alt="Everything Capture 本地内容库看板" width="920">
 </p>
 
+### 文件夹与关系图
+
+文件夹支持多层嵌套、拖拽移入 / 排序、多文件夹归类和父文件夹聚合计数。关系图把文件夹、主题和相似内容连起来，用来发现收藏内容之间的脉络。
+
+<p align="center">
+  <img src="./docs/images/readme/relation-map.png" alt="内容关系图" width="920">
+</p>
+
+### AI 助手与 Agent
+
+AI 助手默认读取 Everything Capture 自己的本地 `app.db` 条目库。Chat 模式适合知识库问答、查找和总结；Agent 模式可以在授权后执行整理、导出、同步和本地命令。
+
 <table>
   <tr>
     <td width="50%">
-      <img src="./docs/images/readme/capture.gif" alt="快捷采集面板">
-      <br><strong>快捷采集</strong>
-      <br>从剪贴板、分享文本或页面内容中识别链接，直接进入本地解析队列。
-    </td>
-    <td width="50%">
-      <img src="./docs/images/readme/reader.gif" alt="阅读器与内容分析侧栏">
-      <br><strong>阅读器与内容分析</strong>
-      <br>原文、媒体、解析正文、笔记和 AI 侧栏并排呈现，阅读时就能追问和整理。
-    </td>
-  </tr>
-  <tr>
-    <td width="50%">
-      <img src="./docs/images/readme/relation-map.png" alt="内容关系图">
-      <br><strong>内容关系图</strong>
-      <br>用文件夹、主题和相似内容构建可探索的知识网络。
-    </td>
-    <td width="50%">
       <img src="./docs/images/readme/ai-chat-summary.png" alt="AI 按主题总结知识库内容">
       <br><strong>知识库总结</strong>
-      <br>让 AI 从本地条目里检索、引用和汇总，输出可继续追问的结构化结果。
-    </td>
-  </tr>
-  <tr>
-    <td width="50%">
-      <img src="./docs/images/readme/ai-chat-find.png" alt="AI 在知识库中查找具体答案">
-      <br><strong>精确查找</strong>
-      <br>用自然语言定位保存过的答案、命令、链接和上下文。
+      <br>按主题检索本地条目，输出带引用的结构化结果。
     </td>
     <td width="50%">
       <img src="./docs/images/readme/ai-agent.png" alt="AI Agent 导出和整理内容">
       <br><strong>Agent 操作</strong>
-      <br>在授权后执行整理、导出、同步和本地命令，把知识库变成可操作的工作台。
+      <br>整理内容、生成 Markdown、同步或执行需要你审批的本地命令。
     </td>
   </tr>
 </table>
 
-## 功能
+<p align="center">
+  <img src="./docs/images/readme/ai-chat-find.png" alt="AI 在知识库中查找具体答案" width="920">
+</p>
+
+### 更多能力
 
 | | 功能 | 说明 |
 |---|---|---|
-| 📥 | **多端采集** | Web UI（粘贴链接或 ⌘K 命令面板）、服务端 URL 提取 API |
-| 📄 | **智能提取** | 文章正文、社交媒体（小红书、抖音、Twitter/X、微信公众号）、图片、视频 |
-| 💾 | **本地媒体存储** | 所有媒体（图片、视频、封面）下载到本地磁盘 |
-| 🔍 | **全文搜索** | SQLite FTS5 trigram 索引，中英文混合高速搜索 |
-| 🗂️ | **文件夹整理** | 多层嵌套、拖拽移入/排序、多文件夹归类、父文件夹聚合计数 |
-| 🤖 | **AI 助手** | 对话与 Agent 模式，知识库问答、内容分析、自动整理 |
 | 🎙️ | **本地语音转录** | 设备端 mlx-whisper 语音转文字（Apple Silicon） |
 | 👁️ | **OCR 识别** | macOS Vision 框架提取图片文字 + 识别二维码 |
 | 📤 | **可选同步 / 导出** | 推送到 Notion 或 Obsidian；它们是可选输出，不是 AI 的主检索来源 |

@@ -37,25 +37,55 @@ if (marqueeTrack) {
   marqueeTrack.innerHTML = items + items;
 }
 
-// ===== Video scroll-to-focus =====
-const videoWrap = document.querySelector('.hero-video-wrap');
-if (videoWrap) {
-  const updateVideo = () => {
-    const rect = videoWrap.getBoundingClientRect();
-    const viewH = window.innerHeight;
-    // progress ramps up as video scrolls into center of viewport
-    const center = rect.top + rect.height / 2;
-    const progress = Math.min(1, Math.max(0, 1 - (center - viewH * 0.5) / (viewH * 0.4)));
-    const scale = 0.88 + progress * 0.12;
-    const radius = 24 - progress * 8; // 24px → 16px
-    const shadowAlpha = 0.18 + progress * 0.14;
-    videoWrap.style.transform = `scale(${scale})`;
-    videoWrap.style.borderRadius = `${radius}px`;
-    videoWrap.style.boxShadow = `0 ${40 + progress * 20}px ${100 + progress * 40}px -20px rgba(0,0,0,${shadowAlpha}), 0 8px 32px rgba(0,0,0,${0.06 + progress * 0.06})`;
-  };
-  window.addEventListener('scroll', updateVideo, { passive: true });
-  updateVideo();
-}
+// ===== Let the hero video pass quickly on the first downward gesture =====
+const heroSection = document.querySelector('.hero');
+const screenshotsSection = document.querySelector('#screenshots');
+let heroSkipInProgress = false;
+
+const shouldSkipHeroVideo = () => {
+  if (!heroSection || !screenshotsSection || heroSkipInProgress) return false;
+
+  const heroRect = heroSection.getBoundingClientRect();
+  const screenshotsRect = screenshotsSection.getBoundingClientRect();
+  const viewportH = window.innerHeight;
+
+  return heroRect.top < 8 && heroRect.bottom > viewportH * 0.72 && screenshotsRect.top > viewportH * 0.55;
+};
+
+const skipHeroVideo = () => {
+  if (!shouldSkipHeroVideo()) return false;
+
+  heroSkipInProgress = true;
+  screenshotsSection.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  window.setTimeout(() => {
+    heroSkipInProgress = false;
+  }, 3000);
+
+  return true;
+};
+
+window.addEventListener('wheel', (event) => {
+  if (event.deltaY > 16 && shouldSkipHeroVideo()) {
+    event.preventDefault();
+    skipHeroVideo();
+  }
+}, { passive: false });
+
+let heroTouchStartY = null;
+window.addEventListener('touchstart', (event) => {
+  heroTouchStartY = event.touches[0]?.clientY ?? null;
+}, { passive: true });
+
+window.addEventListener('touchmove', (event) => {
+  if (heroTouchStartY === null) return;
+
+  const currentY = event.touches[0]?.clientY ?? heroTouchStartY;
+  if (heroTouchStartY - currentY > 18 && shouldSkipHeroVideo()) {
+    event.preventDefault();
+    heroTouchStartY = null;
+    skipHeroVideo();
+  }
+}, { passive: false });
 
 // ===== Screenshot focus while scrolling =====
 const showcaseDemos = Array.from(document.querySelectorAll('.showcase-demo'));

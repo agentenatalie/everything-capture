@@ -14,15 +14,66 @@
 [![GitHub stars](https://img.shields.io/github/stars/agentenatalie/everything-capture?style=flat-square&logo=github)](https://github.com/agentenatalie/everything-capture/stargazers)
 [![GitHub last commit](https://img.shields.io/github/last-commit/agentenatalie/everything-capture?style=flat-square)](https://github.com/agentenatalie/everything-capture/commits/main)
 
-[English](./README.md) · [项目主页](https://agentenatalie.github.io/everything-capture/)
+[English](./README_EN.md) · [项目主页](https://agentenatalie.github.io/everything-capture/)
 
 </div>
+
+<p align="center">
+  <img src="./docs/images/readme/hero.jpg" alt="Everything Capture 搜索与快捷采集界面" width="920">
+</p>
 
 ---
 
 ## 为什么做这个
 
 大多数「稍后阅读」服务把你的数据存在他们的服务器上。Everything Capture 把**所有内容、媒体和元数据存在你本机的 SQLite 数据库**里。AI 助手默认直接读取这份本地 `app.db` 条目库本身；Obsidian 只是一个可选同步 / 导出目标，不是默认检索源。可选的云端采集服务允许手机提交链接，但真正的内容提取始终在本地运行。
+
+## 产品截图
+
+Everything Capture 把采集、搜索、阅读、图谱和 AI 问答放在同一个本地应用里。
+
+<p align="center">
+  <img src="./docs/images/readme/dashboard.png" alt="Everything Capture 本地内容库看板" width="920">
+</p>
+
+<table>
+  <tr>
+    <td width="50%">
+      <img src="./docs/images/readme/capture.gif" alt="快捷采集面板">
+      <br><strong>快捷采集</strong>
+      <br>从剪贴板、分享文本或页面内容中识别链接，直接进入本地解析队列。
+    </td>
+    <td width="50%">
+      <img src="./docs/images/readme/reader.gif" alt="阅读器与内容分析侧栏">
+      <br><strong>阅读器与内容分析</strong>
+      <br>原文、媒体、解析正文、笔记和 AI 侧栏并排呈现，阅读时就能追问和整理。
+    </td>
+  </tr>
+  <tr>
+    <td width="50%">
+      <img src="./docs/images/readme/relation-map.png" alt="内容关系图">
+      <br><strong>内容关系图</strong>
+      <br>用文件夹、主题和相似内容构建可探索的知识网络。
+    </td>
+    <td width="50%">
+      <img src="./docs/images/readme/ai-chat-summary.png" alt="AI 按主题总结知识库内容">
+      <br><strong>知识库总结</strong>
+      <br>让 AI 从本地条目里检索、引用和汇总，输出可继续追问的结构化结果。
+    </td>
+  </tr>
+  <tr>
+    <td width="50%">
+      <img src="./docs/images/readme/ai-chat-find.png" alt="AI 在知识库中查找具体答案">
+      <br><strong>精确查找</strong>
+      <br>用自然语言定位保存过的答案、命令、链接和上下文。
+    </td>
+    <td width="50%">
+      <img src="./docs/images/readme/ai-agent.png" alt="AI Agent 导出和整理内容">
+      <br><strong>Agent 操作</strong>
+      <br>在授权后执行整理、导出、同步和本地命令，把知识库变成可操作的工作台。
+    </td>
+  </tr>
+</table>
 
 ## 功能
 

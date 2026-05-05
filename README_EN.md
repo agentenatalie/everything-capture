@@ -14,7 +14,7 @@ Capture URLs, articles, social media, videos, and text from any device — extra
 [![GitHub stars](https://img.shields.io/github/stars/agentenatalie/everything-capture?style=flat-square&logo=github)](https://github.com/agentenatalie/everything-capture/stargazers)
 [![GitHub last commit](https://img.shields.io/github/last-commit/agentenatalie/everything-capture?style=flat-square)](https://github.com/agentenatalie/everything-capture/commits/main)
 
-[中文文档](./README_CN.md) · [Landing Page](https://agentenatalie.github.io/everything-capture/)
+[中文文档](./README.md) · [Landing Page](https://agentenatalie.github.io/everything-capture/)
 
 </div>
 

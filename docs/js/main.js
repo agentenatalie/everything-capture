@@ -61,6 +61,25 @@ if (videoWrap) {
 const showcaseDemos = Array.from(document.querySelectorAll('.showcase-demo'));
 if (showcaseDemos.length) {
   let focusTicking = false;
+  let currentActiveDemo = null;
+  const showcaseSection = showcaseDemos[0].closest('.screenshots');
+
+  const setShowcasePlayback = (demo, shouldPlay) => {
+    const img = demo.querySelector('img[data-gif-src]');
+    if (!img) return;
+
+    const gifSrc = img.dataset.gifSrc;
+    const posterSrc = img.dataset.posterSrc;
+    const isPlaying = img.dataset.playing === 'true';
+
+    if (shouldPlay && !isPlaying) {
+      img.src = `${gifSrc}?replay=${Date.now()}`;
+      img.dataset.playing = 'true';
+    } else if (!shouldPlay && isPlaying) {
+      img.src = posterSrc;
+      img.dataset.playing = 'false';
+    }
+  };
 
   const updateShowcaseFocus = () => {
     const viewportCenter = window.innerHeight * 0.5;
@@ -81,7 +100,15 @@ if (showcaseDemos.length) {
       }
     });
 
+    if (activeDemo !== currentActiveDemo) {
+      currentActiveDemo = activeDemo;
+      showcaseDemos.forEach((demo) => setShowcasePlayback(demo, demo === activeDemo));
+    }
+
     showcaseDemos.forEach((demo) => demo.classList.toggle('is-active', demo === activeDemo));
+    if (showcaseSection) {
+      showcaseSection.classList.toggle('is-focusing', Boolean(activeDemo));
+    }
     focusTicking = false;
   };
 
@@ -95,6 +122,64 @@ if (showcaseDemos.length) {
   window.addEventListener('scroll', requestShowcaseFocus, { passive: true });
   window.addEventListener('resize', requestShowcaseFocus);
   updateShowcaseFocus();
+}
+
+// ===== Screenshot lightbox =====
+const lightboxButtons = Array.from(document.querySelectorAll('.showcase-image-button'));
+if (lightboxButtons.length) {
+  const lightbox = document.createElement('div');
+  lightbox.className = 'image-lightbox';
+  lightbox.setAttribute('aria-hidden', 'true');
+  lightbox.innerHTML = `
+    <div class="image-lightbox-inner" role="dialog" aria-modal="true" aria-label="图片预览">
+      <button class="image-lightbox-close" type="button" aria-label="关闭图片预览">×</button>
+      <img alt="">
+      <div class="image-lightbox-title"></div>
+    </div>
+  `;
+  document.body.appendChild(lightbox);
+
+  const lightboxImg = lightbox.querySelector('img');
+  const lightboxTitle = lightbox.querySelector('.image-lightbox-title');
+  const lightboxClose = lightbox.querySelector('.image-lightbox-close');
+  let lastFocusedElement = null;
+
+  const closeLightbox = () => {
+    lightbox.classList.remove('is-open');
+    lightbox.setAttribute('aria-hidden', 'true');
+    document.body.style.overflow = '';
+    lightboxImg.removeAttribute('src');
+    if (lastFocusedElement) {
+      lastFocusedElement.focus();
+      lastFocusedElement = null;
+    }
+  };
+
+  const openLightbox = (button) => {
+    lastFocusedElement = button;
+    lightboxImg.src = button.dataset.lightboxSrc;
+    lightboxImg.alt = button.querySelector('img')?.alt || button.dataset.lightboxTitle || '截图预览';
+    lightboxTitle.textContent = button.dataset.lightboxTitle || '';
+    lightbox.classList.add('is-open');
+    lightbox.setAttribute('aria-hidden', 'false');
+    document.body.style.overflow = 'hidden';
+    lightboxClose.focus();
+  };
+
+  lightboxButtons.forEach((button) => {
+    button.addEventListener('click', () => openLightbox(button));
+  });
+
+  lightboxClose.addEventListener('click', closeLightbox);
+  lightbox.addEventListener('click', (event) => {
+    if (event.target === lightbox) closeLightbox();
+  });
+
+  window.addEventListener('keydown', (event) => {
+    if (event.key === 'Escape' && lightbox.classList.contains('is-open')) {
+      closeLightbox();
+    }
+  });
 }
 
 // ===== Smooth scroll for anchor links =====

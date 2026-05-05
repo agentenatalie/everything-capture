@@ -281,10 +281,8 @@ PYTHONPATH="$(pwd)/.." python -m pytest ../capture_service/tests/ -v
 
 ## 许可证
 
-这个仓库使用 [Elastic License 2.0](./LICENSE)（`Elastic-2.0`）。
+本仓库采用 Elastic License 2.0（Elastic-2.0）作为公开的 source-available 社区许可。
 
-简单说：你可以看代码、改代码、自己用；但不能直接拿它做托管服务、代运营服务或 SaaS 给第三方用。
+在公开许可下，你不能把本软件作为托管服务、代运营服务或 SaaS 直接提供给第三方使用。
 
-如果你想做托管、SaaS、白标、OEM，或者其他超出 Elastic-2.0 的商业用途，需要单独拿商业授权。见 [COMMERCIAL-LICENSING.md](./COMMERCIAL-LICENSING.md)。
-
-它是 source-available，不是 OSI 意义上的开源许可证。
+如果你需要托管/SaaS、白标、OEM 或其他超出 Elastic-2.0 的商业权利，需要单独取得商业授权。见 COMMERCIAL-LICENSING.md。

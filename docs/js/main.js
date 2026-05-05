@@ -57,6 +57,46 @@ if (videoWrap) {
   updateVideo();
 }
 
+// ===== Screenshot focus while scrolling =====
+const showcaseDemos = Array.from(document.querySelectorAll('.showcase-demo'));
+if (showcaseDemos.length) {
+  let focusTicking = false;
+
+  const updateShowcaseFocus = () => {
+    const viewportCenter = window.innerHeight * 0.5;
+    let activeDemo = null;
+    let bestScore = -Infinity;
+
+    showcaseDemos.forEach((demo) => {
+      const rect = demo.getBoundingClientRect();
+      const visible = Math.max(0, Math.min(rect.bottom, window.innerHeight) - Math.max(rect.top, 0));
+      const visibleRatio = visible / Math.max(rect.height, 1);
+      const demoCenter = rect.top + rect.height / 2;
+      const centerDistance = Math.abs(demoCenter - viewportCenter);
+      const score = visibleRatio * 1000 - centerDistance;
+
+      if (visibleRatio > 0.18 && score > bestScore) {
+        bestScore = score;
+        activeDemo = demo;
+      }
+    });
+
+    showcaseDemos.forEach((demo) => demo.classList.toggle('is-active', demo === activeDemo));
+    focusTicking = false;
+  };
+
+  const requestShowcaseFocus = () => {
+    if (!focusTicking) {
+      focusTicking = true;
+      requestAnimationFrame(updateShowcaseFocus);
+    }
+  };
+
+  window.addEventListener('scroll', requestShowcaseFocus, { passive: true });
+  window.addEventListener('resize', requestShowcaseFocus);
+  updateShowcaseFocus();
+}
+
 // ===== Smooth scroll for anchor links =====
 document.querySelectorAll('a[href^="#"]').forEach((a) => {
   a.addEventListener('click', (e) => {

@@ -130,7 +130,7 @@ backend/venv/bin/pip install -r requirements.txt
 ./run
 ```
 
-然后打开 **http://localhost:8000**。
+然后打开 http://localhost:8000 。
 
 ### 需要装什么
 

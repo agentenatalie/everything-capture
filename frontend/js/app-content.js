@@ -276,6 +276,7 @@
 
             let deliveredCount = 0;
             const remainingQueue = [];
+            const deliveredFolderIds = new Set();
 
             try {
                 for (const entry of mobileCaptureQueue) {
@@ -287,6 +288,10 @@
                             endpoint: '/api/phone-extract',
                         });
                         deliveredCount += 1;
+                        for (const folderId of entry.folderIds || []) {
+                            const normalizedFolderId = String(folderId || '').trim();
+                            if (normalizedFolderId) deliveredFolderIds.add(normalizedFolderId);
+                        }
                     } catch (error) {
                         remainingQueue.push(entry);
                         console.warn('Mobile queued capture delivery failed', error);
@@ -298,6 +303,14 @@
 
                 if (deliveredCount > 0) {
                     fetchItems();
+                    if (deliveredFolderIds.size > 0) {
+                        if (typeof markFoldersRecentlyUsed === 'function') {
+                            markFoldersRecentlyUsed([...deliveredFolderIds], { render: false });
+                        }
+                        if (typeof fetchFolders === 'function') {
+                            fetchFolders();
+                        }
+                    }
                 }
 
                 const pendingCount = mobileCaptureQueue.length;

@@ -2913,7 +2913,7 @@
 
         .folder-context-menu {
             position: fixed;
-            min-width: 156px;
+            min-width: 168px;
             padding: 4px;
             border-radius: 14px;
             background: rgba(255, 255, 255, 0.96);
@@ -3670,15 +3670,23 @@
             width: 20px;
             height: 20px;
             border-radius: 999px;
-            display: inline-flex;
-            align-items: center;
-            justify-content: center;
+            display: inline-grid;
+            place-items: center;
             flex-shrink: 0;
             background: #f3f4f6;
             color: #71767a;
             font-size: 11px;
             font-weight: 700;
+            line-height: 1;
             text-transform: uppercase;
+            text-align: center;
+            font-family: var(--font-brand);
+        }
+
+        .folder-item-glyph > span {
+            display: block;
+            line-height: 1;
+            transform: translateY(-0.7px);
         }
 
         .folder-item.is-main-folder .folder-item-glyph {
@@ -3865,6 +3873,7 @@
             min-width: 0;
             justify-content: flex-end;
             gap: 8px;
+            flex-wrap: nowrap;
         }
 
         .toolbar-filter-shell {
@@ -3918,7 +3927,7 @@
             text-overflow: ellipsis;
             white-space: nowrap;
             color: inherit;
-            font-size: 13px;
+            font-size: 12px;
             font-weight: 500;
             line-height: 1;
         }
@@ -3933,6 +3942,43 @@
             border: none;
             padding: 0;
             cursor: pointer;
+        }
+
+        @media (min-width: 861px) and (max-width: 1180px) {
+            .board-toolbar {
+                grid-template-columns: auto minmax(180px, 1fr) auto;
+                gap: 10px;
+                padding: 0 14px;
+            }
+
+            .toolbar-left,
+            .toolbar-right,
+            .toolbar-filters {
+                gap: 8px;
+            }
+
+            .toolbar-filter-shell {
+                height: 32px;
+                padding: 0 24px 0 10px;
+            }
+
+            .toolbar-filter-shell::after {
+                right: 10px;
+            }
+
+            .toolbar-filter-shell-tag,
+            .toolbar-filter-shell-platform {
+                width: 62px;
+            }
+
+            .toolbar-filter-value {
+                font-size: 11px;
+            }
+
+            #askAiBtn.view-btn {
+                padding-left: 12px;
+                padding-right: 12px;
+            }
         }
 
         .toolbar-icon-btn {
@@ -7871,7 +7917,7 @@
 
         .modal.is-fullscreen {
             --reader-content-width: 800px;
-            --reader-sidebar-default-ratio: 0.30;
+            --reader-sidebar-default-ratio: 0.38;
             --reader-sidebar-max-ratio: 0.50;
             --reader-sidebar-min-width: 360px;
             --reader-carousel-width: 1120px;

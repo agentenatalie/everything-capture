@@ -40,6 +40,8 @@ PYTHONPATH="$PWD:$PWD/backend" backend/venv/bin/python -m uvicorn capture_servic
 ```bash
 CAPTURE_SERVICE_TOKEN=replace-with-a-long-random-token
 CAPTURE_SERVICE_DATABASE_URL=postgresql://...
+CAPTURE_WORKER_WAKE_URL=https://your-local-tunnel.example.com/api/capture-worker/wake
+CAPTURE_WORKER_WAKE_TOKEN=replace-with-another-long-random-token
 ```
 
 也可以不用外部数据库，改用持久化 SQLite：
@@ -102,6 +104,21 @@ CAPTURE_SERVICE_TOKEN="replace-with-the-same-token"
 
 - 启动本地 Web UI
 - 启动本地 processing worker
+
+如果你想让手机端上传后马上进入本地收藏库，同时仍然保留低频 idle 轮询来节省 Neon 时间，可以额外配置 wake webhook。这个通道目前按 beta 处理：
+
+```bash
+CAPTURE_WORKER_WAKE_TOKEN="replace-with-another-long-random-token"
+```
+
+然后把本地后端的 `POST /api/capture-worker/wake` 暴露成一个带 HTTPS 的公网 URL，并在云端 `capture_service` 设置：
+
+```bash
+CAPTURE_WORKER_WAKE_URL="https://your-local-tunnel.example.com/api/capture-worker/wake"
+CAPTURE_WORKER_WAKE_TOKEN="replace-with-another-long-random-token"
+```
+
+这样新上传只会触发一次本地处理，不需要把 worker 改成全天候 5 秒轮询。没有重新部署 `capture_service` 时，现有云端页面不会自动调用这个 beta webhook；本地 worker 仍会按 idle 轮询兜底。
 
 如果你只想手动跑 worker：
 
@@ -200,6 +217,10 @@ backend/venv/bin/python scripts/prepare_capture_vercel_deploy.py /tmp/everything
   SQLite 文件路径。适合本地或有持久磁盘的主机。
 - `CAPTURE_SERVICE_TOKEN`
   可选 Bearer Token。设置后会保护所有 `/api/*` 队列接口。
+- `CAPTURE_WORKER_WAKE_URL`
+  可选。新建 capture 后通知本地后端立即处理队列的 webhook URL。
+- `CAPTURE_WORKER_WAKE_TOKEN`
+  可选但建议和 wake URL 一起设置。用于保护本地 `/api/capture-worker/wake`。
 - `CAPTURE_SERVICE_LEASE_TIMEOUT_SECONDS`
   worker claim 超时回收时间，默认 6 小时。
 

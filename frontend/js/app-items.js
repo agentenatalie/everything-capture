@@ -1761,6 +1761,9 @@
             folderSearchQuery = e.target.value || '';
             renderFolderNavigation();
         });
+        folderList.addEventListener('dragover', handleFolderListDragOver);
+        folderList.addEventListener('dragleave', handleFolderListDragLeave);
+        folderList.addEventListener('drop', stopFolderListAutoScroll);
         toggleSidebarBtn.addEventListener('click', () => {
             sidebarExpanded = !sidebarExpanded;
             updateSidebarState();
@@ -2950,6 +2953,7 @@
             draggedLibraryItemIds = [];
             document.body.classList.remove('item-dragging');
             clearFolderDropIndicator();
+            stopFolderListAutoScroll();
             clearItemDragPreview();
         }
 

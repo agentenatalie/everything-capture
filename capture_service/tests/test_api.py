@@ -4,6 +4,7 @@ import sys
 import tempfile
 import unittest
 from datetime import datetime, timedelta
+from unittest.mock import patch
 
 from fastapi.testclient import TestClient
 
@@ -28,6 +29,8 @@ class CaptureServiceApiTests(unittest.TestCase):
     def tearDown(self) -> None:
         self.temp_dir.cleanup()
         os.environ.pop("CAPTURE_SERVICE_DB_PATH", None)
+        os.environ.pop("CAPTURE_WORKER_WAKE_URL", None)
+        os.environ.pop("CAPTURE_WORKER_WAKE_TOKEN", None)
 
     def test_capture_queue_claim_and_complete_flow(self) -> None:
         root_response = self.client.get("/")
@@ -83,6 +86,22 @@ class CaptureServiceApiTests(unittest.TestCase):
         self.assertEqual(complete_response.status_code, 200)
         self.assertEqual(complete_response.json()["status"], "processed")
         self.assertEqual(complete_response.json()["local_item_id"], "local-item-123")
+
+    def test_capture_create_notifies_worker_wake_webhook(self) -> None:
+        os.environ["CAPTURE_WORKER_WAKE_URL"] = "https://worker.example.com/api/capture-worker/wake"
+        os.environ["CAPTURE_WORKER_WAKE_TOKEN"] = "wake-secret"
+
+        with patch.object(self.api, "_notify_capture_worker_wake") as notify_wake:
+            create_response = self.client.post(
+                "/api/capture",
+                json={
+                    "text": "wake local library",
+                    "source": "phone-webapp",
+                },
+            )
+
+        self.assertEqual(create_response.status_code, 201)
+        notify_wake.assert_called_once_with(create_response.json()["item_id"])
 
     def test_capture_queue_fail_flow(self) -> None:
         create_response = self.client.post(

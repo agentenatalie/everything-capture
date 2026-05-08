@@ -6,6 +6,9 @@
 import asyncio
 import logging
 import re
+import shutil
+import subprocess
+import tempfile
 from pathlib import Path
 from urllib.parse import urlparse
 
@@ -158,6 +161,126 @@ def _save_subtitle_companion(video_path: Path) -> None:
             vtt.unlink()
         except OSError:
             pass
+
+
+def _find_ffmpeg_binary() -> str:
+    candidates = [
+        shutil.which("ffmpeg"),
+        "/opt/homebrew/bin/ffmpeg",
+        "/usr/local/bin/ffmpeg",
+        str(Path(__file__).resolve().parents[2] / "desktop" / "build" / "runtime" / "bin" / "ffmpeg"),
+    ]
+    for candidate in candidates:
+        if candidate and Path(candidate).exists():
+            return candidate
+    return ""
+
+
+async def _download_companion_media(url: str, target_path: Path, referer: str = "") -> bool:
+    if not url:
+        return False
+
+    headers = {"User-Agent": _MOBILE_UA}
+    if referer:
+        headers["Referer"] = referer
+
+    try:
+        async with httpx.AsyncClient(headers=headers, follow_redirects=True, timeout=60) as client:
+            async with client.stream("GET", url) as resp:
+                resp.raise_for_status()
+                target_path.parent.mkdir(parents=True, exist_ok=True)
+                with target_path.open("wb") as handle:
+                    async for chunk in resp.aiter_bytes(chunk_size=65536):
+                        handle.write(chunk)
+        return target_path.exists() and target_path.stat().st_size > 0
+    except Exception as exc:
+        logger.warning("合成视频素材下载失败 %s: %s", url[:80], exc)
+        return False
+
+
+def _compose_image_audio_video_sync(image_path: Path, audio_path: Path, save_path: Path) -> tuple[Path | None, int]:
+    ffmpeg = _find_ffmpeg_binary()
+    if not ffmpeg:
+        logger.warning("FFmpeg 不可用，无法合成图文视频")
+        return None, 0
+
+    save_path.parent.mkdir(parents=True, exist_ok=True)
+    if save_path.exists():
+        try:
+            save_path.unlink()
+        except OSError:
+            pass
+
+    cmd = [
+        ffmpeg,
+        "-y",
+        "-hide_banner",
+        "-loglevel",
+        "error",
+        "-loop",
+        "1",
+        "-framerate",
+        "1",
+        "-i",
+        str(image_path),
+        "-i",
+        str(audio_path),
+        "-vf",
+        "scale=w='min(720,iw)':h=-2,format=yuv420p",
+        "-r",
+        "1",
+        "-c:v",
+        "libx264",
+        "-preset",
+        "ultrafast",
+        "-tune",
+        "stillimage",
+        "-c:a",
+        "aac",
+        "-b:a",
+        "128k",
+        "-shortest",
+        "-movflags",
+        "+faststart",
+        str(save_path),
+    ]
+
+    try:
+        subprocess.run(cmd, check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=180)
+    except Exception as exc:
+        logger.warning("图文视频合成失败: %s", exc)
+        if save_path.exists():
+            try:
+                save_path.unlink()
+            except OSError:
+                pass
+        return None, 0
+
+    if not save_path.exists():
+        return None, 0
+    return save_path, save_path.stat().st_size
+
+
+async def _compose_image_audio_video(media: dict, save_path: Path, referer: str = "") -> tuple[Path | None, int]:
+    image_url = str(media.get("image_url") or "").strip()
+    audio_url = str(media.get("audio_url") or "").strip()
+    if not image_url or not audio_url:
+        return None, 0
+
+    with tempfile.TemporaryDirectory(prefix="douyin-note-video-") as temp_dir:
+        temp_path = Path(temp_dir)
+        image_path = temp_path / f"image{get_extension(image_url, 'image')}"
+        audio_ext = Path(urlparse(audio_url).path).suffix or ".mp3"
+        audio_path = temp_path / f"audio{audio_ext}"
+
+        image_ok, audio_ok = await asyncio.gather(
+            _download_companion_media(image_url, image_path, referer=referer),
+            _download_companion_media(audio_url, audio_path, referer=referer),
+        )
+        if not image_ok or not audio_ok:
+            return None, 0
+
+        return await asyncio.to_thread(_compose_image_audio_video_sync, image_path, audio_path, save_path)
 
 
 def _download_with_ytdlp_sync(url: str, save_path: Path, referer: str = "") -> tuple[Path | None, int]:
@@ -485,7 +608,10 @@ async def download_media_list(
         filename = f"{mtype}_{order:03d}{ext}"
         save_path = item_dir / filename
 
-        final_path, file_size = await download_file(url, save_path, mtype, referer=referer)
+        if mtype == "video" and media.get("compose") == "image_audio_video":
+            final_path, file_size = await _compose_image_audio_video(media, save_path, referer=referer)
+        else:
+            final_path, file_size = await download_file(url, save_path, mtype, referer=referer)
         if file_size > 0 and final_path:
             # 存储相对于 static/ 的路径，用于 URL 访问
             relative_path = f"media/{'/'.join(path_parts)}/{final_path.name}"

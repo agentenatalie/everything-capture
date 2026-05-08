@@ -47,6 +47,7 @@ desktop/**/*.dmg
 .env.*
 .python-version
 *.log
+*.err
 logs/
 
 # Local planning / notes
@@ -56,10 +57,13 @@ md-docs/
 PROJECT.md
 
 # Temporary debug artifacts
+.tmp/
 tmp-*
 tmp_*
 .tmp-*
 .tmp_*
+*.tmp
+*.bak
 
 # Editor / OS
 .DS_Store

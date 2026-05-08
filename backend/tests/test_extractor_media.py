@@ -38,6 +38,7 @@ from services.extractor import (  # noqa: E402
 from services.downloader import download_media_list  # noqa: E402
 from services.downloader import download_file  # noqa: E402
 from services.downloader import _should_retry_video_via_referer_page  # noqa: E402
+from tenant import DEFAULT_USER_ID  # noqa: E402
 
 
 class _StaticHtmlHandler(BaseHTTPRequestHandler):
@@ -476,6 +477,166 @@ class ExtractorMediaTests(unittest.IsolatedAsyncioTestCase):
                 {"type": "cover", "url": "https://cdn.example.com/cover.webp", "order": 0},
             ],
         )
+
+    def test_parse_douyin_router_data_extracts_note_video_from_image_and_audio(self) -> None:
+        html = """
+        <html><body><script>
+        window._ROUTER_DATA = {
+          "loaderData": {
+            "note_(id)/page": {
+              "videoInfoRes": {
+                "item_list": [{
+                  "desc": "醉酒大佬深夜布道",
+                  "aweme_type": 2,
+                  "author": {"nickname": "大大子用湖接"},
+                  "video": {
+                    "play_addr": {
+                      "url_list": [
+                        "https://aweme.snssdk.com/aweme/v1/playwm/?video_id=https://sf6-cdn-tos.douyinstatic.com/obj/ies-music/7619260807444122378.mp3&ratio=720p&line=0"
+                      ]
+                    },
+                    "cover": {
+                      "url_list": ["https://cdn.example.com/cover.webp"]
+                    }
+                  },
+                  "images": [{
+                    "url_list": ["https://cdn.example.com/note-image.webp"],
+                    "download_url_list": ["https://cdn.example.com/note-image-watermarked.webp"],
+                    "width": 1080,
+                    "height": 1440
+                  }]
+                }]
+              }
+            }
+          }
+        };
+        </script></body></html>
+        """
+
+        result = _parse_douyin_router_data(
+            html,
+            "醉酒大佬深夜布道",
+            "https://www.iesdouyin.com/share/video/7635700654874748261/",
+        )
+
+        self.assertIsNotNone(result)
+        self.assertIn("大大子用湖接", result["text"])
+        self.assertEqual(
+            result["media_urls"],
+            [
+                {
+                    "type": "video",
+                    "url": "https://www.iesdouyin.com/share/video/7635700654874748261/",
+                    "order": 0,
+                    "compose": "image_audio_video",
+                    "image_url": "https://cdn.example.com/note-image.webp",
+                    "audio_url": "https://sf6-cdn-tos.douyinstatic.com/obj/ies-music/7619260807444122378.mp3",
+                },
+                {"type": "image", "url": "https://cdn.example.com/note-image.webp", "order": 0},
+            ],
+        )
+
+    def test_parse_douyin_router_data_ignores_music_proxy_video_url(self) -> None:
+        html = """
+        <html><body><script>
+        window._ROUTER_DATA = {
+          "loaderData": {
+            "note_(id)/page": {
+              "videoInfoRes": {
+                "item_list": [{
+                  "desc": "只有背景音乐代理的图文",
+                  "video": {
+                    "play_addr": {
+                      "url_list": [
+                        "https://aweme.snssdk.com/aweme/v1/playwm/?video_id=https://sf6-cdn-tos.douyinstatic.com/obj/ies-music/example.mp3&ratio=720p&line=0"
+                      ]
+                    },
+                    "cover": {
+                      "url_list": ["https://cdn.example.com/cover.webp"]
+                    }
+                  }
+                }]
+              }
+            }
+          }
+        };
+        </script></body></html>
+        """
+
+        result = _parse_douyin_router_data(html, "图文")
+
+        self.assertIsNotNone(result)
+        self.assertEqual(
+            result["media_urls"],
+            [{"type": "cover", "url": "https://cdn.example.com/cover.webp", "order": 0}],
+        )
+
+    async def test_extract_douyin_does_not_prepend_page_video_for_router_note_images(self) -> None:
+        class _FakeResponse:
+            def __init__(self) -> None:
+                self.text = """
+                <html><body><script>
+                window._ROUTER_DATA = {
+                  "loaderData": {
+                    "note_(id)/page": {
+                      "videoInfoRes": {
+                        "item_list": [{
+                          "desc": "图文笔记正文",
+                          "video": {
+                            "play_addr": {
+                              "url_list": [
+                                "https://aweme.snssdk.com/aweme/v1/playwm/?video_id=https://sf6-cdn-tos.douyinstatic.com/obj/ies-music/example.mp3&ratio=720p&line=0"
+                              ]
+                            }
+                          },
+                          "images": [{
+                            "url_list": ["https://cdn.example.com/note-image.webp"],
+                            "width": 1080,
+                            "height": 1440
+                          }]
+                        }]
+                      }
+                    }
+                  }
+                };
+                </script></body></html>
+                """
+                self.url = "https://www.iesdouyin.com/share/note/7635700654874748261/"
+
+            def raise_for_status(self) -> None:
+                return None
+
+        class _FakeClient:
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, exc_type, exc, tb):
+                return None
+
+            async def get(self, url):
+                return _FakeResponse()
+
+        ytdlp_mock = AsyncMock(return_value=None)
+        with patch("services.extractor._build_client", return_value=_FakeClient()):
+            with patch("services.extractor._extract_douyin_with_ytdlp", new=ytdlp_mock):
+                result = await extract_douyin("https://v.douyin.com/test123/")
+
+        self.assertIsNotNone(result)
+        self.assertEqual(
+            result.media_urls,
+            [
+                {
+                    "type": "video",
+                    "url": "https://www.iesdouyin.com/share/note/7635700654874748261/",
+                    "order": 0,
+                    "compose": "image_audio_video",
+                    "image_url": "https://cdn.example.com/note-image.webp",
+                    "audio_url": "https://sf6-cdn-tos.douyinstatic.com/obj/ies-music/example.mp3",
+                },
+                {"type": "image", "url": "https://cdn.example.com/note-image.webp", "order": 0},
+            ],
+        )
+        ytdlp_mock.assert_not_awaited()
 
     async def test_extract_douyin_keeps_page_video_reference_when_only_desc_exists(self) -> None:
         class _FakeResponse:
@@ -1130,7 +1291,38 @@ class ExtractorMediaTests(unittest.IsolatedAsyncioTestCase):
 
         mocked_ytdlp.assert_called_once()
         self.assertEqual(len(results), 1)
-        self.assertEqual(results[0]["local_path"], "media/test-youtube/video_000.mp4")
+        self.assertEqual(results[0]["local_path"], f"media/users/{DEFAULT_USER_ID}/test-youtube/video_000.mp4")
+
+    async def test_download_media_list_composes_douyin_note_video(self) -> None:
+        final_path = Path(tempfile.gettempdir()) / "douyin-note-video_000.mp4"
+        final_path.write_bytes(b"video")
+        try:
+            with patch(
+                "services.downloader._compose_image_audio_video",
+                return_value=(final_path, 5),
+            ) as mocked_compose:
+                results = await download_media_list(
+                    "test-douyin-note",
+                    [
+                        {
+                            "type": "video",
+                            "url": "https://www.iesdouyin.com/share/video/7635700654874748261/",
+                            "order": 0,
+                            "compose": "image_audio_video",
+                            "image_url": "https://cdn.example.com/note-image.webp",
+                            "audio_url": "https://cdn.example.com/audio.mp3",
+                        }
+                    ],
+                    referer="https://www.iesdouyin.com/share/video/7635700654874748261/",
+                )
+        finally:
+            if final_path.exists():
+                final_path.unlink()
+
+        mocked_compose.assert_called_once()
+        self.assertEqual(len(results), 1)
+        self.assertEqual(results[0]["type"], "video")
+        self.assertEqual(results[0]["local_path"], f"media/users/{DEFAULT_USER_ID}/test-douyin-note/douyin-note-video_000.mp4")
 
     async def test_download_media_list_uses_ytdlp_for_douyin_page_urls(self) -> None:
         item_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "static", "media", "test-douyin"))
@@ -1160,7 +1352,7 @@ class ExtractorMediaTests(unittest.IsolatedAsyncioTestCase):
 
         mocked_ytdlp.assert_called_once()
         self.assertEqual(len(results), 1)
-        self.assertEqual(results[0]["local_path"], "media/test-douyin/video_000.mp4")
+        self.assertEqual(results[0]["local_path"], f"media/users/{DEFAULT_USER_ID}/test-douyin/video_000.mp4")
 
     def test_should_retry_video_via_referer_page_for_protected_douyin_cdn(self) -> None:
         self.assertTrue(

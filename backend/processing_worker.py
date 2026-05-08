@@ -167,7 +167,7 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="Process pending capture-service items locally.")
     parser.add_argument("--once", action="store_true", help="Process one batch and exit.")
     parser.add_argument("--interval", type=float, default=15.0, help="Polling interval while items are flowing.")
-    parser.add_argument("--idle-interval", type=float, default=600.0, help="Polling interval after consecutive empty polls; lets the queue DB scale to zero.")
+    parser.add_argument("--idle-interval", type=float, default=300.0, help="Polling interval after consecutive empty polls; lets the queue DB scale to zero.")
     parser.add_argument("--idle-after", type=int, default=3, help="Switch to --idle-interval after this many consecutive empty polls.")
     parser.add_argument("--limit", type=int, default=10, help="Max pending items per batch.")
     args = parser.parse_args()

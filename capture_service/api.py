@@ -6,12 +6,14 @@ For commercial or SaaS licensing, contact:
 https://github.com/agentenatalie
 """
 import json
+import logging
 import os
 import secrets
 from datetime import datetime, timedelta
 from pathlib import Path
 
-from fastapi import Depends, FastAPI, Header, HTTPException, Query, status
+import httpx
+from fastapi import BackgroundTasks, Depends, FastAPI, Header, HTTPException, Query, status
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from sqlalchemy import func
@@ -39,6 +41,7 @@ from capture_service.schemas import (
 Base.metadata.create_all(bind=engine)
 STATIC_DIR = Path(__file__).resolve().parent / "static"
 FOLDER_SEED_PATH = Path(__file__).resolve().parent / "folder_seed.json"
+logger = logging.getLogger(__name__)
 
 app = FastAPI(title="Everything Capture Service", version="1.0.0")
 app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
@@ -158,6 +161,38 @@ def _get_worker_timeout_seconds() -> int:
     except ValueError:
         worker_timeout = 45
     return max(worker_timeout, 10)
+
+
+def _get_worker_wake_url() -> str | None:
+    value = (os.environ.get("CAPTURE_WORKER_WAKE_URL") or "").strip()
+    return value or None
+
+
+def _get_worker_wake_token() -> str | None:
+    value = (os.environ.get("CAPTURE_WORKER_WAKE_TOKEN") or "").strip()
+    return value or None
+
+
+def _notify_capture_worker_wake(item_id: str) -> None:
+    wake_url = _get_worker_wake_url()
+    if not wake_url:
+        return
+
+    headers = {"Content-Type": "application/json"}
+    wake_token = _get_worker_wake_token()
+    if wake_token:
+        headers["Authorization"] = f"Bearer {wake_token}"
+
+    try:
+        with httpx.Client(timeout=2.0) as client:
+            response = client.post(
+                wake_url,
+                headers=headers,
+                json={"item_id": item_id, "reason": "capture-created"},
+            )
+            response.raise_for_status()
+    except Exception as exc:
+        logger.warning("Failed to notify capture worker wake webhook for item %s: %s", item_id, exc)
 
 
 def _build_worker_status(db: Session) -> CaptureWorkerStatusResponse:
@@ -319,7 +354,11 @@ def create_folder(request: CaptureFolderCreateRequest, db: Session = Depends(get
 
 
 @app.post("/api/capture", response_model=CaptureCreateResponse, status_code=status.HTTP_201_CREATED, dependencies=[Depends(_require_service_token)])
-def create_capture(request: CaptureCreateRequest, db: Session = Depends(get_db)):
+def create_capture(
+    request: CaptureCreateRequest,
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db),
+):
     if not (request.text or "").strip() and not (request.url or "").strip():
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Either text or url is required")
 
@@ -336,6 +375,7 @@ def create_capture(request: CaptureCreateRequest, db: Session = Depends(get_db))
     db.add(item)
     db.commit()
     db.refresh(item)
+    background_tasks.add_task(_notify_capture_worker_wake, item.id)
     return CaptureCreateResponse(
         success=True,
         captured=True,

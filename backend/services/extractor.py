@@ -404,6 +404,8 @@ def _normalize_douyin_video_url(src: str) -> str:
     normalized = _normalize_media_url(src)
     if not normalized:
         return ""
+    if _looks_like_douyin_audio_url(normalized):
+        return ""
 
     parsed = urlparse(normalized)
     host = (parsed.hostname or "").lower()
@@ -412,9 +414,60 @@ def _normalize_douyin_video_url(src: str) -> str:
     return normalized
 
 
+_DOUYIN_AUDIO_EXTENSIONS = (".mp3", ".m4a", ".aac", ".wav", ".ogg", ".opus")
+
+
+def _looks_like_douyin_audio_url(src: str) -> bool:
+    value = _normalize_media_url(src)
+    if not value:
+        value = str(src or "").strip()
+    if not value:
+        return False
+
+    decoded = unquote(value).lower()
+    path_part = decoded.split("?", 1)[0]
+    if path_part.endswith(_DOUYIN_AUDIO_EXTENSIONS):
+        return True
+    if "/ies-music/" in decoded or "mime_type=audio" in decoded:
+        return True
+
+    try:
+        parsed = urlparse(value)
+    except Exception:
+        return False
+
+    query = parse_qs(parsed.query or "")
+    for key in ("video_id", "uri", "url"):
+        for candidate in query.get(key) or []:
+            candidate_decoded = unquote(str(candidate or "")).lower()
+            candidate_path = candidate_decoded.split("?", 1)[0]
+            if candidate_path.endswith(_DOUYIN_AUDIO_EXTENSIONS):
+                return True
+            if "/ies-music/" in candidate_decoded or "mime_type=audio" in candidate_decoded:
+                return True
+
+    return False
+
+
+def _normalize_douyin_audio_url(src: str) -> str:
+    normalized = _normalize_media_url(src)
+    if not normalized:
+        return ""
+
+    parsed = urlparse(normalized)
+    query = parse_qs(parsed.query or "")
+    for key in ("video_id", "uri", "url"):
+        for candidate in query.get(key) or []:
+            candidate_url = _normalize_media_url(str(candidate or ""))
+            if candidate_url and _looks_like_douyin_audio_url(candidate_url):
+                return candidate_url
+
+    return normalized if _looks_like_douyin_audio_url(normalized) else ""
+
+
 def _extract_douyin_aweme_id(url: str) -> str:
     path = urlparse(url).path or ""
-    match = re.search(r"/(?:share/(?:video|slides)|note)/(\d+)", path)
+    match = re.search(r"/(?:share/(?:video|slides|note)|note)/(\d+)", path)
     return match.group(1) if match else ""
 
 
@@ -438,6 +491,119 @@ def _ensure_douyin_video_candidate(media_urls: list[dict] | None, page_url: str)
 
 def _has_video_media(media_urls: list[dict] | None) -> bool:
     return any((entry.get("type") or "").lower() == "video" and entry.get("url") for entry in (media_urls or []) if isinstance(entry, dict))
+
+
+def _has_image_media(media_urls: list[dict] | None) -> bool:
+    return any((entry.get("type") or "").lower() == "image" and entry.get("url") for entry in (media_urls or []) if isinstance(entry, dict))
+
+
+def _first_douyin_url_from_lists(source: dict | None, keys: tuple[str, ...] = ("url_list", "download_url_list")) -> str:
+    if not isinstance(source, dict):
+        return ""
+    for key in keys:
+        url_list = source.get(key)
+        if not isinstance(url_list, list):
+            continue
+        for candidate in url_list:
+            normalized = _normalize_media_url(str(candidate or ""))
+            if normalized:
+                return normalized
+    return ""
+
+
+def _douyin_image_area(image: dict) -> int:
+    try:
+        return int(image.get("width") or 0) * int(image.get("height") or 0)
+    except (TypeError, ValueError):
+        return 0
+
+
+def _extract_douyin_image_media(item: dict) -> list[dict]:
+    raw_images: list[dict] = []
+    for key in ("images", "image_infos"):
+        value = item.get(key)
+        if isinstance(value, list) and value:
+            raw_images = [image for image in value if isinstance(image, dict)]
+            if raw_images:
+                break
+
+    if not raw_images:
+        best_images: list[dict] = []
+        best_score = -1
+        for gear in item.get("img_bitrate") or []:
+            if not isinstance(gear, dict):
+                continue
+            gear_images = [image for image in (gear.get("images") or []) if isinstance(image, dict)]
+            if not gear_images:
+                continue
+            score = max((_douyin_image_area(image) for image in gear_images), default=0)
+            if score > best_score:
+                best_images = gear_images
+                best_score = score
+        raw_images = best_images
+
+    media_urls: list[dict] = []
+    seen: set[str] = set()
+    for index, image in enumerate(raw_images):
+        image_url = _first_douyin_url_from_lists(image)
+        if not image_url or image_url in seen:
+            continue
+        seen.add(image_url)
+        media_urls.append({"type": "image", "url": image_url, "order": index})
+    return media_urls
+
+
+def _extract_douyin_audio_media_url(item: dict) -> str:
+    video_data = item.get("video") or {}
+    if isinstance(video_data, dict):
+        for key in ("play_addr", "play_addr_h264", "play_addr_265", "download_addr"):
+            source = video_data.get(key)
+            if not isinstance(source, dict):
+                continue
+            for candidate in source.get("url_list") or []:
+                audio_url = _normalize_douyin_audio_url(str(candidate or ""))
+                if audio_url:
+                    return audio_url
+
+    music_data = item.get("music") or {}
+    if isinstance(music_data, dict):
+        for key in ("play_url", "play_url_v2"):
+            source = music_data.get(key)
+            if not isinstance(source, dict):
+                continue
+            for candidate in source.get("url_list") or []:
+                audio_url = _normalize_douyin_audio_url(str(candidate or ""))
+                if audio_url:
+                    return audio_url
+
+    return ""
+
+
+def _build_douyin_note_video_media(item: dict, image_media: list[dict], page_url: str = "") -> dict | None:
+    if not image_media:
+        return None
+
+    image_url = str(image_media[0].get("url") or "")
+    audio_url = _extract_douyin_audio_media_url(item)
+    if not image_url or not audio_url:
+        return None
+
+    source_url = _normalize_media_url(page_url)
+    if not source_url:
+        aweme_id = str(item.get("aweme_id") or "").strip()
+        if aweme_id:
+            source_url = f"https://www.iesdouyin.com/share/video/{aweme_id}/"
+    if not source_url:
+        return None
+
+    return {
+        "type": "video",
+        "url": source_url,
+        "order": 0,
+        "compose": "image_audio_video",
+        "image_url": image_url,
+        "audio_url": audio_url,
+    }
 
 
 def _extract_douyin_with_ytdlp_sync(url: str) -> dict | None:
@@ -1868,10 +2034,10 @@ async def extract_douyin(url: str) -> ExtractResult | None:
         return ytdlp_result
 
     # 策略 1: window._ROUTER_DATA（iesdouyin.com 分享页最完整的数据源）
-    router_result = _parse_douyin_router_data(html, title)
+    router_result = _parse_douyin_router_data(html, title, final_url)
     if router_result:
         media_urls = router_result.get("media_urls")
-        if not _has_video_media(media_urls):
+        if not _has_video_media(media_urls) and not _has_image_media(media_urls):
             ytdlp_media = await get_ytdlp_result()
             if ytdlp_media and ytdlp_media.get("media_urls"):
                 media_urls = ytdlp_media["media_urls"] + [entry for entry in (media_urls or []) if (entry.get("type") or "").lower() != "cover"]
@@ -2007,28 +2173,7 @@ def _parse_douyin_slides_response(payload: dict, fallback_title: str = "") -> di
     if not isinstance(item, dict):
         return None
 
-    images = item.get("images") or item.get("image_infos") or []
-    media_urls = []
-    if isinstance(images, list):
-        for index, image in enumerate(images):
-            if not isinstance(image, dict):
-                continue
-            candidate_lists = [
-                image.get("url_list"),
-                image.get("download_url_list"),
-            ]
-            image_url = ""
-            for url_list in candidate_lists:
-                if not isinstance(url_list, list):
-                    continue
-                for candidate in url_list:
-                    image_url = _normalize_media_url(str(candidate or ""))
-                    if image_url:
-                        break
-                if image_url:
-                    break
-            if image_url:
-                media_urls.append({"type": "image", "url": image_url, "order": index})
+    media_urls = _extract_douyin_image_media(item)
 
     desc = str(item.get("desc") or "").strip()
     preview_title = str(item.get("preview_title") or "").strip()
@@ -2073,7 +2218,7 @@ def _parse_douyin_slides_response(payload: dict, fallback_title: str = "") -> di
     }
 
 
-def _parse_douyin_router_data(html: str, fallback_title: str = "") -> dict | None:
+def _parse_douyin_router_data(html: str, fallback_title: str = "", page_url: str = "") -> dict | None:
     """解析抖音 iesdouyin.com 页面中的 window._ROUTER_DATA
 
     该数据包含完整的视频信息：描述、作者名、作者简介、标签等。
@@ -2169,10 +2314,13 @@ def _parse_douyin_router_data(html: str, fallback_title: str = "") -> dict | Non
             if isinstance(te, dict) and te.get("hashtag_name")
         ]
 
-        # 提取视频/封面媒体 URL
-        media_urls = []
+        # 提取视频/封面媒体 URL；图文 note 的 video.play_addr 可能是背景音乐代理。
+        media_urls = _extract_douyin_image_media(item)
+        note_video_media = _build_douyin_note_video_media(item, media_urls, page_url)
+        if note_video_media:
+            media_urls = [note_video_media] + media_urls
         video_data = item.get("video", {})
-        if isinstance(video_data, dict):
+        if not media_urls and isinstance(video_data, dict):
             video_url = _best_video_url(video_data)
             if video_url:
                 media_urls.append({"type": "video", "url": video_url, "order": 0})

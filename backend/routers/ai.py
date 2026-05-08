@@ -1894,6 +1894,54 @@ def _clean_index_summary(text: str) -> str:
     return cleaned.strip()
 
 
+_EXTRACTED_SECTION_LABELS = {
+    "detected_title": "检测标题",
+    "urls": "原始链接",
+    "qr_links": "二维码链接",
+    "ocr_text": "图片文字",
+    "subtitle_text": "视频字幕",
+    "transcript_text": "语音文字",
+    "body": "正文内容",
+}
+
+
+def _parse_extracted_text_sections(text: str | None) -> list[tuple[str, str, str]]:
+    """Parse extracted_text into (key, label, value) sections — mirrors the frontend's
+    parseExtractedTextSections in app-content.js so exports match what users see."""
+    if not text:
+        return []
+    cleaned = str(text).replace("\r\n", "\n").replace("\r", "\n")
+    cleaned = re.sub(r"<think\b[^>]*>[\s\S]*?</think>", "", cleaned, flags=re.IGNORECASE)
+    cleaned = cleaned.strip()
+    if not cleaned:
+        return []
+
+    sections: list[tuple[str, str, str]] = []
+    current_key = ""
+    current_lines: list[str] = []
+
+    def push() -> None:
+        nonlocal current_lines, current_key
+        value = "\n".join(current_lines).strip()
+        if not current_key and not value:
+            current_lines = []
+            return
+        key = current_key or "body"
+        sections.append((key, _EXTRACTED_SECTION_LABELS.get(key, key), value))
+        current_lines = []
+
+    for line in cleaned.split("\n"):
+        match = re.match(r"^\[([a-z_]+)\]$", line.strip(), flags=re.IGNORECASE)
+        if match:
+            push()
+            current_key = match.group(1).lower()
+            continue
+        current_lines.append(line)
+    push()
+
+    return [(k, l, v) for k, l, v in sections if v]
+
+
 def _build_full_items_index(db: Session, user_id: str) -> tuple[str, list[KnowledgeBaseNote]]:
     """Build a compact index of ALL user items (title + clean summary) for the AI to scan.
 
@@ -3569,13 +3617,24 @@ def _build_item_full_text(item: Item, index: int, is_markdown: bool) -> str:
     if item.canonical_text:
         parts.append(item.canonical_text)
 
-    if item.extracted_text:
-        separator = "\n\n## 提取文本\n" if is_markdown else "\n\n--- 提取文本 ---\n"
-        parts.append(separator)
-        parts.append(item.extracted_text)
+    sections = _parse_extracted_text_sections(item.extracted_text)
+    extracted_has_ocr_section = any(key == "ocr_text" for key, _, _ in sections)
+    has_video = any(getattr(m, "type", None) == "video" for m in (item.media or []))
+    if has_video:
+        sections = [s for s in sections if s[0] != "ocr_text"]
 
-    if item.ocr_text:
-        separator = "\n\n## OCR 文本\n" if is_markdown else "\n\n--- OCR 文本 ---\n"
+    if sections:
+        header = "\n\n## 内容分析\n" if is_markdown else "\n\n--- 内容分析 ---\n"
+        parts.append(header)
+        for _key, label, value in sections:
+            sub = f"\n### {label}\n" if is_markdown else f"\n[{label}]\n"
+            parts.append(sub)
+            parts.append(value)
+
+    # Only include the standalone OCR field when extracted_text didn't already carry
+    # an [ocr_text] section (and the item isn't a video — frontend hides cover OCR).
+    if item.ocr_text and not extracted_has_ocr_section and not has_video:
+        separator = "\n\n## 图片文字\n" if is_markdown else "\n\n--- 图片文字 ---\n"
         parts.append(separator)
         parts.append(item.ocr_text)
 

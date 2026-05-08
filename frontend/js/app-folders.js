@@ -5,6 +5,198 @@
          * For commercial or SaaS licensing, contact:
          * https://github.com/agentenatalie
          */
+        const PINNED_FOLDER_IDS_STORAGE_KEY = 'everything-capture-pinned-folder-ids-v1';
+        const RECENT_FOLDER_USAGE_STORAGE_KEY = 'everything-capture-recent-folder-usage-v1';
+        const MAX_RECENT_FOLDER_USAGE_ENTRIES = 150;
+        const FOLDER_LIST_AUTOSCROLL_EDGE_PX = 72;
+        const FOLDER_LIST_AUTOSCROLL_MAX_SPEED = 18;
+
+        let folderListAutoScrollFrame = null;
+        let folderListAutoScrollSpeed = 0;
+
+        function readStoredFolderIds(storageKey) {
+            try {
+                const parsed = JSON.parse(window.localStorage.getItem(storageKey) || '[]');
+                return Array.isArray(parsed)
+                    ? parsed.map((value) => String(value || '').trim()).filter(Boolean)
+                    : [];
+            } catch (error) {
+                return [];
+            }
+        }
+
+        function readStoredFolderUsage() {
+            try {
+                const parsed = JSON.parse(window.localStorage.getItem(RECENT_FOLDER_USAGE_STORAGE_KEY) || '{}');
+                if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return {};
+                return Object.fromEntries(
+                    Object.entries(parsed)
+                        .map(([folderId, timestamp]) => [String(folderId || '').trim(), Number(timestamp || 0)])
+                        .filter(([folderId, timestamp]) => folderId && Number.isFinite(timestamp) && timestamp > 0)
+                );
+            } catch (error) {
+                return {};
+            }
+        }
+
+        let pinnedFolderIds = new Set(readStoredFolderIds(PINNED_FOLDER_IDS_STORAGE_KEY));
+        let recentFolderUsage = readStoredFolderUsage();
+
+        function persistPinnedFolderIds() {
+            try {
+                window.localStorage.setItem(PINNED_FOLDER_IDS_STORAGE_KEY, JSON.stringify([...pinnedFolderIds]));
+            } catch (error) {
+                console.warn('Failed to persist pinned folders', error);
+            }
+        }
+
+        function persistRecentFolderUsage() {
+            try {
+                const entries = Object.entries(recentFolderUsage)
+                    .sort(([, a], [, b]) => Number(b || 0) - Number(a || 0))
+                    .slice(0, MAX_RECENT_FOLDER_USAGE_ENTRIES);
+                recentFolderUsage = Object.fromEntries(entries);
+                window.localStorage.setItem(RECENT_FOLDER_USAGE_STORAGE_KEY, JSON.stringify(recentFolderUsage));
+            } catch (error) {
+                console.warn('Failed to persist recent folders', error);
+            }
+        }
+
+        function pruneFolderPreferences() {
+            const knownFolderIds = new Set(foldersData.map((folder) => folder.id));
+            const nextPinnedIds = [...pinnedFolderIds].filter((folderId) => knownFolderIds.has(folderId));
+            if (nextPinnedIds.length !== pinnedFolderIds.size) {
+                pinnedFolderIds = new Set(nextPinnedIds);
+                persistPinnedFolderIds();
+            }
+
+            let changedRecentUsage = false;
+            for (const folderId of Object.keys(recentFolderUsage)) {
+                if (!knownFolderIds.has(folderId)) {
+                    delete recentFolderUsage[folderId];
+                    changedRecentUsage = true;
+                }
+            }
+            if (changedRecentUsage) {
+                persistRecentFolderUsage();
+            }
+        }
+
+        function normalizeFolderIds(folderIds = []) {
+            return Array.from(new Set(
+                (Array.isArray(folderIds) ? folderIds : [folderIds])
+                    .map((folderId) => String(folderId || '').trim())
+                    .filter(Boolean)
+            ));
+        }
+
+        function markFoldersRecentlyUsed(folderIds = [], options = {}) {
+            const normalizedFolderIds = normalizeFolderIds(folderIds);
+            if (!normalizedFolderIds.length) return;
+            const knownFolderIds = new Set(foldersData.map((folder) => folder.id));
+            const now = Date.now();
+            let changed = false;
+            normalizedFolderIds.forEach((folderId, index) => {
+                if (knownFolderIds.size && !knownFolderIds.has(folderId)) return;
+                const nextTimestamp = now - index;
+                if (recentFolderUsage[folderId] !== nextTimestamp) {
+                    recentFolderUsage[folderId] = nextTimestamp;
+                    changed = true;
+                }
+            });
+            if (!changed) return;
+            persistRecentFolderUsage();
+            if (options.render) {
+                renderFolderNavigation();
+            }
+        }
+
+        function isFolderPinned(folderId) {
+            return pinnedFolderIds.has(String(folderId || '').trim());
+        }
+
+        function toggleFolderPin(folderId) {
+            const normalizedFolderId = String(folderId || '').trim();
+            const folder = getFolderById(normalizedFolderId);
+            if (!folder) return;
+            closeFolderContextMenu();
+            if (pinnedFolderIds.has(normalizedFolderId)) {
+                pinnedFolderIds.delete(normalizedFolderId);
+                showToast(`已取消固定：${folder.name}`, 'info');
+            } else {
+                pinnedFolderIds.add(normalizedFolderId);
+                expandFolderAncestors(normalizedFolderId);
+                showToast(`已固定在文件夹顶部：${folder.name}`, 'success');
+            }
+            persistPinnedFolderIds();
+            renderFolderNavigation();
+        }
+
+        function parseFolderTimestamp(value) {
+            const timestamp = Date.parse(value || '');
+            return Number.isFinite(timestamp) ? timestamp : 0;
+        }
+
+        function getFolderDirectUsageTimestamp(folder) {
+            if (!folder) return 0;
+            return Math.max(
+                Number(recentFolderUsage[folder.id] || 0),
+                parseFolderTimestamp(folder.updated_at),
+                parseFolderTimestamp(folder.created_at)
+            );
+        }
+
+        function createFolderUsageTimestampGetter(folders) {
+            const childrenByParent = {};
+            const foldersById = {};
+            for (const folder of folders) {
+                foldersById[folder.id] = folder;
+                const parentId = folder.parent_id || '__root__';
+                if (!childrenByParent[parentId]) childrenByParent[parentId] = [];
+                childrenByParent[parentId].push(folder);
+            }
+            const cache = new Map();
+            const getTimestamp = (folderId) => {
+                if (cache.has(folderId)) return cache.get(folderId);
+                const folder = foldersById[folderId];
+                let latest = getFolderDirectUsageTimestamp(folder);
+                for (const child of childrenByParent[folderId] || []) {
+                    latest = Math.max(latest, getTimestamp(child.id));
+                }
+                cache.set(folderId, latest);
+                return latest;
+            };
+            return getTimestamp;
+        }
+
+        function compareFolderFallback(a, b) {
+            const sortOrderA = Number.isFinite(Number(a.sort_order)) ? Number(a.sort_order) : 0;
+            const sortOrderB = Number.isFinite(Number(b.sort_order)) ? Number(b.sort_order) : 0;
+            if (sortOrderA !== sortOrderB) return sortOrderA - sortOrderB;
+            const createdA = parseFolderTimestamp(a.created_at);
+            const createdB = parseFolderTimestamp(b.created_at);
+            if (createdA !== createdB) return createdA - createdB;
+            return String(a.name || '').localeCompare(String(b.name || ''), 'zh-Hans');
+        }
+
+        function sortFoldersForNavigation(folders, getUsageTimestamp) {
+            return [...folders].sort((a, b) => {
+                const aPinned = isFolderPinned(a.id);
+                const bPinned = isFolderPinned(b.id);
+                if (aPinned !== bPinned) return aPinned ? -1 : 1;
+                if (aPinned && bPinned) {
+                    const pinnedOrder = [...pinnedFolderIds];
+                    const pinnedA = pinnedOrder.indexOf(a.id);
+                    const pinnedB = pinnedOrder.indexOf(b.id);
+                    if (pinnedA !== pinnedB) return pinnedA - pinnedB;
+                }
+                const recentA = getUsageTimestamp(a.id);
+                const recentB = getUsageTimestamp(b.id);
+                if (recentA !== recentB) return recentB - recentA;
+                return compareFolderFallback(a, b);
+            });
+        }
+
         function showToast(msg, type) {
             toast.textContent = msg;
             toast.className = 'toast ' + type + ' show';
@@ -108,6 +300,7 @@
         function setActiveFolder(scope, folderId = null) {
             if (scope === 'folder' && folderId) {
                 expandFolderAncestors(folderId);
+                markFoldersRecentlyUsed([folderId], { render: false });
             }
             currentFolderScope = scope;
             currentFolderId = scope === 'folder' ? folderId : null;
@@ -195,7 +388,7 @@
                 : ` data-folder-scope="${scope}"`;
             return `
                 <div class="folder-item${scopeClass}${active ? ' active' : ''}${isMainFolder ? ' is-main-folder' : ''}" role="button" tabindex="0" title="${escapeAttribute(label)}" style="${indent ? `padding-left:${12 + indent}px` : ''}" onclick="handleFolderNavActivate('${scope}', ${folderId ? `'${folderId}'` : 'null'})" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();handleFolderNavActivate('${scope}', ${folderId ? `'${folderId}'` : 'null'});}"${dragAttrs}${contextMenuAttr}>
-                    <span class="folder-item-glyph" aria-hidden="true">${escapeHtml(glyph)}</span>
+                    <span class="folder-item-glyph" aria-hidden="true"><span>${escapeHtml(glyph)}</span></span>
                     <span class="folder-item-name">${escapeHtml(label)}</span>
                     <span class="folder-item-count">${count}</span>
                     ${menuButton}
@@ -220,8 +413,9 @@
                 if (!byParent[pid]) byParent[pid] = [];
                 byParent[pid].push(f);
             }
+            const getUsageTimestamp = createFolderUsageTimestampGetter(folders);
             function collect(parentId, level) {
-                const children = byParent[parentId] || [];
+                const children = sortFoldersForNavigation(byParent[parentId] || [], getUsageTimestamp);
                 const result = [];
                 for (const f of children) {
                     const hasChildren = (byParent[f.id] || []).length > 0;
@@ -254,6 +448,10 @@
         function renderFolderNavigation() {
             const normalizedQuery = folderSearchQuery.trim().toLowerCase();
             const treeItems = buildFolderTree(foldersData);
+            const flatFolderItems = sortFoldersForNavigation(
+                foldersData,
+                createFolderUsageTimestampGetter(foldersData)
+            );
             const allItems = [
                 { label: '全部内容', scope: 'all', count: totalFolderCount, _level: 0, _hasChildren: false },
                 { label: '收藏夹', scope: 'favorites', count: favoriteFolderCount, _level: 0, _hasChildren: false },
@@ -285,7 +483,7 @@
                 { label: '全部', scope: 'all', count: totalFolderCount },
                 { label: '收藏夹', scope: 'favorites', count: favoriteFolderCount },
                 { label: '未读', scope: 'unread', count: unreadFolderCount },
-                ...foldersData.map((folder) => ({ label: folder.name, scope: 'folder', count: folder.item_count || 0, id: folder.id })),
+                ...flatFolderItems.map((folder) => ({ label: folder.name, scope: 'folder', count: folder.item_count || 0, id: folder.id })),
             ];
             folderMobileStrip.innerHTML = mobileItems.map((item) => {
                 const active = currentFolderScope === item.scope && (item.scope !== 'folder' || currentFolderId === item.id);
@@ -360,6 +558,79 @@
             if (typeof dragTypes.includes === 'function') return dragTypes.includes(dataType);
             if (typeof dragTypes.contains === 'function') return dragTypes.contains(dataType);
             return Array.from(dragTypes).includes(dataType);
+        }
+
+        function hasFolderListDragPayload(event) {
+            return Boolean(
+                draggedLibraryItemId
+                || draggedLibraryItemIds.length
+                || draggedFolderId
+                || hasDragDataType(event, ITEM_DRAG_DATA_TYPE)
+                || hasDragDataType(event, ITEM_MULTI_DRAG_DATA_TYPE)
+                || hasDragDataType(event, FOLDER_DRAG_DATA_TYPE)
+            );
+        }
+
+        function stopFolderListAutoScroll() {
+            folderListAutoScrollSpeed = 0;
+            if (folderListAutoScrollFrame) {
+                window.cancelAnimationFrame(folderListAutoScrollFrame);
+                folderListAutoScrollFrame = null;
+            }
+        }
+
+        function runFolderListAutoScroll() {
+            if (!folderListAutoScrollSpeed) {
+                folderListAutoScrollFrame = null;
+                return;
+            }
+            folderList.scrollTop += folderListAutoScrollSpeed;
+            folderListAutoScrollFrame = window.requestAnimationFrame(runFolderListAutoScroll);
+        }
+
+        function updateFolderListAutoScroll(event) {
+            if (!folderList || !hasFolderListDragPayload(event)) {
+                stopFolderListAutoScroll();
+                return;
+            }
+
+            const rect = folderList.getBoundingClientRect();
+            const insideHorizontalBounds = event.clientX >= rect.left - 24 && event.clientX <= rect.right + 24;
+            if (!insideHorizontalBounds || event.clientY < rect.top || event.clientY > rect.bottom) {
+                stopFolderListAutoScroll();
+                return;
+            }
+
+            const topDistance = event.clientY - rect.top;
+            const bottomDistance = rect.bottom - event.clientY;
+            let nextSpeed = 0;
+            if (topDistance < FOLDER_LIST_AUTOSCROLL_EDGE_PX) {
+                const intensity = 1 - Math.max(0, topDistance) / FOLDER_LIST_AUTOSCROLL_EDGE_PX;
+                nextSpeed = -Math.max(4, Math.round(intensity * FOLDER_LIST_AUTOSCROLL_MAX_SPEED));
+            } else if (bottomDistance < FOLDER_LIST_AUTOSCROLL_EDGE_PX) {
+                const intensity = 1 - Math.max(0, bottomDistance) / FOLDER_LIST_AUTOSCROLL_EDGE_PX;
+                nextSpeed = Math.max(4, Math.round(intensity * FOLDER_LIST_AUTOSCROLL_MAX_SPEED));
+            }
+
+            folderListAutoScrollSpeed = nextSpeed;
+            if (nextSpeed && !folderListAutoScrollFrame) {
+                folderListAutoScrollFrame = window.requestAnimationFrame(runFolderListAutoScroll);
+            } else if (!nextSpeed) {
+                stopFolderListAutoScroll();
+            }
+        }
+
+        function handleFolderListDragOver(event) {
+            if (!hasFolderListDragPayload(event)) return;
+            event.preventDefault();
+            if (event.dataTransfer) event.dataTransfer.dropEffect = 'move';
+            updateFolderListAutoScroll(event);
+        }
+
+        function handleFolderListDragLeave(event) {
+            const nextTarget = event.relatedTarget;
+            if (nextTarget && folderList.contains(nextTarget)) return;
+            stopFolderListAutoScroll();
         }
 
         function getFolderById(folderId) {
@@ -496,6 +767,7 @@
                     : `已放入「${folder.name}」`,
                 'success'
             );
+            markFoldersRecentlyUsed([folderId], { render: false });
             await fetchFolders();
         }
 
@@ -598,20 +870,17 @@
             draggedFolderId = null;
             document.body.classList.remove('folder-reordering');
             clearFolderDropIndicator();
+            stopFolderListAutoScroll();
         }
 
         function handleFolderDragOver(event, folderId) {
-            const hasItemDrag = Boolean(
-                draggedLibraryItemId
-                || draggedLibraryItemIds.length
-                || hasDragDataType(event, ITEM_DRAG_DATA_TYPE)
-                || hasDragDataType(event, ITEM_MULTI_DRAG_DATA_TYPE)
-            );
+            const hasItemDrag = Boolean(draggedLibraryItemId || draggedLibraryItemIds.length || hasDragDataType(event, ITEM_DRAG_DATA_TYPE) || hasDragDataType(event, ITEM_MULTI_DRAG_DATA_TYPE));
             const hasFolderDrag = Boolean(draggedFolderId || hasDragDataType(event, FOLDER_DRAG_DATA_TYPE));
             if (!hasItemDrag && !hasFolderDrag) return;
             if (hasFolderDrag && draggedFolderId === folderId) return;
 
             event.preventDefault();
+            updateFolderListAutoScroll(event);
             const targetElement = event.currentTarget;
             if (hasFolderDrag) {
                 const sourceFolderId = draggedFolderId || event.dataTransfer?.getData(FOLDER_DRAG_DATA_TYPE) || '';
@@ -660,6 +929,7 @@
                 draggedLibraryItemId = null;
                 draggedLibraryItemIds = [];
                 draggedFolderId = null;
+                stopFolderListAutoScroll();
                 document.body.classList.remove('item-dragging', 'folder-reordering');
                 if (typeof clearItemDragPreview === 'function') {
                     clearItemDragPreview();
@@ -677,6 +947,7 @@
                 unfiledFolderCount = Number(data.unfiled_count || 0);
                 favoriteFolderCount = Number(data.favorite_count || 0);
                 unreadFolderCount = Number(data.unread_count || 0);
+                pruneFolderPreferences();
                 if (mobileCaptureSelectedFolderIds.length) {
                     mobileCaptureSelectedFolderIds = mobileCaptureSelectedFolderIds.filter((folderId) => foldersData.some((folder) => folder.id === folderId));
                     persistMobileCaptureSelectedFolder();
@@ -714,6 +985,9 @@
                 throw new Error(data.detail || '创建文件夹失败');
             }
             await fetchFolders();
+            if (data?.id) {
+                markFoldersRecentlyUsed([data.id], { render: true });
+            }
             return data;
         }
 
@@ -905,7 +1179,7 @@
             folderPickerHint.textContent = '输入名称可直接创建；点现有文件夹可快速切换。';
             folderPickerStatus.textContent = selectedNames.length
                 ? `当前高亮：${selectedNames.join('、')}`
-                : '新建后会自动切换到对应文件夹。';
+                : '新建后会保持在当前内容列表。';
             folderPickerClearBtn.hidden = true;
             folderPickerApplyBtn.hidden = true;
             folderPickerClearBtn.textContent = '清空选择';
@@ -914,7 +1188,11 @@
 
         function renderFolderPickerOptions() {
             const mode = getFolderPickerMode();
-            const options = foldersData.map((folder) => ({ id: folder.id, label: folder.name, count: folder.item_count || 0 }));
+            const orderedFolders = sortFoldersForNavigation(
+                foldersData,
+                createFolderUsageTimestampGetter(foldersData)
+            );
+            const options = orderedFolders.map((folder) => ({ id: folder.id, label: folder.name, count: folder.item_count || 0 }));
             folderPickerList.innerHTML = options.length ? options.map((option) => {
                 const active = folderPickerSelectedIds.has(option.id);
                 return `
@@ -984,6 +1262,7 @@
                 if (mode === 'mobile-capture') {
                     mobileCaptureSelectedFolderIds = folderIds;
                     persistMobileCaptureSelectedFolder();
+                    markFoldersRecentlyUsed(folderIds, { render: false });
                     updateMobileCaptureFolderSummary();
                     closeFolderPickerDialog();
                     showToast(
@@ -998,6 +1277,7 @@
                 if (mode === 'mobile-capture-submit') {
                     mobileCaptureSelectedFolderIds = folderIds;
                     persistMobileCaptureSelectedFolder();
+                    markFoldersRecentlyUsed(folderIds, { render: false });
                     updateMobileCaptureFolderSummary();
                     const submissionText = pendingMobileCaptureSubmission?.text || '';
                     closeFolderPickerDialog();
@@ -1046,6 +1326,7 @@
                     closeFolderPickerDialog();
                     return;
                 }
+                markFoldersRecentlyUsed(folderIds, { render: false });
                 closeFolderPickerDialog();
                 await fetchFolders();
             } catch (error) {
@@ -1068,7 +1349,8 @@
                 folderCreateInput.value = '';
                 if (parentId && collapsedFolderIds.has(parentId)) {
                     collapsedFolderIds.delete(parentId);
-                    localStorage.setItem('collapsedFolderIds', JSON.stringify([...collapsedFolderIds]));
+                    persistCollapsedFolderIds();
+                    renderFolderNavigation();
                 }
                 if (mode === 'mobile-capture') {
                     folderPickerSelectedIds.add(folder.id);
@@ -1101,7 +1383,6 @@
                 }
                 showToast(`已创建文件夹：${folder.name}`, 'success');
                 closeFolderPickerDialog();
-                setActiveFolder('folder', folder.id);
             } catch (error) {
                 setFolderPickerActionState(false);
                 showToast(error.message, 'error');
@@ -1128,6 +1409,17 @@
             const folder = foldersData.find((entry) => entry.id === folderId);
             if (!folder) return;
             const canNest = true;
+            const isPinned = isFolderPinned(folderId);
+            const pinBtn = `
+                <button type="button" onclick="toggleFolderPin('${folderId}')">
+                    <span class="folder-context-menu-icon" aria-hidden="true">
+                        <svg viewBox="0 0 24 24" fill="none">
+                            <path fill="currentColor" d="M12 6.5c0.3199 0 0.6204 0.15337 0.8086 0.41211l4 5.49999c0.2211 0.3042 0.2537 0.7069 0.083 1.042S16.3761 14 16 14h-3v7c0 0.5523 -0.4477 1 -1 1s-1 -0.4477 -1 -1v-7H8c-0.3761 0 -0.72091 -0.2108 -0.8916 -0.5459 -0.17066 -0.3351 -0.13814 -0.7378 0.08301 -1.042l3.99999 -5.49999 0.0752 -0.0918C11.4546 6.61742 11.7199 6.5 12 6.5M17 2c0.5523 0 1 0.44772 1 1s-0.4477 1 -1 1H7c-0.55228 0 -1 -0.44772 -1 -1s0.44772 -1 1 -1z"></path>
+                        </svg>
+                    </span>
+                    <span class="folder-context-menu-copy">${isPinned ? '取消固定' : '固定在顶部'}</span>
+                </button>
+            `;
             const subfolderBtn = canNest ? `
                 <button type="button" onclick="createSubfolderPrompt('${folderId}')">
                     <span class="folder-context-menu-icon" aria-hidden="true">
@@ -1139,6 +1431,7 @@
                 </button>
             ` : '';
             folderContextMenu.innerHTML = `
+                ${pinBtn}
                 ${subfolderBtn}
                 <button type="button" onclick="renameFolderPrompt('${folderId}')">
                     <span class="folder-context-menu-icon" aria-hidden="true">

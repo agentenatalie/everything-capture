@@ -9,6 +9,37 @@ logger = logging.getLogger(__name__)
 
 BACKEND_DIR = Path(__file__).resolve().parent
 PROJECT_ROOT = BACKEND_DIR.parent
+
+
+def _load_local_env_file() -> None:
+    """Load local runtime config for launchers that cannot source shell env files."""
+    for candidate_path in (
+        BACKEND_DIR / ".local" / "capture_service.env",
+        PROJECT_ROOT / ".local" / "capture_service.env",
+    ):
+        if not candidate_path.exists():
+            continue
+        try:
+            for raw_line in candidate_path.read_text(encoding="utf-8").splitlines():
+                line = raw_line.strip()
+                if not line or line.startswith("#"):
+                    continue
+                if line.startswith("export "):
+                    line = line[7:].strip()
+                if "=" not in line:
+                    continue
+                key, value = line.split("=", 1)
+                key = key.strip()
+                if not key or key in os.environ:
+                    continue
+                os.environ[key] = value.strip().strip("\"'")
+        except OSError:
+            continue
+        return
+
+
+_load_local_env_file()
+
 APP_MODE = (os.getenv("EC_APP_MODE") or "").strip().lower()
 IS_DESKTOP_MODE = APP_MODE == "desktop"
 APP_NAME = (os.getenv("EC_APP_NAME") or "Everything Capture").strip() or "Everything Capture"

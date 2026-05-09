@@ -6,6 +6,7 @@ AI_MODEL_OPTIONS = [
     "minimax-m2.1",
     "kimi-k2.5",
     "glm-5",
+    "glm-5.1",
     "minimax-m2.5",
 ]
 AI_DEFAULT_MODEL = AI_MODEL_OPTIONS[0]

@@ -1872,6 +1872,57 @@
             clearFolderDropIndicator();
         });
 
+        let pendingDeleteBtn = null;
+        let pendingDeleteTimer = null;
+        const DELETE_CONFIRM_ICON = '<svg class="delete-confirm-svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path class="delete-confirm-circle" d="M21.801 10A10 10 0 1 1 17 3.335" pathLength="1"/><path class="delete-confirm-tick" d="m9 11 3 3L22 4" pathLength="1"/></svg>';
+
+        function resetPendingDeleteBtn() {
+            if (pendingDeleteBtn) {
+                const btn = pendingDeleteBtn;
+                if (btn.dataset.deleteOriginalHtml !== undefined) {
+                    btn.innerHTML = btn.dataset.deleteOriginalHtml;
+                    delete btn.dataset.deleteOriginalHtml;
+                }
+                btn.classList.remove('is-confirming');
+                if (btn.dataset.deleteOriginalTitle !== undefined) {
+                    btn.title = btn.dataset.deleteOriginalTitle;
+                    delete btn.dataset.deleteOriginalTitle;
+                } else {
+                    btn.title = '删除';
+                }
+            }
+            pendingDeleteBtn = null;
+            if (pendingDeleteTimer) {
+                clearTimeout(pendingDeleteTimer);
+                pendingDeleteTimer = null;
+            }
+        }
+
+        function armDeleteBtn(btn) {
+            if (!btn) return;
+            if (pendingDeleteBtn && pendingDeleteBtn !== btn) {
+                resetPendingDeleteBtn();
+            }
+            if (btn.dataset.deleteOriginalHtml === undefined) {
+                btn.dataset.deleteOriginalHtml = btn.innerHTML;
+                btn.dataset.deleteOriginalTitle = btn.title || '删除';
+            }
+            btn.innerHTML = DELETE_CONFIRM_ICON;
+            btn.classList.add('is-confirming');
+            btn.title = '再点一次确认删除';
+            pendingDeleteBtn = btn;
+            if (pendingDeleteTimer) clearTimeout(pendingDeleteTimer);
+            pendingDeleteTimer = setTimeout(() => {
+                resetPendingDeleteBtn();
+            }, 3000);
+        }
+
+        document.addEventListener('click', (event) => {
+            if (!pendingDeleteBtn) return;
+            if (pendingDeleteBtn.contains(event.target)) return;
+            resetPendingDeleteBtn();
+        }, true);
+
         async function deleteItem(id, event) {
             event?.stopPropagation?.();
             const normalizedId = String(id || '').trim();
@@ -1886,10 +1937,23 @@
             if (!targetIds.length) return;
 
             const isBulkDelete = targetIds.length > 1;
-            const confirmMessage = isBulkDelete
-                ? `确定要删除选中的 ${targetIds.length} 条内容吗？删除后不可恢复。`
-                : '确定要删除这条内容吗？删除后不可恢复。';
-            if (!confirm(confirmMessage)) return;
+            const btn = event?.currentTarget instanceof HTMLElement ? event.currentTarget : null;
+            if (btn && pendingDeleteBtn !== btn) {
+                armDeleteBtn(btn);
+                return;
+            }
+            if (btn) {
+                btn.classList.add('is-executing');
+                btn.title = '正在删除…';
+                pendingDeleteBtn = null;
+                if (pendingDeleteTimer) {
+                    clearTimeout(pendingDeleteTimer);
+                    pendingDeleteTimer = null;
+                }
+                await new Promise((resolve) => setTimeout(resolve, 450));
+            } else {
+                resetPendingDeleteBtn();
+            }
 
             try {
                 const response = isBulkDelete

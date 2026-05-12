@@ -4310,8 +4310,20 @@
             gap: 24px;
             align-content: start;
             overflow: visible;
-            grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+            grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
             contain: layout paint style;
+        }
+
+        @media (min-width: 1280px) {
+            #grid.grid {
+                grid-template-columns: repeat(4, minmax(0, 1fr));
+            }
+        }
+
+        @media (min-width: 1680px) {
+            #grid.grid {
+                grid-template-columns: repeat(5, minmax(0, 1fr));
+            }
         }
 
         .list-view {
@@ -9039,6 +9051,69 @@
             border-color: transparent;
             box-shadow: none;
             transform: none;
+        }
+
+        .delete-btn.is-confirming,
+        .delete-btn.is-confirming:hover {
+            color: #dc2626;
+        }
+
+        .delete-btn.is-confirming .delete-confirm-svg {
+            stroke: #dc2626;
+            transform-origin: center;
+        }
+
+        .delete-confirm-circle {
+            stroke-dasharray: 1;
+            stroke-dashoffset: 0.3;
+            opacity: 0.7;
+            animation: delete-confirm-circle-draw 0.35s ease-out forwards;
+        }
+
+        .delete-confirm-tick {
+            stroke-dasharray: 1;
+            stroke-dashoffset: 1;
+            opacity: 1;
+        }
+
+        .delete-btn.is-executing .delete-confirm-svg {
+            animation: delete-confirm-svg-pulse 0.45s ease-out;
+            transform-origin: center;
+        }
+
+        .delete-btn.is-executing .delete-confirm-tick {
+            animation: delete-confirm-tick-draw 0.3s ease-out 0.12s forwards;
+        }
+
+        @keyframes delete-confirm-circle-draw {
+            from { stroke-dashoffset: 0.3; opacity: 0.7; }
+            to   { stroke-dashoffset: 0; opacity: 1; }
+        }
+
+        @keyframes delete-confirm-tick-draw {
+            from { stroke-dashoffset: 1; }
+            to   { stroke-dashoffset: 0; }
+        }
+
+        @keyframes delete-confirm-svg-pulse {
+            0%   { transform: scale(1); }
+            37%  { transform: scale(1.12); }
+            74%  { transform: scale(0.96); }
+            100% { transform: scale(1); }
+        }
+
+        @media (prefers-reduced-motion: reduce) {
+            .delete-btn.is-confirming .delete-confirm-svg,
+            .delete-btn.is-executing .delete-confirm-svg,
+            .delete-confirm-circle,
+            .delete-confirm-tick {
+                animation: none;
+            }
+            .delete-confirm-circle,
+            .delete-confirm-tick {
+                stroke-dashoffset: 0;
+                opacity: 1;
+            }
         }
 
         .reader-action {

@@ -1985,6 +1985,17 @@
             margin-bottom: 1rem;
         }
 
+        .modal-media--video {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            width: 100%;
+            margin-left: auto;
+            margin-right: auto;
+            border-radius: 12px;
+            background: #000;
+        }
+
         .modal-media .media-gallery {
             display: flex;
             gap: 10px;
@@ -2005,11 +2016,33 @@
         }
 
         .modal-media video {
+            display: block;
             width: 100%;
-            max-height: 400px;
+            max-height: min(72vh, 640px);
             border-radius: 12px;
             border: 1px solid rgba(255, 255, 255, 0.68);
             background: #000;
+            object-fit: contain;
+        }
+
+        .modal-media--video video {
+            border: 0;
+        }
+
+        .modal-media--video.is-portrait {
+            width: min(100%, 460px);
+        }
+
+        .modal-media--video.is-portrait video {
+            width: auto;
+            max-width: 100%;
+            height: min(76vh, 760px);
+            max-height: 760px;
+            aspect-ratio: var(--media-aspect-ratio, 9 / 16);
+        }
+
+        .modal-media--video.is-square {
+            width: min(100%, 640px);
         }
 
         .modal-media iframe,

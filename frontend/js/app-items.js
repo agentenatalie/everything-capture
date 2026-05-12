@@ -28,6 +28,8 @@
         let readerChromeHidden = false;
         let readerChromeLastToggle = 0;
         let readerLastScrollTop = 0;
+        let readerImageLightboxItems = [];
+        let readerImageLightboxIndex = -1;
         const readerNavStack = []; // stack of { itemId, sidebarTab } for back-navigation from citations
         let readerNavOrigin = null; // 'askAi' | 'readerAi' | null — where the citation nav started
         let readerScrollTicking = false;
@@ -95,6 +97,79 @@
             readerScrollIntent = 0;
             readerChromeLastToggle = 0; // bypass cooldown on explicit reset
             setReaderChromeHidden(false);
+        }
+
+        function closeReaderImageLightbox() {
+            if (!readerImageLightbox?.classList.contains('is-active')) return false;
+            readerImageLightbox.classList.remove('is-active');
+            readerImageLightbox.setAttribute('aria-hidden', 'true');
+            readerImageLightboxItems = [];
+            readerImageLightboxIndex = -1;
+            if (readerImageLightboxImg) {
+                readerImageLightboxImg.removeAttribute('src');
+                readerImageLightboxImg.alt = '';
+            }
+            return true;
+        }
+
+        function getReaderImageLightboxSource(image) {
+            return image?.currentSrc || image?.src || image?.getAttribute?.('src') || image?.dataset?.src || '';
+        }
+
+        function renderReaderImageLightboxImage(index) {
+            if (!readerImageLightboxImg || !readerImageLightboxItems.length) return;
+            const normalizedIndex = (index + readerImageLightboxItems.length) % readerImageLightboxItems.length;
+            const item = readerImageLightboxItems[normalizedIndex];
+            readerImageLightboxIndex = normalizedIndex;
+            readerImageLightboxImg.src = item.src;
+            readerImageLightboxImg.alt = item.alt || '';
+        }
+
+        function moveReaderImageLightbox(direction) {
+            if (!readerImageLightbox?.classList.contains('is-active') || readerImageLightboxItems.length < 2) return false;
+            renderReaderImageLightboxImage(readerImageLightboxIndex + direction);
+            return true;
+        }
+
+        function openReaderImageLightboxFromImage(sourceImage) {
+            if (!sourceImage || modalContent?.classList.contains('is-content-editable')) return;
+            const imageElements = Array.from(modalContent?.querySelectorAll('img') || []);
+            readerImageLightboxItems = imageElements
+                .map((image) => ({
+                    src: getReaderImageLightboxSource(image),
+                    alt: image.alt || '',
+                    element: image,
+                }))
+                .filter((item) => item.src);
+            const imageUrl = getReaderImageLightboxSource(sourceImage);
+            if (!imageUrl || !readerImageLightbox || !readerImageLightboxImg) return;
+            if (!readerImageLightboxItems.length) {
+                readerImageLightboxItems = [{ src: imageUrl, alt: sourceImage.alt || '' }];
+            }
+
+            const sourceIndex = readerImageLightboxItems.findIndex((item) => item.element === sourceImage);
+            renderReaderImageLightboxImage(sourceIndex >= 0 ? sourceIndex : 0);
+            readerImageLightbox.classList.add('is-active');
+            readerImageLightbox.setAttribute('aria-hidden', 'false');
+            setReaderChromeHidden(false);
+            closeReaderImageLightboxBtn?.focus?.({ preventScroll: true });
+        }
+
+        function handleReaderImageLightboxKey(event) {
+            if (!readerImageLightbox?.classList.contains('is-active')) return false;
+            if (event.key === 'ArrowRight') {
+                moveReaderImageLightbox(1);
+                return true;
+            }
+            if (event.key === 'ArrowLeft') {
+                moveReaderImageLightbox(-1);
+                return true;
+            }
+            if (event.key === 'Escape') {
+                closeReaderImageLightbox();
+                return true;
+            }
+            return false;
         }
 
         function updateReaderChromeVisibilityFromScroll() {
@@ -2825,7 +2900,9 @@
                 let html = '';
                 if (videos.length > 0) {
                     const cover = (item.media || []).find(m => m.type === 'cover');
-                    html += `<div class="modal-media"><video controls preload="metadata" poster="${escapeAttribute(resolveMediaUrl(cover ? cover.url : ''))}"><source src="${escapeAttribute(resolveMediaUrl(videos[0].url || ''))}" type="video/mp4"></video></div>`;
+                    html += renderVideoMedia(resolveMediaUrl(videos[0].url || ''), {
+                        poster: resolveMediaUrl(cover ? cover.url : ''),
+                    });
                 }
                 if (images.length > 0) {
                     html += `<div class="modal-media modal-media--carousel${images.length > 1 ? ' is-multi' : ''}"><div class="media-gallery">${images.map((img, i) => `<img src="${escapeAttribute(resolveMediaUrl(img.url || ''))}" alt=""${i > 0 ? ' loading="lazy" decoding="async"' : ' decoding="async"'}>`).join('')}</div>${images.length > 1 ? '<div class="gallery-hint">← 左右滑动查看更多图片 →</div>' : ''}</div>`;
@@ -2840,6 +2917,7 @@
                 // ── 通用网页 / 微信：优先恢复原始图文流，再按稳妥策略回退 ──────────────
                 modalContent.innerHTML = renderWebArticle(item, videos);
             }
+            hydrateModalVideoLayouts(modalContent);
 
             // ── contenteditable for edit mode ──────────────────────────────
             if (contentViewMode === 'edit') {
@@ -2988,6 +3066,7 @@
 
         async function closeModalDialog() {
             if (modalOverlay.classList.contains('is-closing') || modalCloseInFlight) return;
+            closeReaderImageLightbox();
 
             // If there's a previous item on the nav stack, go back to it instead of closing
             if (readerNavStack.length > 0) {
@@ -3099,6 +3178,16 @@
         modalOverlay.onclick = (e) => {
             if (e.target === modalOverlay) closeModalDialog();
         };
+        readerImageLightboxBackdrop?.addEventListener('click', closeReaderImageLightbox);
+        closeReaderImageLightboxBtn?.addEventListener('click', closeReaderImageLightbox);
+        readerImageLightboxImg?.addEventListener('click', closeReaderImageLightbox);
+        modalContent?.addEventListener('click', (event) => {
+            const image = event.target?.closest?.('img');
+            if (!image || !modalContent.contains(image) || modalContent.classList.contains('is-content-editable')) return;
+            event.preventDefault();
+            event.stopPropagation();
+            openReaderImageLightboxFromImage(image);
+        });
         settingsOverlay.onclick = (e) => {
             if (e.target === settingsOverlay) {
                 if (typeof closeSettingsPanel === 'function') closeSettingsPanel();
@@ -3155,6 +3244,9 @@
 
         function closeTopmostPopupOnEscape() {
             const askAiOverlay = document.getElementById('askAiOverlay');
+            if (closeReaderImageLightbox()) {
+                return true;
+            }
             if (askAiOverlay?.classList.contains('active') && !askAiOverlay.classList.contains('is-behind-reader') && typeof closeAskAiDialog === 'function') {
                 closeAskAiDialog();
                 return true;
@@ -3217,6 +3309,11 @@
         }
 
         document.addEventListener('keydown', (e) => {
+            if (handleReaderImageLightboxKey(e)) {
+                e.preventDefault();
+                e.stopImmediatePropagation();
+                return;
+            }
             if (e.key !== 'Escape') return;
             if (closeTopmostPopupOnEscape()) {
                 e.preventDefault();

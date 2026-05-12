@@ -896,12 +896,42 @@
             return /youtube(?:-nocookie)?\.com|youtu\.be|vimeo\.com/i.test(value);
         }
 
-        function renderVideoMedia(url) {
+        function syncModalVideoAspect(video) {
+            if (!video) return;
+            const frame = video.closest('.modal-media--video');
+            if (!frame) return;
+            const width = video.videoWidth || 0;
+            const height = video.videoHeight || 0;
+            if (!width || !height) return;
+
+            frame.classList.remove('is-portrait', 'is-landscape', 'is-square');
+            frame.style.setProperty('--media-aspect-ratio', `${width} / ${height}`);
+            if (height > width * 1.08) {
+                frame.classList.add('is-portrait');
+            } else if (width > height * 1.08) {
+                frame.classList.add('is-landscape');
+            } else {
+                frame.classList.add('is-square');
+            }
+            frame.classList.add('is-video-ready');
+        }
+
+        function hydrateModalVideoLayouts(root = document) {
+            const scope = root && typeof root.querySelectorAll === 'function' ? root : document;
+            scope.querySelectorAll('.modal-media--video video').forEach((video) => {
+                syncModalVideoAspect(video);
+                video.addEventListener('loadedmetadata', () => syncModalVideoAspect(video), { once: true });
+            });
+        }
+
+        function renderVideoMedia(url, options = {}) {
             const safeUrl = escapeAttribute(url);
             if (isIframeVideoUrl(url)) {
                 return `<div class="modal-media"><iframe src="${escapeAttribute(getEmbedVideoUrl(url))}" title="Embedded video" loading="lazy" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share" allowfullscreen referrerpolicy="strict-origin-when-cross-origin"></iframe></div>`;
             }
-            return `<div class="modal-media"><video controls preload="metadata"><source src="${safeUrl}" type="video/mp4"></video></div>`;
+            const posterUrl = String(options?.poster || '').trim();
+            const posterAttribute = posterUrl ? ` poster="${escapeAttribute(posterUrl)}"` : '';
+            return `<div class="modal-media modal-media--video"><video controls playsinline preload="metadata"${posterAttribute}><source src="${safeUrl}" type="video/mp4"></video></div>`;
         }
 
         function renderImageCarouselMedia(images) {

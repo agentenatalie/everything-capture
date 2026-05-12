@@ -15,6 +15,10 @@
         const readerNotePanel = document.getElementById('readerNotePanel');
         const modalContent = document.getElementById('modalContent');
         const modalFooter = document.getElementById('modalFooter');
+        const readerImageLightbox = document.getElementById('readerImageLightbox');
+        const readerImageLightboxBackdrop = document.getElementById('readerImageLightboxBackdrop');
+        const readerImageLightboxImg = document.getElementById('readerImageLightboxImg');
+        const closeReaderImageLightboxBtn = document.getElementById('closeReaderImageLightbox');
         const readerStatusDots = document.getElementById('readerStatusDots');
         const closeModal = document.getElementById('closeModal');
         const toggleNoteBtn = document.getElementById('toggleNoteBtn');

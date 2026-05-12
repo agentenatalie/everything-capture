@@ -20,6 +20,8 @@ from sqlalchemy.orm import Session
 from database import SessionLocal, get_db
 from models import AiConversation, Folder, Highlight, Item, ItemFolderLink, ItemPageNote, ItemTagLink, Media, Tag
 from schemas import (
+    BulkItemDeleteRequest,
+    BulkItemDeleteResponse,
     BulkFolderUpdateRequest,
     BulkFolderUpdateResponse,
     GraphEdge,
@@ -245,6 +247,87 @@ class SearchQueryPlan:
     tokens: tuple[str, ...]
     intents: tuple[str, ...]
     boost_terms: tuple[SearchBoostTerm, ...]
+
+
+@dataclass(frozen=True)
+class MediaSnapshot:
+    id: str
+    user_id: str
+    workspace_id: str
+    item_id: str
+    type: str
+    original_url: str | None
+    local_path: str | None
+    file_size: int | None
+    display_order: int | None
+    inline_position: float | None
+    storage_backend: str | None
+    storage_key: str | None
+    storage_etag: str | None
+    storage_uploaded_at: datetime | None
+
+
+def _snapshot_media(media: Media) -> MediaSnapshot:
+    return MediaSnapshot(
+        id=media.id,
+        user_id=media.user_id,
+        workspace_id=media.workspace_id,
+        item_id=media.item_id,
+        type=media.type,
+        original_url=media.original_url,
+        local_path=media.local_path,
+        file_size=media.file_size,
+        display_order=media.display_order,
+        inline_position=media.inline_position,
+        storage_backend=media.storage_backend,
+        storage_key=media.storage_key,
+        storage_etag=media.storage_etag,
+        storage_uploaded_at=media.storage_uploaded_at,
+    )
+
+
+def _copy_item_parse_fields(source: Item, target: Item) -> None:
+    target.extracted_text = source.extracted_text
+    target.ocr_text = source.ocr_text
+    target.frame_texts_json = source.frame_texts_json
+    target.urls_json = source.urls_json
+    target.qr_links_json = source.qr_links_json
+    target.parse_status = source.parse_status
+    target.parse_error = source.parse_error
+    target.parse_started_at = source.parse_started_at
+    target.parsed_at = source.parsed_at
+
+
+def _persist_offloaded_media_metadata(db: Session, media_entries: list[Media]) -> None:
+    for source in media_entries:
+        persisted = db.query(Media).filter(Media.id == source.id).first()
+        if not persisted:
+            continue
+        persisted.storage_backend = source.storage_backend
+        persisted.storage_key = source.storage_key
+        persisted.storage_etag = source.storage_etag
+        persisted.storage_uploaded_at = source.storage_uploaded_at
+
+
+def _detach_item_for_long_parse(db: Session, item: Item) -> Item:
+    # Ensure eager-loaded media remains available after releasing the DB connection.
+    list(item.media or [])
+    db.expunge_all()
+    db.close()
+    return item
+
+
+def _delete_items_and_cleanup_media(db: Session, items: list[Item]) -> int:
+    media_entries: list[Media] = []
+    for item in items:
+        media_entries.extend(list(item.media or []))
+        db.delete(item)
+
+    db.commit()
+    cleanup_media_local_artifacts(media_entries)
+    for media in media_entries:
+        delete_remote_media(media)
+    return len(items)
 
 
 def normalize_platform_filter(platform: Optional[str]) -> str:
@@ -562,7 +645,8 @@ def _offload_item_videos(item: Item) -> list[Media]:
 
 
 def background_parse_item_content(item_id: str, user_id: str) -> None:
-    with SessionLocal() as db:
+    db = SessionLocal()
+    try:
         item = db.query(Item).filter(Item.id == item_id, Item.user_id == user_id).first()
         if not item:
             return
@@ -570,11 +654,17 @@ def background_parse_item_content(item_id: str, user_id: str) -> None:
         _mark_item_parse_processing(item)
         db.commit()
         db.refresh(item)
+        detached_item = _detach_item_for_long_parse(db, item)
 
         try:
-            parse_item_content_for_item(item)
-            offloaded_media = _offload_item_videos(item)
-            item.parse_retry_count = 0  # 成功后重置重试计数
+            parse_item_content_for_item(detached_item)
+            offloaded_media = _offload_item_videos(detached_item)
+            persisted_item = db.query(Item).filter(Item.id == item_id, Item.user_id == user_id).first()
+            if not persisted_item:
+                return
+            _copy_item_parse_fields(detached_item, persisted_item)
+            persisted_item.parse_retry_count = 0  # 成功后重置重试计数
+            _persist_offloaded_media_metadata(db, offloaded_media)
             db.commit()
             if offloaded_media:
                 cleanup_media_local_artifacts(offloaded_media)
@@ -585,6 +675,8 @@ def background_parse_item_content(item_id: str, user_id: str) -> None:
                 return
             _store_item_parse_failure(item, str(exc))
             db.commit()
+    finally:
+        db.close()
 
 
 def _list_processing_parse_jobs(
@@ -1124,6 +1216,25 @@ def get_recent_views(limit: int = 8, db: Session = Depends(get_db)):
     return serialize_items(items)
 
 
+@router.post("/items/bulk-delete", response_model=BulkItemDeleteResponse)
+def bulk_delete_items(request: BulkItemDeleteRequest, db: Session = Depends(get_db)):
+    user_id = get_current_user_id()
+    item_ids = list(OrderedDict.fromkeys(
+        item_id
+        for item_id in (str(value or "").strip() for value in request.item_ids)
+        if item_id
+    ))
+    if not item_ids:
+        raise HTTPException(status_code=400, detail="item_ids is required")
+
+    items = db.query(Item).filter(Item.user_id == user_id, Item.id.in_(item_ids)).all()
+    if not items:
+        raise HTTPException(status_code=404, detail="Items not found")
+
+    deleted_count = _delete_items_and_cleanup_media(db, items)
+    return BulkItemDeleteResponse(deleted_count=deleted_count, requested_count=len(item_ids))
+
+
 @router.get("/items/{item_id}", response_model=ItemResponse)
 def get_item(
     item_id: str,
@@ -1487,15 +1598,23 @@ def parse_item_content_endpoint(item_id: str, db: Session = Depends(get_db)):
     item.parse_retry_count = 0  # 用户手动重试，重置计数
     db.commit()
     db.refresh(item)
+    detached_item = _detach_item_for_long_parse(db, item)
 
     try:
-        parse_item_content_for_item(item)
-        offloaded_media = _offload_item_videos(item)
+        parse_item_content_for_item(detached_item)
+        offloaded_media = _offload_item_videos(detached_item)
+        item = db.query(Item).filter(Item.id == item_id, Item.user_id == user_id).first()
+        if not item:
+            raise HTTPException(status_code=404, detail="Item not found")
+        _copy_item_parse_fields(detached_item, item)
+        _persist_offloaded_media_metadata(db, offloaded_media)
         db.commit()
         if offloaded_media:
             cleanup_media_local_artifacts(offloaded_media)
         db.refresh(item)
         return serialize_items([item])[0]
+    except HTTPException:
+        raise
     except ContentExtractionError as exc:
         db.rollback()
         item = db.query(Item).filter(Item.id == item_id, Item.user_id == user_id).first()
@@ -1513,19 +1632,21 @@ def parse_item_content_endpoint(item_id: str, db: Session = Depends(get_db)):
 
 
 @router.get("/media/{media_id}/content")
-def get_media_content(media_id: str, db: Session = Depends(get_db)):
+def get_media_content(media_id: str):
     user_id = get_current_user_id()
-    media = db.query(Media).filter(Media.id == media_id, Media.user_id == user_id).first()
-    if not media:
-        raise HTTPException(status_code=404, detail="Media not found")
+    with SessionLocal() as db:
+        media = db.query(Media).filter(Media.id == media_id, Media.user_id == user_id).first()
+        if not media:
+            raise HTTPException(status_code=404, detail="Media not found")
+        media_snapshot = _snapshot_media(media)
 
-    local_path = resolve_local_media_path(media)
+    local_path = resolve_local_media_path(media_snapshot)
     if local_path is not None:
         media_type = mimetypes.guess_type(local_path.name)[0] or "application/octet-stream"
         return FileResponse(str(local_path), media_type=media_type, filename=local_path.name)
 
     try:
-        target_url = media_read_redirect_url(media)
+        target_url = media_read_redirect_url(media_snapshot)
     except FileNotFoundError as exc:
         raise HTTPException(status_code=404, detail="Media file not found") from exc
 
@@ -1857,12 +1978,7 @@ def delete_item(item_id: str, db: Session = Depends(get_db)):
     if not item:
         raise HTTPException(status_code=404, detail="Item not found")
 
-    media_entries = list(item.media or [])
-    db.delete(item)
-    db.commit()
-    cleanup_media_local_artifacts(media_entries)
-    for media in media_entries:
-        delete_remote_media(media)
+    _delete_items_and_cleanup_media(db, [item])
     return None
 
 

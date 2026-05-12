@@ -1798,16 +1798,45 @@
         });
 
         async function deleteItem(id, event) {
-            event.stopPropagation();
-            if (!confirm('确定要删除这条内容吗？删除后不可恢复。')) return;
+            event?.stopPropagation?.();
+            const normalizedId = String(id || '').trim();
+            if (!normalizedId) return;
+
+            const selectedIds = getSelectedLibraryItemIds();
+            const targetIds = Array.from(new Set(
+                (selectedIds.includes(normalizedId) ? selectedIds : [normalizedId])
+                    .map((value) => String(value || '').trim())
+                    .filter(Boolean)
+            ));
+            if (!targetIds.length) return;
+
+            const isBulkDelete = targetIds.length > 1;
+            const confirmMessage = isBulkDelete
+                ? `确定要删除选中的 ${targetIds.length} 条内容吗？删除后不可恢复。`
+                : '确定要删除这条内容吗？删除后不可恢复。';
+            if (!confirm(confirmMessage)) return;
 
             try {
-                const response = await fetch(`/api/items/${id}`, { method: 'DELETE' });
+                const response = isBulkDelete
+                    ? await fetch('/api/items/bulk-delete', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ item_ids: targetIds }),
+                    })
+                    : await fetch(`/api/items/${encodeURIComponent(targetIds[0])}`, { method: 'DELETE' });
                 if (response.ok) {
-                    showToast('已删除', 'deleted');
+                    if (isBulkDelete) {
+                        const data = await response.json().catch(() => ({}));
+                        showToast(`已删除 ${data.deleted_count || targetIds.length} 条`, 'deleted');
+                    } else {
+                        showToast('已删除', 'deleted');
+                    }
+                    if (targetIds.some((itemId) => selectedLibraryItemIds.has(itemId))) {
+                        clearLibraryItemSelection({ render: false });
+                    }
                     await Promise.all([fetchFolders(), fetchItems()]);
                 } else {
-                    const data = await response.json();
+                    const data = await response.json().catch(() => ({}));
                     showToast('删除失败: ' + (data.detail || '未知错误'), 'error');
                 }
             } catch (error) {

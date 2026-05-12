@@ -184,6 +184,39 @@ class MainSinglePortTests(unittest.TestCase):
         self.assertEqual(response.status_code, 204)
         delete_remote_media.assert_called_once()
 
+    def test_bulk_delete_items_route_deletes_selected_items(self) -> None:
+        with load_main_with_temp_data_dir() as main_module:
+            self._create_item_with_media(
+                "item-bulk-delete-a",
+                "media-bulk-delete-a",
+                storage_backend="s3",
+                storage_key="media/users/local-default-user/item-bulk-delete-a/video_000.mp4",
+            )
+            self._create_item_with_media(
+                "item-bulk-delete-b",
+                "media-bulk-delete-b",
+                storage_backend="s3",
+                storage_key="media/users/local-default-user/item-bulk-delete-b/video_000.mp4",
+            )
+
+            with patch("routers.items.delete_remote_media") as delete_remote_media:
+                with TestClient(main_module.app) as client:
+                    response = client.post(
+                        "/api/items/bulk-delete",
+                        json={"item_ids": ["item-bulk-delete-a", "item-bulk-delete-b"]},
+                    )
+
+            from database import SessionLocal
+            from models import Item
+
+            with SessionLocal() as db:
+                remaining = db.query(Item).filter(Item.id.in_(["item-bulk-delete-a", "item-bulk-delete-b"])).count()
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json(), {"deleted_count": 2, "requested_count": 2})
+        self.assertEqual(remaining, 0)
+        self.assertEqual(delete_remote_media.call_count, 2)
+
 
 if __name__ == "__main__":
     unittest.main()

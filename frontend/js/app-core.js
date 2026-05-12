@@ -142,7 +142,7 @@
 
         async function loadAiMemories() {
             try {
-                const res = await fetch(window.API_BASE_URL + '/api/ai/memories');
+                const res = await fetch((window.API_BASE_URL || '') + '/api/ai/memories');
                 if (res.ok) _aiMemories = await res.json();
                 _aiMemoriesLoaded = true;
             } catch (e) { /* silent */ }

@@ -513,6 +513,15 @@ class ItemStateUpdateRequest(BaseModel):
     is_favorite: Optional[bool] = None
 
 
+class BulkItemDeleteRequest(BaseModel):
+    item_ids: list[str] = Field(default_factory=list)
+
+
+class BulkItemDeleteResponse(BaseModel):
+    deleted_count: int
+    requested_count: int
+
+
 class BulkFolderUpdateRequest(BaseModel):
     item_ids: list[str] = Field(default_factory=list)
     folder_id: Optional[str] = None

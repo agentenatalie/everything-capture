@@ -125,6 +125,7 @@ class Folder(Base):
     name = Column(String, nullable=False, index=True)
     sort_order = Column(Integer, nullable=False, default=0, index=True)
     parent_id = Column(String, ForeignKey("folders.id"), nullable=True, index=True)
+    hidden_from_all = Column(Boolean, nullable=False, default=False, index=True)
     created_at = Column(DateTime, default=datetime.datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.datetime.utcnow)
 

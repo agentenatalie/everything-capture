@@ -1,7 +1,7 @@
 import datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Response, status
-from sqlalchemy import func
+from sqlalchemy import func, or_
 from sqlalchemy.orm import Session
 
 from database import get_db
@@ -47,6 +47,7 @@ def _serialize_folders(folders: list[Folder], item_counts: dict[str, int] | None
             name=folder.name,
             sort_order=folder.sort_order or 0,
             parent_id=folder.parent_id,
+            hidden_from_all=bool(getattr(folder, "hidden_from_all", False)),
             created_at=folder.created_at,
             updated_at=folder.updated_at,
             item_count=(item_counts or {}).get(folder.id, 0),
@@ -63,6 +64,45 @@ def _next_folder_sort_order(db: Session, user_id: str, parent_id: str | None = N
         q = q.filter(Folder.parent_id.is_(None))
     current_max = q.scalar()
     return int(current_max if current_max is not None else -1) + 1
+
+
+def _hidden_from_all_folder_ids(folders: list[Folder]) -> set[str]:
+    if not folders:
+        return set()
+
+    children_by_parent: dict[str | None, list[str]] = {}
+    hidden_ids: set[str] = set()
+    for folder in folders:
+        children_by_parent.setdefault(folder.parent_id, []).append(folder.id)
+        if getattr(folder, "hidden_from_all", False):
+            hidden_ids.add(folder.id)
+
+    result = set(hidden_ids)
+    queue = list(hidden_ids)
+    while queue:
+        parent_id = queue.pop(0)
+        for child_id in children_by_parent.get(parent_id, []):
+            if child_id in result:
+                continue
+            result.add(child_id)
+            queue.append(child_id)
+    return result
+
+
+def _count_items_visible_in_all(db: Session, user_id: str, folders: list[Folder]) -> int:
+    query = db.query(func.count(Item.id)).filter(Item.user_id == user_id)
+    hidden_folder_ids = _hidden_from_all_folder_ids(folders)
+    if hidden_folder_ids:
+        hidden_linked_item_ids = db.query(ItemFolderLink.item_id).filter(
+            ItemFolderLink.folder_id.in_(hidden_folder_ids)
+        )
+        query = query.filter(
+            ~or_(
+                func.coalesce(Item.folder_id, "").in_(hidden_folder_ids),
+                Item.id.in_(hidden_linked_item_ids),
+            )
+        )
+    return query.scalar() or 0
 
 
 def _build_folder_aggregate_counts(db: Session, user_id: str, folders: list[Folder]) -> dict[str, int]:
@@ -109,7 +149,7 @@ def get_folders(db: Session = Depends(get_db)):
         .all()
     )
     aggregate_counts = _build_folder_aggregate_counts(db, user_id, folders)
-    total_count = db.query(func.count(Item.id)).filter(Item.user_id == user_id).scalar() or 0
+    total_count = _count_items_visible_in_all(db, user_id, folders)
     unfiled_count = (
         db.query(func.count(Item.id))
         .outerjoin(ItemFolderLink, ItemFolderLink.item_id == Item.id)
@@ -171,6 +211,7 @@ def create_folder(request: FolderCreateRequest, db: Session = Depends(get_db)):
         name=folder.name,
         sort_order=folder.sort_order or 0,
         parent_id=folder.parent_id,
+        hidden_from_all=bool(folder.hidden_from_all),
         created_at=folder.created_at,
         updated_at=folder.updated_at,
         item_count=0,
@@ -184,13 +225,19 @@ def update_folder(folder_id: str, request: FolderUpdateRequest, db: Session = De
     if not folder:
         raise HTTPException(status_code=404, detail="Folder not found")
 
-    name = _clean_folder_name(request.name)
-    if not name:
-        raise HTTPException(status_code=400, detail="Folder name is required")
-    if _find_folder_by_name(db, user_id, name, parent_id=folder.parent_id, exclude_folder_id=folder.id):
-        raise HTTPException(status_code=409, detail="Folder name already exists")
+    if request.name is None and request.hidden_from_all is None:
+        raise HTTPException(status_code=400, detail="No folder updates provided")
 
-    folder.name = name
+    if request.name is not None:
+        name = _clean_folder_name(request.name)
+        if not name:
+            raise HTTPException(status_code=400, detail="Folder name is required")
+        if _find_folder_by_name(db, user_id, name, parent_id=folder.parent_id, exclude_folder_id=folder.id):
+            raise HTTPException(status_code=409, detail="Folder name already exists")
+        folder.name = name
+
+    if request.hidden_from_all is not None:
+        folder.hidden_from_all = bool(request.hidden_from_all)
     folder.updated_at = datetime.datetime.utcnow()
     db.commit()
     item_count = (
@@ -206,6 +253,7 @@ def update_folder(folder_id: str, request: FolderUpdateRequest, db: Session = De
         name=folder.name,
         sort_order=folder.sort_order or 0,
         parent_id=folder.parent_id,
+        hidden_from_all=bool(folder.hidden_from_all),
         created_at=folder.created_at,
         updated_at=folder.updated_at,
         item_count=item_count,
@@ -285,6 +333,7 @@ def move_folder(folder_id: str, request: FolderMoveRequest, db: Session = Depend
             name=folder.name,
             sort_order=folder.sort_order or 0,
             parent_id=folder.parent_id,
+            hidden_from_all=bool(folder.hidden_from_all),
             created_at=folder.created_at,
             updated_at=folder.updated_at,
             item_count=item_count,
@@ -319,6 +368,7 @@ def move_folder(folder_id: str, request: FolderMoveRequest, db: Session = Depend
         name=folder.name,
         sort_order=folder.sort_order or 0,
         parent_id=folder.parent_id,
+        hidden_from_all=bool(folder.hidden_from_all),
         created_at=folder.created_at,
         updated_at=folder.updated_at,
         item_count=item_count,

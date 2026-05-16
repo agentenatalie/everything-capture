@@ -12,8 +12,8 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")
 
 from database import Base  # noqa: E402
 from models import Folder, Item, ItemFolderLink, User  # noqa: E402
-from routers.folders import create_folder, get_folders, move_folder, reorder_folders  # noqa: E402
-from schemas import FolderCreateRequest, FolderMoveRequest, FolderReorderRequest  # noqa: E402
+from routers.folders import create_folder, get_folders, move_folder, reorder_folders, update_folder  # noqa: E402
+from schemas import FolderCreateRequest, FolderMoveRequest, FolderReorderRequest, FolderUpdateRequest  # noqa: E402
 from tenant import DEFAULT_USER_EMAIL, DEFAULT_USER_ID, DEFAULT_USER_NAME  # noqa: E402
 
 
@@ -115,6 +115,20 @@ class FolderHierarchyTests(unittest.TestCase):
 
             self.assertEqual(response.parent_id, parent.id)
 
+    def test_update_folder_can_toggle_hidden_from_all_without_renaming(self) -> None:
+        with self.Session() as db:
+            folder = Folder(user_id=DEFAULT_USER_ID, name="Private", sort_order=0)
+            db.add(folder)
+            db.commit()
+            db.refresh(folder)
+
+            response = update_folder(folder.id, FolderUpdateRequest(hidden_from_all=True), db)
+
+            db.refresh(folder)
+            self.assertEqual(response.name, "Private")
+            self.assertTrue(response.hidden_from_all)
+            self.assertTrue(folder.hidden_from_all)
+
     def test_move_folder_rejects_duplicate_name_in_target_parent(self) -> None:
         with self.Session() as db:
             parent = Folder(user_id=DEFAULT_USER_ID, name="Projects", sort_order=0)
@@ -189,6 +203,86 @@ class FolderHierarchyTests(unittest.TestCase):
 
             self.assertEqual(folders_by_id[parent.id].item_count, 3)
             self.assertEqual(folders_by_id[child.id].item_count, 2)
+
+    def test_get_folders_total_count_excludes_hidden_from_all_subtrees(self) -> None:
+        with self.Session() as db:
+            visible_folder = Folder(user_id=DEFAULT_USER_ID, name="Visible", sort_order=0)
+            hidden_parent = Folder(user_id=DEFAULT_USER_ID, name="Private", sort_order=1, hidden_from_all=True)
+            db.add_all([visible_folder, hidden_parent])
+            db.commit()
+            db.refresh(visible_folder)
+            db.refresh(hidden_parent)
+            hidden_child = Folder(user_id=DEFAULT_USER_ID, name="Nested", parent_id=hidden_parent.id, sort_order=0)
+            db.add(hidden_child)
+            db.commit()
+            db.refresh(hidden_child)
+
+            visible_item = Item(
+                id="visible-item",
+                user_id=DEFAULT_USER_ID,
+                source_url="https://example.com/visible",
+                title="Visible",
+                canonical_text="body",
+                platform="web",
+                status="ready",
+                folder_id=visible_folder.id,
+            )
+            unfiled_item = Item(
+                id="unfiled-item",
+                user_id=DEFAULT_USER_ID,
+                source_url="https://example.com/unfiled",
+                title="Unfiled",
+                canonical_text="body",
+                platform="web",
+                status="ready",
+            )
+            hidden_item = Item(
+                id="hidden-item",
+                user_id=DEFAULT_USER_ID,
+                source_url="https://example.com/hidden",
+                title="Hidden",
+                canonical_text="body",
+                platform="web",
+                status="ready",
+                folder_id=hidden_parent.id,
+            )
+            hidden_child_item = Item(
+                id="hidden-child-item",
+                user_id=DEFAULT_USER_ID,
+                source_url="https://example.com/hidden-child",
+                title="Hidden child",
+                canonical_text="body",
+                platform="web",
+                status="ready",
+                folder_id=hidden_child.id,
+            )
+            shared_hidden_item = Item(
+                id="shared-hidden-item",
+                user_id=DEFAULT_USER_ID,
+                source_url="https://example.com/shared-hidden",
+                title="Shared hidden",
+                canonical_text="body",
+                platform="web",
+                status="ready",
+                folder_id=visible_folder.id,
+            )
+            db.add_all([visible_item, unfiled_item, hidden_item, hidden_child_item, shared_hidden_item])
+            db.commit()
+
+            db.add_all(
+                [
+                    ItemFolderLink(item_id=visible_item.id, folder_id=visible_folder.id),
+                    ItemFolderLink(item_id=hidden_item.id, folder_id=hidden_parent.id),
+                    ItemFolderLink(item_id=hidden_child_item.id, folder_id=hidden_child.id),
+                    ItemFolderLink(item_id=shared_hidden_item.id, folder_id=visible_folder.id),
+                    ItemFolderLink(item_id=shared_hidden_item.id, folder_id=hidden_parent.id),
+                ]
+            )
+            db.commit()
+
+            response = get_folders(db)
+
+            self.assertEqual(response.total_count, 2)
 
     def test_get_folders_returns_favorite_and_unread_counts(self) -> None:
         with self.Session() as db:

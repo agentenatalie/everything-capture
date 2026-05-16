@@ -493,7 +493,53 @@ def _get_descendant_folder_ids(db: Session, folder_id: str) -> list[str]:
     return result
 
 
-def apply_folder_filter(query, folder_scope: str = "all", folder_id: Optional[str] = None):
+def _get_hidden_from_all_folder_ids(db: Session, user_id: str) -> set[str]:
+    folders = db.query(Folder.id, Folder.parent_id, Folder.hidden_from_all).filter(Folder.user_id == user_id).all()
+    if not folders:
+        return set()
+
+    children_by_parent: dict[str | None, list[str]] = {}
+    hidden_ids: set[str] = set()
+    for folder_id, parent_id, hidden_from_all in folders:
+        children_by_parent.setdefault(parent_id, []).append(folder_id)
+        if hidden_from_all:
+            hidden_ids.add(folder_id)
+
+    result = set(hidden_ids)
+    queue = list(hidden_ids)
+    while queue:
+        parent_id = queue.pop(0)
+        for child_id in children_by_parent.get(parent_id, []):
+            if child_id in result:
+                continue
+            result.add(child_id)
+            queue.append(child_id)
+    return result
+
+
+def apply_hidden_from_all_filter(query, user_id: str):
+    hidden_folder_ids = _get_hidden_from_all_folder_ids(query.session, user_id)
+    if not hidden_folder_ids:
+        return query
+    hidden_linked_item_ids = query.session.query(ItemFolderLink.item_id).filter(
+        ItemFolderLink.folder_id.in_(hidden_folder_ids)
+    )
+    return query.filter(
+        ~or_(
+            func.coalesce(Item.folder_id, "").in_(hidden_folder_ids),
+            Item.id.in_(hidden_linked_item_ids),
+        )
+    )
+
+
+def apply_folder_filter(
+    query,
+    folder_scope: str = "all",
+    folder_id: Optional[str] = None,
+    *,
+    user_id: Optional[str] = None,
+    exclude_hidden_from_all: bool = False,
+):
     if folder_id:
         db = query.session
         all_folder_ids = _get_descendant_folder_ids(db, folder_id)
@@ -501,6 +547,8 @@ def apply_folder_filter(query, folder_scope: str = "all", folder_id: Optional[st
         return query.filter(Item.id.in_(linked_item_ids))
 
     normalized_scope = (folder_scope or "all").strip().lower()
+    if normalized_scope == "all" and exclude_hidden_from_all and user_id:
+        return apply_hidden_from_all_filter(query, user_id)
     if normalized_scope == "unfiled":
         linked_item_ids = query.session.query(ItemFolderLink.item_id)
         return query.filter(~Item.id.in_(linked_item_ids))
@@ -1067,6 +1115,8 @@ def get_items_graph(
     query = db.query(Item).filter(Item.user_id == user_id)
     if folder_id:
         query = apply_folder_filter(query, folder_id=folder_id)
+    else:
+        query = apply_hidden_from_all_filter(query, user_id)
     items_list = query.order_by(Item.created_at.desc()).limit(500).all()
 
     # Build nodes + TF-IDF vectors
@@ -1189,6 +1239,22 @@ def get_search_suggestions(
             {"fts_query": fts_query, "user_id": user_id, "limit": limit}
         ).fetchall()
 
+        hidden_folder_ids = _get_hidden_from_all_folder_ids(db, user_id)
+        hidden_item_ids: set[str] = set()
+        if hidden_folder_ids:
+            hidden_item_ids.update(
+                item_id
+                for (item_id,) in db.query(ItemFolderLink.item_id)
+                .filter(ItemFolderLink.folder_id.in_(hidden_folder_ids))
+                .all()
+            )
+            hidden_item_ids.update(
+                item_id
+                for (item_id,) in db.query(Item.id)
+                .filter(Item.user_id == user_id, Item.folder_id.in_(hidden_folder_ids))
+                .all()
+            )
+
         return [
             {
                 "item_id": row[0],
@@ -1196,6 +1262,7 @@ def get_search_suggestions(
                 "score": row[2]
             }
             for row in suggestions
+            if row[0] not in hidden_item_ids
         ]
     except Exception as exc:
         logger.warning("FTS5 search-suggestions failed for query %r: %s", q, exc)
@@ -1207,8 +1274,10 @@ def get_recent_views(limit: int = 8, db: Session = Depends(get_db)):
     user_id = get_current_user_id()
     safe_limit = max(1, min(limit, 20))
     items = (
-        db.query(Item)
-        .filter(Item.user_id == user_id, Item.last_viewed_at.isnot(None))
+        apply_hidden_from_all_filter(
+            db.query(Item).filter(Item.user_id == user_id, Item.last_viewed_at.isnot(None)),
+            user_id,
+        )
         .order_by(Item.last_viewed_at.desc())
         .limit(safe_limit)
         .all()
@@ -1353,7 +1422,10 @@ def get_items(
 ):
     user_id = get_current_user_id()
     safe_limit = max(1, min(limit, 10000))
-    total_count = db.query(func.count(Item.id)).filter(Item.user_id == user_id).scalar() or 0
+    total_count = apply_hidden_from_all_filter(
+        db.query(Item).filter(Item.user_id == user_id),
+        user_id,
+    ).count()
 
     raw_query = (q or "").strip()
     if raw_query:
@@ -1384,7 +1456,9 @@ def get_items(
                 apply_folder_filter(
                     apply_platform_filter(base_query, platform),
                     folder_scope,
-                    folder_id
+                    folder_id,
+                    user_id=user_id,
+                    exclude_hidden_from_all=True,
                 ),
                 tag_id,
             )
@@ -1420,6 +1494,8 @@ def get_items(
                         ),
                         folder_scope,
                         folder_id,
+                        user_id=user_id,
+                        exclude_hidden_from_all=True,
                     ),
                     tag_id,
                 )
@@ -1442,6 +1518,8 @@ def get_items(
                 apply_platform_filter(db.query(Item).filter(Item.user_id == user_id), platform),
                 folder_scope,
                 folder_id,
+                user_id=user_id,
+                exclude_hidden_from_all=True,
             ),
             tag_id,
         )

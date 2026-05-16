@@ -274,7 +274,12 @@ def ensure_runtime_schema():
             connection.exec_driver_sql(
                 "ALTER TABLE folders ADD COLUMN parent_id VARCHAR REFERENCES folders(id)"
             )
+        if "hidden_from_all" not in folder_columns:
+            connection.exec_driver_sql(
+                "ALTER TABLE folders ADD COLUMN hidden_from_all BOOLEAN NOT NULL DEFAULT 0"
+            )
         connection.exec_driver_sql("CREATE INDEX IF NOT EXISTS idx_folders_parent_id ON folders(parent_id)")
+        connection.exec_driver_sql("CREATE INDEX IF NOT EXISTS idx_folders_hidden_from_all ON folders(hidden_from_all)")
         connection.exec_driver_sql(
             "UPDATE folders SET user_id = ? WHERE user_id IS NULL OR trim(user_id) = ''",
             (DEFAULT_USER_ID,),

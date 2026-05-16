@@ -430,6 +430,7 @@ class FolderResponse(BaseModel):
     name: str
     sort_order: int = 0
     parent_id: Optional[str] = None
+    hidden_from_all: bool = False
     created_at: datetime
     updated_at: datetime
     item_count: int = 0
@@ -452,7 +453,8 @@ class FolderCreateRequest(BaseModel):
 
 
 class FolderUpdateRequest(BaseModel):
-    name: str
+    name: Optional[str] = None
+    hidden_from_all: Optional[bool] = None
 
 
 class FolderMoveRequest(BaseModel):

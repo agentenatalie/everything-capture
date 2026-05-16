@@ -132,6 +132,63 @@
             renderFolderNavigation();
         }
 
+        async function toggleFolderHiddenFromAll(folderId) {
+            const normalizedFolderId = String(folderId || '').trim();
+            const folder = getFolderById(normalizedFolderId);
+            if (!folder) return;
+            closeFolderContextMenu();
+
+            const nextHidden = !Boolean(folder.hidden_from_all);
+            try {
+                const response = await fetch(`/api/folders/${normalizedFolderId}`, {
+                    method: 'PATCH',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ name: folder.name, hidden_from_all: nextHidden }),
+                });
+                const data = await response.json().catch(() => ({}));
+                if (!response.ok) {
+                    throw new Error(getFolderApiErrorMessage(data, '更新文件夹显示状态失败'));
+                }
+                if (data && !Object.prototype.hasOwnProperty.call(data, 'hidden_from_all')) {
+                    throw new Error('后端服务还未加载隐藏文件夹功能，请重启应用后再试');
+                }
+
+                showToast(
+                    nextHidden
+                        ? `已从全部内容隐藏：${folder.name}`
+                        : `已恢复到全部内容：${folder.name}`,
+                    nextHidden ? 'success' : 'info'
+                );
+                await Promise.all([fetchFolders(), fetchItems()]);
+                if (currentView === 'graph') {
+                    _graphLoaded = false;
+                    if (typeof initGraph === 'function') initGraph();
+                }
+            } catch (error) {
+                showToast(error.message, 'error');
+            }
+        }
+
+        function getFolderApiErrorMessage(data, fallback) {
+            const detail = data?.detail;
+            if (!detail) return fallback;
+            if (typeof detail === 'string') return detail;
+            if (Array.isArray(detail)) {
+                const messages = detail.map((entry) => {
+                    if (typeof entry === 'string') return entry;
+                    if (entry && typeof entry === 'object') {
+                        return entry.msg || entry.message || entry.detail || '';
+                    }
+                    return '';
+                }).filter(Boolean);
+                return messages.join('；') || fallback;
+            }
+            if (typeof detail === 'object') {
+                return detail.msg || detail.message || fallback;
+            }
+            return fallback;
+        }
+
         function parseFolderTimestamp(value) {
             const timestamp = Date.parse(value || '');
             return Number.isFinite(timestamp) ? timestamp : 0;
@@ -1410,6 +1467,7 @@
             if (!folder) return;
             const canNest = true;
             const isPinned = isFolderPinned(folderId);
+            const isHiddenFromAll = Boolean(folder.hidden_from_all);
             const pinBtn = `
                 <button type="button" onclick="toggleFolderPin('${folderId}')">
                     <span class="folder-context-menu-icon" aria-hidden="true">
@@ -1418,6 +1476,18 @@
                         </svg>
                     </span>
                     <span class="folder-context-menu-copy">${isPinned ? '取消固定' : '固定在顶部'}</span>
+                </button>
+            `;
+            const hideFromAllBtn = `
+                <button type="button" onclick="toggleFolderHiddenFromAll('${folderId}')">
+                    <span class="folder-context-menu-icon" aria-hidden="true">
+                        <svg viewBox="0 0 24 24" fill="none" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">
+                            ${isHiddenFromAll
+                                ? '<path d="M2.4 12C3.9 7.9 7.3 4.8 12 4.8s8.1 3.1 9.6 7.2c-1.5 4.1-4.9 7.2-9.6 7.2S3.9 16.1 2.4 12Z"></path><path d="M12 14.8a2.8 2.8 0 1 0 0-5.6 2.8 2.8 0 0 0 0 5.6Z"></path>'
+                                : '<path d="M3 3l18 18"></path><path d="M10.6 10.6A2 2 0 0 0 13.4 13.4"></path><path d="M8.5 5.4A9.6 9.6 0 0 1 12 4.8c4.7 0 8.1 3.1 9.6 7.2a11 11 0 0 1-2.3 3.7M6.2 6.9A10.8 10.8 0 0 0 2.4 12c1.5 4.1 4.9 7.2 9.6 7.2 1.5 0 2.9-.3 4.1-.9"></path>'}
+                        </svg>
+                    </span>
+                    <span class="folder-context-menu-copy">${isHiddenFromAll ? '取消隐藏文件夹' : '隐藏文件夹'}</span>
                 </button>
             `;
             const subfolderBtn = canNest ? `
@@ -1432,6 +1502,7 @@
             ` : '';
             folderContextMenu.innerHTML = `
                 ${pinBtn}
+                ${hideFromAllBtn}
                 ${subfolderBtn}
                 <button type="button" onclick="renameFolderPrompt('${folderId}')">
                     <span class="folder-context-menu-icon" aria-hidden="true">

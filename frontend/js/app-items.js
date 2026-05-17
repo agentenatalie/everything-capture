@@ -30,6 +30,11 @@
         let readerLastScrollTop = 0;
         let readerImageLightboxItems = [];
         let readerImageLightboxIndex = -1;
+        let readerImageLightboxZoom = 1;
+        let readerImageLightboxDrag = null;
+        const READER_IMAGE_LIGHTBOX_ZOOM_MIN = 1;
+        const READER_IMAGE_LIGHTBOX_ZOOM_MAX = 5;
+        const READER_IMAGE_LIGHTBOX_ZOOM_STEP = 0.25;
         const readerNavStack = []; // stack of { itemId, sidebarTab } for back-navigation from citations
         let readerNavOrigin = null; // 'askAi' | 'readerAi' | null — where the citation nav started
         let readerScrollTicking = false;
@@ -99,15 +104,184 @@
             setReaderChromeHidden(false);
         }
 
+        function clampReaderImageLightboxZoom(value) {
+            const numericValue = Number(value);
+            if (!Number.isFinite(numericValue)) return 1;
+            return Math.min(READER_IMAGE_LIGHTBOX_ZOOM_MAX, Math.max(READER_IMAGE_LIGHTBOX_ZOOM_MIN, numericValue));
+        }
+
+        function getReaderImageLightboxCanvasPadding() {
+            const canvasStyle = readerImageLightboxCanvas ? window.getComputedStyle(readerImageLightboxCanvas) : null;
+            const left = canvasStyle ? parseFloat(canvasStyle.paddingLeft || 0) : 0;
+            const right = canvasStyle ? parseFloat(canvasStyle.paddingRight || 0) : 0;
+            const top = canvasStyle ? parseFloat(canvasStyle.paddingTop || 0) : 0;
+            const bottom = canvasStyle ? parseFloat(canvasStyle.paddingBottom || 0) : 0;
+            return {
+                left,
+                right,
+                top,
+                bottom,
+                x: left + right,
+                y: top + bottom,
+            };
+        }
+
+        function getReaderImageLightboxAvailableSize() {
+            if (!readerImageLightboxStage) return { width: 0, height: 0 };
+            const stageRect = readerImageLightboxStage.getBoundingClientRect();
+            const padding = getReaderImageLightboxCanvasPadding();
+            return {
+                width: Math.max(180, stageRect.width - padding.x),
+                height: Math.max(180, stageRect.height - padding.y),
+            };
+        }
+
+        function getReaderImageLightboxFitSize() {
+            const naturalWidth = readerImageLightboxImg?.naturalWidth || 0;
+            const naturalHeight = readerImageLightboxImg?.naturalHeight || 0;
+            const available = getReaderImageLightboxAvailableSize();
+            if (!naturalWidth || !naturalHeight || !available.width || !available.height) {
+                return { width: 0, height: 0 };
+            }
+            const fitRatio = Math.min(available.width / naturalWidth, available.height / naturalHeight, 1);
+            return {
+                width: Math.max(1, Math.round(naturalWidth * fitRatio)),
+                height: Math.max(1, Math.round(naturalHeight * fitRatio)),
+            };
+        }
+
+        function updateReaderImageLightboxControls() {
+            const isZoomed = readerImageLightboxZoom > READER_IMAGE_LIGHTBOX_ZOOM_MIN + 0.001;
+            readerImageLightbox?.classList.toggle('is-zoomed', isZoomed);
+            readerImageLightboxStage?.classList.toggle('is-zoomed', isZoomed);
+        }
+
+        function syncReaderImageLightboxImageSize(options = {}) {
+            if (!readerImageLightboxImg) return;
+            const { resetScroll = false, keepCenter = true } = options;
+            const stage = readerImageLightboxStage;
+            const previousCenter = stage && keepCenter
+                ? {
+                    x: (stage.scrollLeft + stage.clientWidth / 2) / Math.max(stage.scrollWidth, 1),
+                    y: (stage.scrollTop + stage.clientHeight / 2) / Math.max(stage.scrollHeight, 1),
+                }
+                : null;
+            const fitSize = getReaderImageLightboxFitSize();
+            if (!fitSize.width || !fitSize.height) {
+                readerImageLightboxImg.style.removeProperty('width');
+                readerImageLightboxImg.style.removeProperty('height');
+                readerImageLightboxCanvas?.style.removeProperty('width');
+                readerImageLightboxCanvas?.style.removeProperty('height');
+                updateReaderImageLightboxControls();
+                return;
+            }
+            const imageWidth = Math.round(fitSize.width * readerImageLightboxZoom);
+            const imageHeight = Math.round(fitSize.height * readerImageLightboxZoom);
+            readerImageLightboxImg.style.width = `${imageWidth}px`;
+            readerImageLightboxImg.style.height = `${imageHeight}px`;
+            if (readerImageLightboxCanvas && stage) {
+                const padding = getReaderImageLightboxCanvasPadding();
+                readerImageLightboxCanvas.style.width = `${Math.max(stage.clientWidth, imageWidth + padding.x)}px`;
+                readerImageLightboxCanvas.style.height = `${Math.max(stage.clientHeight, imageHeight + padding.y)}px`;
+            }
+            updateReaderImageLightboxControls();
+            if (!stage) return;
+            requestAnimationFrame(() => {
+                if (resetScroll || readerImageLightboxZoom <= READER_IMAGE_LIGHTBOX_ZOOM_MIN + 0.001) {
+                    stage.scrollLeft = Math.max(0, (stage.scrollWidth - stage.clientWidth) / 2);
+                    stage.scrollTop = Math.max(0, (stage.scrollHeight - stage.clientHeight) / 2);
+                    return;
+                }
+                if (previousCenter) {
+                    stage.scrollLeft = Math.max(0, previousCenter.x * stage.scrollWidth - stage.clientWidth / 2);
+                    stage.scrollTop = Math.max(0, previousCenter.y * stage.scrollHeight - stage.clientHeight / 2);
+                }
+            });
+        }
+
+        function setReaderImageLightboxZoom(nextZoom, options = {}) {
+            const clampedZoom = clampReaderImageLightboxZoom(nextZoom);
+            if (Math.abs(clampedZoom - readerImageLightboxZoom) < 0.001) {
+                syncReaderImageLightboxImageSize(options);
+                return;
+            }
+            readerImageLightboxZoom = clampedZoom;
+            syncReaderImageLightboxImageSize(options);
+        }
+
+        function adjustReaderImageLightboxZoom(delta) {
+            setReaderImageLightboxZoom(readerImageLightboxZoom + delta);
+        }
+
+        function resetReaderImageLightboxZoom(options = {}) {
+            readerImageLightboxZoom = 1;
+            syncReaderImageLightboxImageSize({ resetScroll: true, ...options });
+        }
+
+        function handleReaderImageLightboxWheel(event) {
+            if (!readerImageLightbox?.classList.contains('is-active')) return;
+            if (!(event.ctrlKey || event.metaKey)) return;
+            event.preventDefault();
+            event.stopPropagation();
+            const zoomFactor = Math.exp(-event.deltaY * 0.002);
+            setReaderImageLightboxZoom(readerImageLightboxZoom * zoomFactor);
+        }
+
+        function handleReaderImageLightboxDoubleClick(event) {
+            if (!readerImageLightbox?.classList.contains('is-active')) return;
+            event.preventDefault();
+            event.stopPropagation();
+            setReaderImageLightboxZoom(
+                readerImageLightboxZoom > 1.01 ? 1 : Math.min(2, READER_IMAGE_LIGHTBOX_ZOOM_MAX),
+                { resetScroll: readerImageLightboxZoom > 1.01 }
+            );
+        }
+
+        function stopReaderImageLightboxDrag() {
+            if (!readerImageLightboxDrag) return;
+            readerImageLightboxDrag = null;
+            readerImageLightbox?.classList.remove('is-panning');
+        }
+
+        function startReaderImageLightboxDrag(event) {
+            if (event.button !== 0 || readerImageLightboxZoom <= 1.001 || !readerImageLightboxStage) return;
+            readerImageLightboxDrag = {
+                pointerId: event.pointerId,
+                x: event.clientX,
+                y: event.clientY,
+                scrollLeft: readerImageLightboxStage.scrollLeft,
+                scrollTop: readerImageLightboxStage.scrollTop,
+            };
+            readerImageLightbox?.classList.add('is-panning');
+            readerImageLightboxImg?.setPointerCapture?.(event.pointerId);
+            event.preventDefault();
+        }
+
+        function moveReaderImageLightboxDrag(event) {
+            if (!readerImageLightboxDrag || !readerImageLightboxStage) return;
+            readerImageLightboxStage.scrollLeft = readerImageLightboxDrag.scrollLeft - (event.clientX - readerImageLightboxDrag.x);
+            readerImageLightboxStage.scrollTop = readerImageLightboxDrag.scrollTop - (event.clientY - readerImageLightboxDrag.y);
+            event.preventDefault();
+        }
+
         function closeReaderImageLightbox() {
             if (!readerImageLightbox?.classList.contains('is-active')) return false;
             readerImageLightbox.classList.remove('is-active');
             readerImageLightbox.setAttribute('aria-hidden', 'true');
             readerImageLightboxItems = [];
             readerImageLightboxIndex = -1;
+            stopReaderImageLightboxDrag();
+            readerImageLightboxZoom = 1;
+            updateReaderImageLightboxControls();
             if (readerImageLightboxImg) {
                 readerImageLightboxImg.removeAttribute('src');
                 readerImageLightboxImg.alt = '';
+                readerImageLightboxImg.style.removeProperty('width');
+                readerImageLightboxImg.style.removeProperty('height');
+            }
+            if (readerImageLightboxCanvas) {
+                readerImageLightboxCanvas.style.removeProperty('width');
+                readerImageLightboxCanvas.style.removeProperty('height');
             }
             return true;
         }
@@ -121,8 +295,15 @@
             const normalizedIndex = (index + readerImageLightboxItems.length) % readerImageLightboxItems.length;
             const item = readerImageLightboxItems[normalizedIndex];
             readerImageLightboxIndex = normalizedIndex;
+            readerImageLightboxZoom = 1;
+            readerImageLightboxImg.style.removeProperty('width');
+            readerImageLightboxImg.style.removeProperty('height');
+            readerImageLightboxCanvas?.style.removeProperty('width');
+            readerImageLightboxCanvas?.style.removeProperty('height');
             readerImageLightboxImg.src = item.src;
             readerImageLightboxImg.alt = item.alt || '';
+            updateReaderImageLightboxControls();
+            requestAnimationFrame(() => syncReaderImageLightboxImageSize({ resetScroll: true, keepCenter: false }));
         }
 
         function moveReaderImageLightbox(direction) {
@@ -152,6 +333,7 @@
             readerImageLightbox.classList.add('is-active');
             readerImageLightbox.setAttribute('aria-hidden', 'false');
             setReaderChromeHidden(false);
+            requestAnimationFrame(() => syncReaderImageLightboxImageSize({ resetScroll: true, keepCenter: false }));
             closeReaderImageLightboxBtn?.focus?.({ preventScroll: true });
         }
 
@@ -163,6 +345,18 @@
             }
             if (event.key === 'ArrowLeft') {
                 moveReaderImageLightbox(-1);
+                return true;
+            }
+            if (event.key === '+' || event.key === '=') {
+                adjustReaderImageLightboxZoom(READER_IMAGE_LIGHTBOX_ZOOM_STEP);
+                return true;
+            }
+            if (event.key === '-' || event.key === '_') {
+                adjustReaderImageLightboxZoom(-READER_IMAGE_LIGHTBOX_ZOOM_STEP);
+                return true;
+            }
+            if (event.key === '0') {
+                resetReaderImageLightboxZoom();
                 return true;
             }
             if (event.key === 'Escape') {
@@ -3244,7 +3438,24 @@
         };
         readerImageLightboxBackdrop?.addEventListener('click', closeReaderImageLightbox);
         closeReaderImageLightboxBtn?.addEventListener('click', closeReaderImageLightbox);
-        readerImageLightboxImg?.addEventListener('click', closeReaderImageLightbox);
+        readerImageLightboxStage?.addEventListener('click', (event) => {
+            if (event.target === readerImageLightboxStage || event.target === readerImageLightboxCanvas) {
+                closeReaderImageLightbox();
+            }
+        });
+        readerImageLightboxStage?.addEventListener('wheel', handleReaderImageLightboxWheel, { passive: false });
+        readerImageLightboxImg?.addEventListener('load', () => syncReaderImageLightboxImageSize({ resetScroll: true, keepCenter: false }));
+        readerImageLightboxImg?.addEventListener('click', (event) => event.stopPropagation());
+        readerImageLightboxImg?.addEventListener('dblclick', handleReaderImageLightboxDoubleClick);
+        readerImageLightboxImg?.addEventListener('pointerdown', startReaderImageLightboxDrag);
+        readerImageLightboxImg?.addEventListener('pointermove', moveReaderImageLightboxDrag);
+        readerImageLightboxImg?.addEventListener('pointerup', stopReaderImageLightboxDrag);
+        readerImageLightboxImg?.addEventListener('pointercancel', stopReaderImageLightboxDrag);
+        window.addEventListener('resize', () => {
+            if (readerImageLightbox?.classList.contains('is-active')) {
+                syncReaderImageLightboxImageSize();
+            }
+        });
         modalContent?.addEventListener('click', (event) => {
             const image = event.target?.closest?.('img');
             if (!image || !modalContent.contains(image) || modalContent.classList.contains('is-content-editable')) return;

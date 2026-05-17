@@ -2064,7 +2064,6 @@
             z-index: 60;
             display: grid;
             place-items: center;
-            padding: 22px;
             contain: layout paint style;
             opacity: 0;
             pointer-events: none;
@@ -2090,35 +2089,54 @@
         .reader-image-lightbox-stage {
             position: relative;
             z-index: 1;
-            display: inline-flex;
-            align-items: flex-start;
-            justify-content: center;
-            max-width: min(100%, 1280px);
-            max-height: calc(100% - 8px);
-            border-radius: 14px;
+            width: 100%;
+            height: 100%;
             background: transparent;
-            overflow: visible;
+            overflow: auto;
+            overscroll-behavior: contain;
+            scrollbar-gutter: stable both-edges;
+            touch-action: pan-x pan-y;
+        }
+
+        .reader-image-lightbox-canvas {
+            position: relative;
+            min-width: 100%;
+            min-height: 100%;
+            box-sizing: border-box;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 24px 72px;
         }
 
         .reader-image-lightbox-stage img {
             display: block;
-            width: auto;
-            height: auto;
-            max-width: min(100%, 1280px);
-            max-height: min(calc(100vh - 112px), 920px);
+            flex: 0 0 auto;
+            max-width: none;
+            max-height: none;
             object-fit: contain;
             border-radius: 14px;
             background: #ffffff;
             box-shadow:
                 0 22px 48px -30px rgba(15, 23, 42, 0.42),
                 0 0 0 1px rgba(203, 213, 225, 0.8);
-            cursor: zoom-out;
+            cursor: zoom-in;
+            user-select: none;
+            -webkit-user-drag: none;
+        }
+
+        .reader-image-lightbox.is-zoomed .reader-image-lightbox-stage img {
+            cursor: grab;
+        }
+
+        .reader-image-lightbox.is-panning .reader-image-lightbox-stage img {
+            cursor: grabbing;
         }
 
         .reader-image-lightbox-close {
             position: absolute;
-            top: 10px;
-            right: 10px;
+            top: 34px;
+            right: 34px;
             z-index: 2;
             width: 34px;
             height: 34px;
@@ -2137,6 +2155,17 @@
             background: #ffffff;
             color: #0f172a;
             outline: none;
+        }
+
+        @media (max-width: 720px) {
+            .reader-image-lightbox-canvas {
+                padding: 18px 16px 88px;
+            }
+
+            .reader-image-lightbox-close {
+                top: 18px;
+                right: 18px;
+            }
         }
 
         .modal-overlay.active .modal {

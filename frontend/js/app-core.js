@@ -17,6 +17,8 @@
         const modalFooter = document.getElementById('modalFooter');
         const readerImageLightbox = document.getElementById('readerImageLightbox');
         const readerImageLightboxBackdrop = document.getElementById('readerImageLightboxBackdrop');
+        const readerImageLightboxStage = document.querySelector('.reader-image-lightbox-stage');
+        const readerImageLightboxCanvas = document.getElementById('readerImageLightboxCanvas');
         const readerImageLightboxImg = document.getElementById('readerImageLightboxImg');
         const closeReaderImageLightboxBtn = document.getElementById('closeReaderImageLightbox');
         const readerStatusDots = document.getElementById('readerStatusDots');

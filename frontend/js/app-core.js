@@ -48,6 +48,7 @@
         const platformFilterValue = document.getElementById('platformFilterValue');
         const tagFilterValue = document.getElementById('tagFilterValue');
         const recentViewsSection = document.getElementById('recentViewsSection');
+        const boardToolbar = document.querySelector('.board-toolbar');
         const galleryViewBtn = document.getElementById('galleryViewBtn');
         const listViewBtn = document.getElementById('listViewBtn');
         const graphViewBtn = document.getElementById('graphViewBtn');
@@ -56,6 +57,7 @@
         const graphTooltip = document.getElementById('graphTooltip');
         const folderList = document.getElementById('folderList');
         const folderMobileStrip = document.getElementById('folderMobileStrip');
+        const todaySection = document.getElementById('todaySection');
         const createFolderBtn = document.getElementById('createFolderBtn');
         const folderSearchInput = document.getElementById('folderSearchInput');
         const boardShell = document.getElementById('boardShell');
@@ -207,6 +209,7 @@
         }
 
         let itemsData = [];
+        let currentBoardPage = 'library';
         let currentView = 'gallery';
         let filteredEntries = [];
         let commandSearchResults = [];

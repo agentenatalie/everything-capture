@@ -255,6 +255,39 @@ class AiRelatedNotesResponse(BaseModel):
     note_count: int = 0
 
 
+class AiDashboardRecommendation(BaseModel):
+    item: ItemResponse
+    reason: str
+    topic: str
+    score: float = 0.0
+    action_label: str = "打开"
+
+
+class AiDashboardTopic(BaseModel):
+    label: str
+    count: int
+    item_ids: list[str] = Field(default_factory=list)
+    description: str = ""
+    reason: str = ""
+    unread_count: int = 0
+    priority_item_ids: list[str] = Field(default_factory=list)
+
+
+class AiDashboardStats(BaseModel):
+    total_count: int = 0
+    unread_count: int = 0
+    unfiled_count: int = 0
+    untagged_count: int = 0
+    low_priority_count: int = 0
+
+
+class AiDashboardResponse(BaseModel):
+    generated_at: datetime
+    recommendations: list[AiDashboardRecommendation] = Field(default_factory=list)
+    topics: list[AiDashboardTopic] = Field(default_factory=list)
+    stats: AiDashboardStats = Field(default_factory=AiDashboardStats)
+
+
 class AiConversationMessage(BaseModel):
     role: str
     content: str

@@ -223,6 +223,190 @@ class AiRouteTests(unittest.TestCase):
         self.assertEqual(response.citations[1].reference_index, 2)
         self.assertFalse(response.insufficient_context)
 
+    def test_dashboard_returns_curated_unread_recommendations(self) -> None:
+        with self.Session() as db:
+            tag = Tag(id="tag-ai-agent", user_id="local-default-user", name="AI Agent")
+            db.add(tag)
+            db.add(ItemTagLink(item_id="item-ai", tag_id=tag.id, source="ai"))
+            db.add(
+                Item(
+                    id="item-read",
+                    user_id="local-default-user",
+                    workspace_id="local-default-workspace",
+                    title="已经读过的普通内容",
+                    source_url="https://example.com/read",
+                    canonical_text="短内容",
+                    extracted_text="短内容",
+                    platform="generic",
+                    status="ready",
+                    parse_status="completed",
+                    last_viewed_at=datetime.utcnow(),
+                )
+            )
+            db.commit()
+
+            with patch.object(ai_router, "get_current_user_id", return_value="local-default-user"):
+                response = ai_router.get_ai_dashboard(limit=3, db=db)
+
+        self.assertGreaterEqual(len(response.recommendations), 1)
+        self.assertEqual(response.recommendations[0].item.id, "item-ai")
+        self.assertEqual(response.recommendations[0].topic, "今日 10 篇")
+        self.assertIn("还没打开过", response.recommendations[0].reason)
+        self.assertGreaterEqual(response.stats.unread_count, 1)
+        self.assertTrue(any(topic.label == "今日 10 篇" for topic in response.topics))
+        self.assertTrue(any(topic.description for topic in response.topics))
+
+    def test_dashboard_groups_items_by_reusable_content_themes(self) -> None:
+        with self.Session() as db:
+            tag_system = Tag(id="tag-system-design", user_id="local-default-user", name="系统设计")
+            tag_checklist = Tag(id="tag-checklist", user_id="local-default-user", name="操作清单")
+            tag_tool = Tag(id="tag-tool-resource", user_id="local-default-user", name="工具资源")
+            tag_design = Tag(id="tag-design-ref", user_id="local-default-user", name="UI/UX 设计参考")
+            db.add_all([tag_system, tag_checklist, tag_tool, tag_design])
+            db.add_all(
+                [
+                    Item(
+                        id="item-deep",
+                        user_id="local-default-user",
+                        workspace_id="local-default-workspace",
+                        title="一篇值得精读的系统设计深度解析",
+                        source_url="https://example.com/deep",
+                        canonical_text="深度研究报告。" * 900,
+                        platform="generic",
+                        status="ready",
+                        parse_status="completed",
+                    ),
+                    Item(
+                        id="item-action",
+                        user_id="local-default-user",
+                        workspace_id="local-default-workspace",
+                        title="可以马上用的操作清单",
+                        source_url="https://example.com/action",
+                        canonical_text="这是一份教程、步骤和 checklist。",
+                        platform="generic",
+                        status="ready",
+                        parse_status="completed",
+                    ),
+                    Item(
+                        id="item-tool",
+                        user_id="local-default-user",
+                        workspace_id="local-default-workspace",
+                        title="GitHub 工具项目",
+                        source_url="https://github.com/example/tool",
+                        canonical_text="一个开源工具和 API 文档。",
+                        platform="github",
+                        status="ready",
+                        parse_status="completed",
+                    ),
+                    Item(
+                        id="item-design-ref",
+                        user_id="local-default-user",
+                        workspace_id="local-default-workspace",
+                        title="卡通形象 UI 参考",
+                        source_url="https://example.com/design-ref",
+                        canonical_text="一组可以以后做 UI/UX 时复用的卡通形象和视觉参考。",
+                        platform="generic",
+                        status="ready",
+                        parse_status="completed",
+                    ),
+                    Item(
+                        id="item-case",
+                        user_id="local-default-user",
+                        workspace_id="local-default-workspace",
+                        title="产品案例研究复盘",
+                        source_url="https://example.com/case",
+                        canonical_text="这是一篇适合继续精读的产品案例研究复盘。" * 220,
+                        platform="generic",
+                        status="ready",
+                        parse_status="completed",
+                    ),
+                    Item(
+                        id="item-low",
+                        user_id="local-default-user",
+                        workspace_id="local-default-workspace",
+                        title="限时优惠领取",
+                        source_url="https://example.com/coupon",
+                        canonical_text="coupon",
+                        platform="generic",
+                        status="ready",
+                        parse_status="completed",
+                        last_viewed_at=datetime.utcnow(),
+                    ),
+                ]
+            )
+            db.add_all(
+                [
+                    ItemTagLink(item_id="item-deep", tag_id=tag_system.id, source="ai"),
+                    ItemTagLink(item_id="item-action", tag_id=tag_checklist.id, source="ai"),
+                    ItemTagLink(item_id="item-tool", tag_id=tag_tool.id, source="ai"),
+                    ItemTagLink(item_id="item-design-ref", tag_id=tag_design.id, source="ai"),
+                ]
+            )
+            for index in range(4):
+                db.add(
+                    Item(
+                        id=f"item-extra-read-{index}",
+                        user_id="local-default-user",
+                        workspace_id="local-default-workspace",
+                        title=f"额外研究内容 {index}",
+                        source_url=f"https://example.com/extra-read-{index}",
+                        canonical_text="这是一篇适合继续阅读吸收的研究内容。" * 220,
+                        platform="generic",
+                        status="ready",
+                        parse_status="completed",
+                    )
+                )
+            db.commit()
+
+            with patch.object(ai_router, "get_current_user_id", return_value="local-default-user"):
+                response = ai_router.get_ai_dashboard(limit=3, db=db)
+
+        labels = {topic.label for topic in response.topics}
+        self.assertIn("今日 10 篇", labels)
+        self.assertIn("继续精读", labels)
+        self.assertIn("工具备查", labels)
+        self.assertIn("可复用参考", labels)
+        self.assertNotIn("值得精读", labels)
+        self.assertNotIn("可以马上用", labels)
+        self.assertNotIn("待整理", labels)
+        self.assertGreaterEqual(response.stats.low_priority_count, 1)
+
+    def test_dashboard_topic_item_ids_are_not_truncated(self) -> None:
+        with self.Session() as db:
+            tag = Tag(id="tag-research-report", user_id="local-default-user", name="研究报告")
+            db.add(tag)
+            for index in range(30):
+                db.add(
+                    Item(
+                        id=f"item-deep-{index}",
+                        user_id="local-default-user",
+                        workspace_id="local-default-workspace",
+                        title=f"深度研究报告 {index}",
+                        source_url=f"https://example.com/deep-{index}",
+                        canonical_text="这是一篇值得精读的研究报告。" * 220,
+                        platform="generic",
+                        status="ready",
+                        parse_status="completed",
+                    )
+                )
+                db.add(ItemTagLink(item_id=f"item-deep-{index}", tag_id=tag.id, source="ai"))
+            db.commit()
+
+            with patch.object(ai_router, "get_current_user_id", return_value="local-default-user"):
+                response = ai_router.get_ai_dashboard(limit=6, db=db)
+
+        daily_topic = next(topic for topic in response.topics if topic.label == "今日 10 篇")
+        read_topic = next(topic for topic in response.topics if topic.label == "继续精读")
+        self.assertLessEqual(len(response.recommendations), 10)
+        self.assertLessEqual(len(daily_topic.item_ids), 10)
+        self.assertGreaterEqual(len(read_topic.item_ids), 24)
+        deep_item_ids = {
+            item_id
+            for item_id in [*daily_topic.item_ids, *read_topic.item_ids]
+            if item_id.startswith("item-deep-")
+        }
+        self.assertGreaterEqual(len(deep_item_ids), 30)
+
     def test_assistant_chat_backfills_missing_title_level_citation_markers(self) -> None:
         request = AiAssistantRequest(
             mode="chat",

@@ -359,9 +359,11 @@
                 expandFolderAncestors(folderId);
                 markFoldersRecentlyUsed([folderId], { render: false });
             }
+            currentBoardPage = 'library';
             currentFolderScope = scope;
             currentFolderId = scope === 'folder' ? folderId : null;
             renderFolderNavigation();
+            if (typeof syncBoardPageState === 'function') syncBoardPageState();
             fetchItems();
             // Reload graph if graph view is active
             if (currentView === 'graph') {
@@ -395,6 +397,10 @@
         }
 
         function handleFolderNavActivate(scope, folderId = null) {
+            if (scope === 'ai-dashboard') {
+                if (typeof openAiDashboardPage === 'function') openAiDashboardPage();
+                return;
+            }
             if (scope !== 'folder' || !folderId) {
                 setActiveFolder(scope, folderId);
                 return;
@@ -428,9 +434,13 @@
         }
 
         function renderFolderNavItem(label, scope, count, folderId = null, options = {}) {
-            const active = currentFolderScope === scope && (scope !== 'folder' || currentFolderId === folderId);
+            const active = scope === 'ai-dashboard'
+                ? currentBoardPage === 'ai-dashboard' || currentBoardPage === 'ai-topic'
+                : currentBoardPage === 'library' && currentFolderScope === scope && (scope !== 'folder' || currentFolderId === folderId);
             const isMainFolder = scope === 'folder' && (options.level || 0) === 0 && Boolean(options.hasChildren);
-            const scopeClass = scope === 'favorites'
+            const scopeClass = scope === 'ai-dashboard'
+                ? ' is-ai-dashboard-scope'
+                : scope === 'favorites'
                 ? ' is-favorites-scope'
                 : (scope === 'unread' ? ' is-unread-scope' : '');
             const menuButton = options.menu
@@ -443,11 +453,14 @@
             const dragAttrs = scope === 'folder'
                 ? ` draggable="true" data-folder-id="${folderId}" data-folder-scope="${scope}" ondragstart="handleFolderDragStart(event, '${folderId}')" ondragend="handleFolderDragEnd()" ondragover="handleFolderDragOver(event, '${folderId}')" ondragleave="handleFolderDragLeave(event, '${folderId}')" ondrop="handleFolderDrop(event, '${folderId}')"`
                 : ` data-folder-scope="${scope}"`;
+            const countMarkup = count === null || typeof count === 'undefined'
+                ? ''
+                : `<span class="folder-item-count">${count}</span>`;
             return `
                 <div class="folder-item${scopeClass}${active ? ' active' : ''}${isMainFolder ? ' is-main-folder' : ''}" role="button" tabindex="0" title="${escapeAttribute(label)}" style="${indent ? `padding-left:${12 + indent}px` : ''}" onclick="handleFolderNavActivate('${scope}', ${folderId ? `'${folderId}'` : 'null'})" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();handleFolderNavActivate('${scope}', ${folderId ? `'${folderId}'` : 'null'});}"${dragAttrs}${contextMenuAttr}>
                     <span class="folder-item-glyph" aria-hidden="true"><span>${escapeHtml(glyph)}</span></span>
                     <span class="folder-item-name">${escapeHtml(label)}</span>
-                    <span class="folder-item-count">${count}</span>
+                    ${countMarkup}
                     ${menuButton}
                 </div>
             `;
@@ -494,6 +507,7 @@
         }
 
         function getFolderGlyph(label, scope) {
+            if (scope === 'ai-dashboard') return 'AI';
             if (scope === 'all') return '全';
             if (scope === 'favorites') return '藏';
             if (scope === 'unread') return '未';
@@ -510,6 +524,7 @@
                 createFolderUsageTimestampGetter(foldersData)
             );
             const allItems = [
+                { label: 'AI 整理', scope: 'ai-dashboard', count: null, _level: 0, _hasChildren: false },
                 { label: '全部内容', scope: 'all', count: totalFolderCount, _level: 0, _hasChildren: false },
                 { label: '收藏夹', scope: 'favorites', count: favoriteFolderCount, _level: 0, _hasChildren: false },
                 { label: '未读', scope: 'unread', count: unreadFolderCount, _level: 0, _hasChildren: false },
@@ -573,6 +588,8 @@
             }
             tagFilter.value = currentTagId || '';
             if (typeof syncToolbarFilterLabels === 'function') syncToolbarFilterLabels();
+            currentBoardPage = 'library';
+            if (typeof syncBoardPageState === 'function') syncBoardPageState();
             renderFolderNavigation();
             fetchItems();
         }

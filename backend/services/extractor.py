@@ -93,6 +93,7 @@ _PLATFORM_RULES: list[tuple[str, list[str]]] = [
     ("zhihu", ["zhuanlan.zhihu.com"]),
     ("wechat", ["mp.weixin.qq.com", "weixin.qq.com"]),
     ("twitter", ["twitter.com", "x.com", "t.co"]),
+    ("dribbble", ["dribbble.com"]),
 ]
 
 
@@ -1559,6 +1560,628 @@ async def extract_zhihu(url: str) -> ExtractResult | None:
     page_result = _parse_zhihu_page_html(html, final_url or url)
     if page_result and not _looks_like_zhihu_guard_result(page_result):
         return page_result
+
+    return None
+
+
+# ---------------------------------------------------------------------------
+# Dribbble 提取器
+# ---------------------------------------------------------------------------
+
+_DRIBBBLE_SHOT_PATH_PATTERN = re.compile(r"^/shots/(?P<id>\d+)(?:[-/].*)?$", re.IGNORECASE)
+_DRIBBBLE_GUARD_TEXT_MARKERS = (
+    "AwsWafIntegration",
+    "awsWafCookieDomainList",
+    "x-amzn-waf-action",
+    "Max challenge attempts exceeded",
+    "JavaScript is disabled",
+    "we need to verify that you're not a robot",
+)
+
+
+def _extract_dribbble_shot_id(url: str | None) -> str:
+    value = str(url or "").strip()
+    if not value:
+        return ""
+    try:
+        parsed = urlparse(value)
+    except Exception:
+        return ""
+    host = (parsed.hostname or "").lower()
+    if host != "dribbble.com" and not host.endswith(".dribbble.com"):
+        return ""
+    match = _DRIBBBLE_SHOT_PATH_PATTERN.match(parsed.path or "")
+    return match.group("id") if match else ""
+
+
+def _is_dribbble_waf_challenge(status_code: int, headers: httpx.Headers | dict | None, html: str | None) -> bool:
+    header_map = headers or {}
+    try:
+        waf_action = str(header_map.get("x-amzn-waf-action") or "").strip().lower()
+    except Exception:
+        waf_action = ""
+    if waf_action == "challenge":
+        return True
+    if status_code == 202 and waf_action:
+        return True
+    body = str(html or "")
+    return any(marker in body for marker in _DRIBBBLE_GUARD_TEXT_MARKERS)
+
+
+def _looks_like_dribbble_guard_result(result: ExtractResult | None) -> bool:
+    if not result:
+        return False
+    body = f"{result.title}\n{result.text}\n{result.final_url}"
+    return any(marker in body for marker in _DRIBBBLE_GUARD_TEXT_MARKERS)
+
+
+def _normalize_dribbble_title(value: str | None) -> str:
+    title = re.sub(r"\s+", " ", str(value or "")).strip()
+    title = re.sub(r"\s+by\s+.+?\s+on\s+Dribbble\s*$", "", title, flags=re.IGNORECASE)
+    title = re.sub(r"\s*[-|｜]\s*Dribbble\s*$", "", title, flags=re.IGNORECASE)
+    return title[:200]
+
+
+def _extract_dribbble_author_from_title(value: str | None) -> str:
+    match = re.search(r"\s+by\s+(.+?)\s+on\s+Dribbble\s*$", str(value or ""), flags=re.IGNORECASE)
+    return re.sub(r"\s+", " ", match.group(1)).strip()[:120] if match else ""
+
+
+def _html_fragment_to_text(value: str | None) -> str:
+    fragment = str(value or "").strip()
+    if not fragment:
+        return ""
+    text = BeautifulSoup(fragment, "html.parser").get_text("\n", strip=True)
+    return _clean_text(text)
+
+
+def _is_dribbble_media_url(url: str) -> bool:
+    normalized = _normalize_media_url(url)
+    if not normalized:
+        return False
+    parsed = urlparse(normalized)
+    host = (parsed.hostname or "").lower()
+    path = (parsed.path or "").lower()
+    if (
+        host != "cdn.dribbble.com"
+        and host != "d13yacurqjgara.cloudfront.net"
+        and not host.endswith(".dribbble.com")
+    ):
+        return False
+    if any(token in path for token in ("/avatars/", "/assets/", "/images/", "/badges/")):
+        return False
+    return any(token in path for token in ("/screenshots/", "/userupload/", "/videos/", "/attachments/"))
+
+
+def _dribbble_media_type(url: str) -> str:
+    path = urlparse(url).path.lower()
+    if path.endswith((".mp4", ".webm", ".mov")) or "/videos/" in path:
+        return "video"
+    return "image"
+
+
+def _append_unique_dribbble_media(
+    media_urls: list[dict],
+    seen: set[str],
+    url: str,
+    media_type: str | None = None,
+) -> None:
+    normalized = _normalize_media_url(html_lib.unescape(str(url or "")))
+    if not normalized or normalized in seen or not _is_dribbble_media_url(normalized):
+        return
+    seen.add(normalized)
+    media_urls.append(
+        {
+            "type": media_type or _dribbble_media_type(normalized),
+            "url": normalized,
+            "order": len(media_urls),
+            "inline_position": -1.0,
+        }
+    )
+
+
+def _best_srcset_url(srcset: str | None, base_url: str = "") -> str:
+    parts = [part.strip().split()[0] for part in str(srcset or "").split(",") if part.strip()]
+    for candidate in reversed(parts):
+        normalized = _normalize_media_url(candidate, base_url=base_url)
+        if normalized:
+            return normalized
+    return ""
+
+
+def _extract_dribbble_palette(soup: BeautifulSoup) -> list[str]:
+    colors: list[str] = []
+    seen: set[str] = set()
+    candidates = soup.select(
+        "a[href*='/colors/'], a[href*='color='], [data-color], "
+        ".shot-colors *, .shot-details-colors *, .color, .color-chip"
+    )
+    for node in candidates:
+        values = [
+            node.get_text(" ", strip=True),
+            node.get("href", ""),
+            node.get("title", ""),
+            node.get("aria-label", ""),
+            node.get("style", ""),
+            node.get("data-color", ""),
+        ]
+        for value in values:
+            for match in re.finditer(r"#?[0-9A-Fa-f]{6}\b", str(value or "")):
+                color = match.group(0).upper()
+                if not color.startswith("#"):
+                    color = f"#{color}"
+                if color not in seen:
+                    seen.add(color)
+                    colors.append(color)
+    return colors[:12]
+
+
+def _extract_dribbble_tags(soup: BeautifulSoup) -> list[str]:
+    tags: list[str] = []
+    seen: set[str] = set()
+    for node in soup.select("a[href*='/tags/'], a[href*='tags=']"):
+        text = re.sub(r"\s+", " ", node.get_text(" ", strip=True)).strip().strip("#")
+        if not text or len(text) > 40:
+            continue
+        key = text.lower()
+        if key not in seen:
+            seen.add(key)
+            tags.append(text)
+    return tags[:20]
+
+
+def _extract_dribbble_media_from_html(soup: BeautifulSoup, html: str, final_url: str) -> list[dict] | None:
+    media_urls: list[dict] = []
+    seen: set[str] = set()
+
+    for prop in ("og:image", "og:image:url", "twitter:image", "twitter:image:src", "image"):
+        _append_unique_dribbble_media(media_urls, seen, _html_meta(soup, prop) or "", "image")
+
+    for prop in ("og:video", "og:video:url", "og:video:secure_url", "twitter:player:stream"):
+        _append_unique_dribbble_media(media_urls, seen, _html_meta(soup, prop) or "", "video")
+
+    likely_media_nodes = soup.select(
+        ".shot-media img, .shot-media video, .shot-media source, "
+        ".shot-image img, .shot-image video, .shot-image source, "
+        ".shot-content img, .shot-content video, .shot-content source, "
+        "[data-shot-media] img, [data-shot-media] video, [data-shot-media] source, "
+        "main picture img, main video, main source"
+    )
+    for node in likely_media_nodes:
+        src = (
+            node.get("src", "")
+            or node.get("data-src", "")
+            or node.get("data-original", "")
+            or _best_srcset_url(node.get("srcset", ""), base_url=final_url)
+        )
+        _append_unique_dribbble_media(media_urls, seen, _normalize_media_url(src, base_url=final_url))
+
+    if not media_urls:
+        for match in re.finditer(
+            r"https:\\?/\\?/(?:cdn\.dribbble\.com|d13yacurqjgara\.cloudfront\.net)[^\"'\\<>\s]+",
+            html,
+        ):
+            candidate = match.group(0).replace("\\/", "/")
+            _append_unique_dribbble_media(media_urls, seen, candidate)
+            if len(media_urls) >= 4:
+                break
+
+    return media_urls or None
+
+
+def _build_dribbble_text(
+    title: str,
+    author: str = "",
+    description: str = "",
+    palette: list[str] | None = None,
+    tags: list[str] | None = None,
+) -> str:
+    parts: list[str] = []
+    if title:
+        parts.append(title)
+    if author:
+        parts.append(f"作者：{author}")
+    if description and description != title:
+        parts.append(description)
+    if palette:
+        parts.append("色板：" + " ".join(palette))
+    if tags:
+        parts.append("标签：" + " ".join(f"#{tag}" for tag in tags if tag))
+    return _clean_text("\n\n".join(part for part in parts if part))
+
+
+def _build_dribbble_content_html(media_urls: list[dict] | None, text: str) -> str | None:
+    parts: list[str] = []
+    for media in media_urls or []:
+        media_url = str(media.get("url") or "").strip()
+        if not media_url:
+            continue
+        safe_url = html_lib.escape(media_url, quote=True)
+        if media.get("type") == "video":
+            parts.append(f'<figure><video src="{safe_url}" controls="controls"></video></figure>')
+        else:
+            parts.append(f'<figure><img src="{safe_url}" alt="" /></figure>')
+
+    for paragraph in [segment.strip() for segment in re.split(r"\n{2,}", text or "") if segment.strip()]:
+        safe_text = html_lib.escape(paragraph).replace("\n", "<br />")
+        parts.append(f"<p>{safe_text}</p>")
+
+    html_fragment = "\n".join(parts).strip()
+    return html_fragment or None
+
+
+def _build_dribbble_content_blocks(media_urls: list[dict] | None, text: str) -> list[dict] | None:
+    blocks: list[dict] = []
+    for media in media_urls or []:
+        media_type = media.get("type")
+        media_url = media.get("url")
+        if media_type in {"image", "video"} and media_url:
+            blocks.append({"type": media_type, "url": media_url})
+    if text:
+        blocks.append({"type": "text", "content": text})
+    return blocks or None
+
+
+def _parse_dribbble_page_html(html: str | None, final_url: str) -> ExtractResult | None:
+    body = str(html or "")
+    if not body or _is_dribbble_waf_challenge(0, {}, body):
+        return None
+
+    soup = BeautifulSoup(body, "lxml")
+    raw_title = (
+        _html_meta(soup, "og:title")
+        or _html_meta(soup, "twitter:title")
+        or (soup.title.string if soup.title and soup.title.string else "")
+        or ""
+    )
+    h1_title = soup.find("h1")
+    title = (
+        _normalize_dribbble_title(h1_title.get_text(" ", strip=True) if h1_title else "")
+        or _normalize_dribbble_title(raw_title)
+        or "Dribbble Shot"
+    )
+    author = (
+        _extract_dribbble_author_from_title(raw_title)
+        or (_html_meta(soup, "author") or "")
+        or (_html_meta(soup, "twitter:creator") or "").lstrip("@")
+    )
+    if not author:
+        author_node = soup.select_one("[rel='author'], .shot-user-link, .shot-user-name, .user-information a")
+        if author_node:
+            author = re.sub(r"\s+", " ", author_node.get_text(" ", strip=True)).strip()
+
+    description_node = soup.select_one(
+        ".shot-description, .shot-desc, .shot-details, [data-shot-description], .description"
+    )
+    description = _clean_text(description_node.get_text("\n", strip=True)) if description_node else ""
+    if not description:
+        description = (
+            _html_meta(soup, "og:description")
+            or _html_meta(soup, "twitter:description")
+            or _html_meta(soup, "description")
+            or ""
+        )
+        description = _html_fragment_to_text(description)
+
+    palette = _extract_dribbble_palette(soup)
+    tags = _extract_dribbble_tags(soup)
+    media_urls = _extract_dribbble_media_from_html(soup, body, final_url)
+    text = _build_dribbble_text(title, author=author, description=description, palette=palette, tags=tags)
+
+    if not text and not media_urls:
+        return None
+
+    return ExtractResult(
+        title=title,
+        text=text or title,
+        platform="dribbble",
+        final_url=final_url,
+        media_urls=media_urls,
+        content_blocks=_build_dribbble_content_blocks(media_urls, text or title),
+        content_html=_build_dribbble_content_html(media_urls, text or title),
+    )
+
+
+def _first_dribbble_reader_heading(markdown: str) -> str:
+    for line in str(markdown or "").splitlines():
+        candidate = line.strip()
+        if candidate.startswith("# "):
+            return candidate.lstrip("#").strip()
+    return ""
+
+
+def _extract_dribbble_reader_palette(markdown: str) -> list[str]:
+    colors: list[str] = []
+    seen: set[str] = set()
+    for match in re.finditer(r"\[#?([0-9A-Fa-f]{6})\]\(https?://dribbble\.com/shots\?color=", markdown):
+        color = f"#{match.group(1).upper()}"
+        if color not in seen:
+            seen.add(color)
+            colors.append(color)
+    return colors[:12]
+
+
+def _extract_dribbble_reader_media(markdown: str) -> list[dict] | None:
+    media_urls: list[dict] = []
+    seen: set[str] = set()
+    for match in re.finditer(r"!\[[^\]]*\]\((https?://[^)]+)\)", markdown):
+        _append_unique_dribbble_media(media_urls, seen, match.group(1))
+        if media_urls:
+            break
+    return media_urls or None
+
+
+def _extract_dribbble_reader_description(markdown: str, media_urls: list[dict] | None) -> str:
+    source = str(markdown or "")
+    start = 0
+    if media_urls:
+        media_url = str(media_urls[0].get("url") or "")
+        if media_url:
+            idx = source.find(media_url)
+            if idx != -1:
+                newline_idx = source.find("\n", idx)
+                start = newline_idx + 1 if newline_idx != -1 else idx + len(media_url)
+
+    lines: list[str] = []
+    for raw_line in source[start:].splitlines():
+        line = raw_line.strip()
+        if not line:
+            if lines:
+                break
+            continue
+        if line.startswith("[![") or line.startswith("!["):
+            if lines:
+                break
+            continue
+        if line.startswith("#### ") or line.startswith("*   "):
+            if lines:
+                break
+            continue
+        if re.match(r"^\[[^\]]+\]\(https://dribbble\.com/", line):
+            if lines:
+                break
+            continue
+        if line in {"Available for work", "Follow", "Following"}:
+            continue
+        if "Cookie" in line and not lines:
+            continue
+        lines.append(line)
+    return _clean_text("\n".join(lines))
+
+
+def _parse_dribbble_reader_markdown(markdown: str | None, final_url: str) -> ExtractResult | None:
+    body = str(markdown or "").strip()
+    if not body or "Max challenge attempts exceeded" in body:
+        return None
+
+    heading = _first_dribbble_reader_heading(body)
+    title = _normalize_dribbble_title(heading) or _normalize_dribbble_title(final_url.rsplit("/", 1)[-1].replace("-", " "))
+    author = _extract_dribbble_author_from_title(heading)
+    if not author:
+        author_match = re.search(r"\[([^\]]+)\]\(https://dribbble\.com/[^)]+\)\s*\n\s*Available for work", body)
+        if author_match:
+            author = re.sub(r"\s+", " ", author_match.group(1)).strip()
+
+    palette = _extract_dribbble_reader_palette(body)
+    media_urls = _extract_dribbble_reader_media(body)
+    description = _extract_dribbble_reader_description(body, media_urls)
+    text = _build_dribbble_text(title, author=author, description=description, palette=palette)
+
+    if not text and not media_urls:
+        return None
+
+    return ExtractResult(
+        title=title or "Dribbble Shot",
+        text=text or title or final_url,
+        platform="dribbble",
+        final_url=final_url,
+        media_urls=media_urls,
+        content_blocks=_build_dribbble_content_blocks(media_urls, text or title or final_url),
+        content_html=_build_dribbble_content_html(media_urls, text or title or final_url),
+    )
+
+
+def _parse_dribbble_api_shot(payload: dict | None, final_url: str) -> ExtractResult | None:
+    if not isinstance(payload, dict) or payload.get("message"):
+        return None
+
+    title = _normalize_dribbble_title(payload.get("title")) or "Dribbble Shot"
+    user = payload.get("user") if isinstance(payload.get("user"), dict) else {}
+    team = payload.get("team") if isinstance(payload.get("team"), dict) else {}
+    author = str(user.get("name") or team.get("name") or "").strip()
+    description = _html_fragment_to_text(payload.get("description"))
+    tags = [str(tag).strip() for tag in (payload.get("tags") or []) if str(tag).strip()]
+
+    media_urls: list[dict] = []
+    seen: set[str] = set()
+    video = payload.get("video") if isinstance(payload.get("video"), dict) else {}
+    if video.get("url"):
+        _append_unique_dribbble_media(media_urls, seen, str(video.get("url")), "video")
+
+    images = payload.get("images") if isinstance(payload.get("images"), dict) else {}
+    for key in ("hidpi", "normal", "teaser"):
+        if images.get(key):
+            _append_unique_dribbble_media(media_urls, seen, str(images.get(key)), "image")
+            break
+
+    for attachment in payload.get("attachments") or []:
+        if not isinstance(attachment, dict):
+            continue
+        media_type = "video" if str(attachment.get("content_type") or "").startswith("video/") else "image"
+        _append_unique_dribbble_media(media_urls, seen, str(attachment.get("url") or ""), media_type)
+
+    text = _build_dribbble_text(title, author=author, description=description, tags=tags)
+    return ExtractResult(
+        title=title,
+        text=text or title,
+        platform="dribbble",
+        final_url=final_url,
+        media_urls=media_urls or None,
+        content_blocks=_build_dribbble_content_blocks(media_urls, text or title),
+        content_html=_build_dribbble_content_html(media_urls, text or title),
+    )
+
+
+def _load_dribbble_cookie_map() -> dict[str, str]:
+    cookie_map: dict[str, str] = {}
+
+    header = os.getenv("DRIBBBLE_COOKIE_HEADER", "").strip()
+    if header:
+        cookie_map.update(_parse_cookie_header(header))
+    if cookie_map:
+        return cookie_map
+
+    load_from_browser = os.getenv("DRIBBBLE_COOKIE_FROM_BROWSER", "1").strip().lower()
+    if load_from_browser in {"0", "false", "no", "off"}:
+        return {}
+    if yt_dlp is None:
+        return {}
+
+    try:
+        from yt_dlp.cookies import extract_cookies_from_browser
+    except Exception as exc:
+        logger.debug("Dribbble cookies 浏览器提取器不可用: %s", exc)
+        return {}
+
+    browser_order_raw = os.getenv(
+        "DRIBBBLE_COOKIE_BROWSER_ORDER",
+        "chrome,safari,edge,firefox",
+    )
+    browser_order = [item.strip().lower() for item in browser_order_raw.split(",") if item.strip()]
+    browser_profile = os.getenv("DRIBBBLE_COOKIE_BROWSER_PROFILE", "").strip() or None
+    allowed_domains = {"dribbble.com", "token.awswaf.com"}
+
+    for browser_name in browser_order:
+        try:
+            jar = extract_cookies_from_browser(browser_name, profile=browser_profile)
+        except Exception as exc:
+            logger.debug("读取 Dribbble 浏览器 cookies 失败 (%s): %s", browser_name, exc)
+            continue
+
+        extracted: dict[str, str] = {}
+        for cookie in jar:
+            domain = (getattr(cookie, "domain", "") or "").lstrip(".").lower()
+            if not any(domain == candidate or domain.endswith("." + candidate) for candidate in allowed_domains):
+                continue
+            name = getattr(cookie, "name", "") or ""
+            value = getattr(cookie, "value", "") or ""
+            if name and value:
+                extracted[name] = value
+        if extracted:
+            logger.info("已加载 Dribbble 浏览器 cookies: %s (%d)", browser_name, len(extracted))
+            return extracted
+
+    return {}
+
+
+def _build_dribbble_headers(cookie_map: dict[str, str] | None = None) -> dict[str, str]:
+    headers = {
+        "User-Agent": os.getenv("DRIBBBLE_USER_AGENT", "").strip() or _DESKTOP_UA,
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
+        "Accept-Language": "en-US,en;q=0.9,zh-CN;q=0.8,zh;q=0.7",
+        "Referer": "https://dribbble.com/",
+    }
+    if cookie_map:
+        headers["Cookie"] = "; ".join(f"{key}={value}" for key, value in cookie_map.items() if value)
+        waf_token = cookie_map.get("aws-waf-token") or cookie_map.get("aws_waf_token")
+        if waf_token:
+            headers["x-aws-waf-token"] = waf_token
+    return headers
+
+
+async def _request_dribbble_api_shot(shot_id: str, final_url: str) -> ExtractResult | None:
+    token = os.getenv("DRIBBBLE_ACCESS_TOKEN", "").strip() or os.getenv("DRIBBBLE_API_TOKEN", "").strip()
+    if not token or not shot_id:
+        return None
+
+    headers = {
+        "Authorization": f"Bearer {token}",
+        "Accept": "application/json",
+        "User-Agent": _DESKTOP_UA,
+    }
+    async with httpx.AsyncClient(headers=headers, follow_redirects=True, timeout=20) as client:
+        try:
+            resp = await client.get(f"https://api.dribbble.com/v2/shots/{shot_id}")
+        except Exception as exc:
+            logger.debug("Dribbble API 请求失败: %s", exc)
+            return None
+    if resp.status_code >= 400:
+        logger.debug("Dribbble API 返回状态异常: %s", resp.status_code)
+        return None
+    try:
+        return _parse_dribbble_api_shot(resp.json(), final_url)
+    except Exception as exc:
+        logger.debug("Dribbble API JSON 解析失败: %s", exc)
+        return None
+
+
+async def _request_dribbble_page_html(url: str) -> tuple[str, str]:
+    headers = _build_dribbble_headers(_load_dribbble_cookie_map())
+    async with httpx.AsyncClient(
+        headers=headers,
+        timeout=20,
+        follow_redirects=True,
+        limits=httpx.Limits(max_connections=10),
+    ) as client:
+        try:
+            resp = await client.get(url)
+        except Exception as exc:
+            logger.warning("Dribbble 页面请求失败: %s", exc)
+            return "", url
+
+    html = resp.text or ""
+    final_url = str(resp.url)
+    if _is_dribbble_waf_challenge(resp.status_code, resp.headers, html):
+        logger.warning("Dribbble 页面命中 WAF challenge: %s -> %s", url, final_url)
+        return "", final_url
+    if resp.status_code >= 400:
+        logger.warning("Dribbble 页面返回状态异常: %s", resp.status_code)
+        return "", final_url
+    return html, final_url
+
+
+async def _request_dribbble_reader_markdown(url: str) -> tuple[str, str]:
+    enabled = os.getenv("DRIBBBLE_READER_FALLBACK", "1").strip().lower()
+    if enabled in {"0", "false", "no", "off"}:
+        return "", url
+
+    reader_url = f"https://r.jina.ai/http://{url}"
+    headers = {
+        "User-Agent": _DESKTOP_UA,
+        "Accept": "text/plain, text/markdown, */*",
+        "x-engine": "browser",
+    }
+    if os.getenv("DRIBBBLE_READER_NO_CACHE", "1").strip().lower() not in {"0", "false", "no", "off"}:
+        headers["x-no-cache"] = "true"
+
+    async with httpx.AsyncClient(headers=headers, timeout=45, follow_redirects=True) as client:
+        try:
+            resp = await client.get(reader_url)
+        except Exception as exc:
+            logger.warning("Dribbble Reader 请求失败: %s", exc)
+            return "", url
+    if resp.status_code >= 400:
+        logger.warning("Dribbble Reader 返回状态异常: %s", resp.status_code)
+        return "", url
+    return resp.text or "", url
+
+
+async def extract_dribbble(url: str) -> ExtractResult | None:
+    shot_id = _extract_dribbble_shot_id(url)
+
+    api_result = await _request_dribbble_api_shot(shot_id, url)
+    if api_result:
+        return api_result
+
+    html, final_url = await _request_dribbble_page_html(url)
+    page_result = _parse_dribbble_page_html(html, final_url or url)
+    if page_result:
+        return page_result
+
+    reader_markdown, reader_url = await _request_dribbble_reader_markdown(url)
+    reader_result = _parse_dribbble_reader_markdown(reader_markdown, reader_url or final_url or url)
+    if reader_result:
+        return reader_result
 
     return None
 
@@ -3221,6 +3844,7 @@ _EXTRACTORS = {
     "zhihu": extract_zhihu,
     "wechat": extract_wechat,
     "twitter": extract_twitter,
+    "dribbble": extract_dribbble,
     "generic": extract_generic,
 }
 
@@ -3249,6 +3873,9 @@ async def extract_content(url: str) -> ExtractResult:
         if platform == "zhihu" and _looks_like_zhihu_guard_result(result):
             logger.warning("知乎提取命中安全验证页: %s -> %s", url, result.final_url)
             result = None
+        if platform == "dribbble" and _looks_like_dribbble_guard_result(result):
+            logger.warning("Dribbble 提取命中 WAF challenge: %s -> %s", url, result.final_url)
+            result = None
         if result and (len(result.text) > 20 or result.media_urls):
             return result
         logger.info("平台 %s 提取失败，回退到通用提取器", platform)
@@ -3267,6 +3894,9 @@ async def extract_content(url: str) -> ExtractResult:
         result = None
     if platform == "zhihu" and _looks_like_zhihu_guard_result(result):
         logger.warning("知乎通用提取命中安全验证页: %s -> %s", url, result.final_url)
+        result = None
+    if platform == "dribbble" and _looks_like_dribbble_guard_result(result):
+        logger.warning("Dribbble 通用提取命中 WAF challenge: %s -> %s", url, result.final_url)
         result = None
     if result and (len(result.text) > 20 or result.media_urls):
         if platform != "generic":

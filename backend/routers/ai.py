@@ -34,6 +34,10 @@ from schemas import (
     AiConversationSaveRequest,
     AiConversationStoredMessage,
     AiConversationSummaryResponse,
+    AiDashboardRecommendation,
+    AiDashboardResponse,
+    AiDashboardStats,
+    AiDashboardTopic,
     AiItemAnalysisResponse,
     AiPendingApprovalResponse,
     AiRelatedNotesResponse,
@@ -110,6 +114,83 @@ _RAG_CONTEXT_SNIPPET_LIMIT = 420
 _SEMANTIC_INDEX_CACHE: dict[str, tuple[str, "SemanticChunkIndex"]] = {}
 _MEMORY_EMBED_CACHE: dict[tuple[str, str, str], tuple[str, list[list[float]]]] = {}
 _ASK_AI_MAX_TOOL_ITERATIONS = 3
+
+_DASHBOARD_DAILY_LABEL = "今日 10 篇"
+_DASHBOARD_READ_LABEL = "继续精读"
+_DASHBOARD_REFERENCE_LABEL = "可复用参考"
+_DASHBOARD_TOOL_LABEL = "工具备查"
+_DASHBOARD_DAILY_LIMIT = 10
+_DASHBOARD_BUCKET_ORDER = {
+    _DASHBOARD_DAILY_LABEL: 0,
+    _DASHBOARD_READ_LABEL: 1,
+    _DASHBOARD_REFERENCE_LABEL: 2,
+    _DASHBOARD_TOOL_LABEL: 3,
+}
+_DASHBOARD_BUCKET_META = {
+    _DASHBOARD_DAILY_LABEL: {
+        "description": "每天只读这些",
+        "reason": "AI 从未读、近期收录、收藏和知识密度里筛出最多 10 条。",
+    },
+    _DASHBOARD_READ_LABEL: {
+        "description": "读完今日后再读",
+        "reason": "长文、研究、观点、案例和方法类内容，适合继续消化。",
+    },
+    _DASHBOARD_REFERENCE_LABEL: {
+        "description": "设计/素材/灵感",
+        "reason": "适合以后做 UI/UX、视觉、案例或素材查找时复用。",
+    },
+    _DASHBOARD_TOOL_LABEL: {
+        "description": "工具资源先收好",
+        "reason": "工具、项目、API、文档和库先堆在一起，需要时再查。",
+    },
+}
+_DASHBOARD_ACTION_KEYWORDS = (
+    "教程", "指南", "步骤", "清单", "攻略", "实战", "上手", "入门", "流程",
+    "怎么", "如何", "方法", "模板", "checklist", "guide", "tutorial", "how to",
+    "playbook", "workflow", "roadmap", "best practice", "example",
+)
+_DASHBOARD_TOOL_KEYWORDS = (
+    "工具", "插件", "扩展", "资源", "官网", "文档", "api", "sdk", "cli", "github",
+    "repo", "repository", "library", "framework", "template", "boilerplate",
+    "npm", "pip", "开源", "下载", "chrome extension", "plugin",
+)
+_DASHBOARD_KNOWLEDGE_KEYWORDS = (
+    "深度", "解析", "研究", "报告", "论文", "观点", "复盘", "原理", "趋势", "案例",
+    "方法论", "系统", "架构", "思考", "analysis", "research", "report", "paper",
+    "case study", "deep dive", "principle", "strategy",
+)
+_DASHBOARD_LOW_PRIORITY_KEYWORDS = (
+    "优惠", "折扣", "coupon", "活动", "抽奖", "领取", "邀请码", "限时", "价格",
+    "pricing", "release note", "changelog", "更新日志", "登录", "注册",
+)
+_DASHBOARD_TOPIC_STOP_LABELS = {
+    "all", "inbox", "capture", "captures", "default", "general", "generic",
+    "uncategorized", "unfiled", "unknown", "web", "www", "网页", "全部",
+    "默认", "未分类", "未归档", "收录", "收藏", "资料", "素材", "临时",
+}
+_DASHBOARD_TOPIC_KEYWORD_RULES: tuple[tuple[str, tuple[str, ...]], ...] = (
+    ("Jable", ("jable",)),
+    (
+        "UI/UX 设计参考",
+        (
+            "ui/ux", "ux", "ui design", "interface design", "design reference",
+            "设计参考", "界面参考", "交互设计", "视觉参考", "设计灵感",
+            "mobbin", "dribbble", "behance",
+        ),
+    ),
+    (
+        "卡通形象参考",
+        (
+            "卡通", "角色设计", "形象设计", "ip形象", "ip 形象", "吉祥物",
+            "character design", "mascot", "cartoon", "illustration",
+        ),
+    ),
+    ("AI 工具与实践", ("ai agent", "agentic", "claude", "chatgpt", "openai", "cursor", "codex")),
+    ("系统设计", ("系统设计", "system design", "架构", "architecture")),
+    ("产品与增长", ("产品", "增长", "growth", "pm", "product management")),
+    ("求职与面试", ("找工作", "求职", "面试", "简历", "interview", "resume", "career")),
+)
+_DASHBOARD_TITLE_SPLIT_RE = re.compile(r"[\n\r\t|｜:：·•\-–—_/]+")
 
 # ── Computer command approval system ──────────────────────────────────
 _pending_approvals: dict[str, dict[str, Any]] = {}
@@ -5256,6 +5337,449 @@ async def _run_agent_loop(
         insufficient_context=False,
         agent_permissions=agent_permissions,
         updated_items=updated_items,
+    )
+
+
+def _extract_item_tag_names(item: Item) -> list[str]:
+    names: list[str] = []
+    seen: set[str] = set()
+    for link in item.tag_links or []:
+        tag = getattr(link, "tag", None)
+        name = _clean_optional_string(tag.name if tag else None)
+        if not name or name in seen:
+            continue
+        names.append(name)
+        seen.add(name)
+    return names
+
+
+def _dashboard_item_text_length(item: Item) -> int:
+    frame_text = "\n".join(_load_frame_texts(item))
+    return max(
+        len(value or "")
+        for value in (
+            item.extracted_text,
+            item.canonical_text,
+            item.ocr_text,
+            frame_text,
+        )
+    )
+
+
+def _dashboard_item_signal_text(item: Item) -> str:
+    values = [
+        item.title or "",
+        item.source_url or "",
+        item.final_url or "",
+        item.platform or "",
+        " ".join(_extract_item_tag_names(item)),
+        " ".join(_extract_item_folder_names(item)),
+        _truncate_text(item.canonical_text, 1200),
+        _truncate_text(item.extracted_text, 1200),
+        _truncate_text(item.ocr_text, 800),
+        _truncate_text("\n".join(_load_frame_texts(item)), 800),
+    ]
+    return "\n".join(value for value in values if value).lower()
+
+
+def _dashboard_text_matches_keyword(text: str, keyword: str) -> bool:
+    normalized_keyword = keyword.strip().lower()
+    if not normalized_keyword:
+        return False
+    if re.fullmatch(r"[a-z0-9][a-z0-9 ._+-]*", normalized_keyword):
+        pattern = r"(?<![a-z0-9])" + re.escape(normalized_keyword).replace(r"\ ", r"[\s/_+-]+") + r"(?![a-z0-9])"
+        return re.search(pattern, text) is not None
+    return normalized_keyword in text
+
+
+def _dashboard_text_has_any(text: str, keywords: tuple[str, ...]) -> bool:
+    return any(_dashboard_text_matches_keyword(text, keyword) for keyword in keywords)
+
+
+def _dashboard_item_is_tool_reference(item: Item) -> bool:
+    signal_text = _dashboard_item_signal_text(item)
+    platform = (_clean_optional_string(item.platform) or "").lower()
+    if platform == "github":
+        return True
+    return _dashboard_text_has_any(signal_text, _DASHBOARD_TOOL_KEYWORDS)
+
+
+def _dashboard_clean_topic_label(value: str | None) -> str:
+    label = _clean_optional_string(value)
+    if not label:
+        return ""
+    label = re.sub(r"^https?://", "", label, flags=re.IGNORECASE).strip()
+    label = label.strip(" /\\#[]()（）「」『』【】.,，。")
+    label = re.sub(r"\s+", " ", label)
+    if not label:
+        return ""
+    if label.lower() in _DASHBOARD_TOPIC_STOP_LABELS:
+        return ""
+    if len(label) > 28:
+        label = label[:26].rstrip() + "…"
+    return label
+
+
+def _dashboard_source_host_label(item: Item) -> str:
+    raw_url = _clean_optional_string(item.final_url) or _clean_optional_string(item.source_url)
+    if not raw_url:
+        return ""
+    try:
+        host = urlparse(raw_url).netloc.lower()
+    except Exception:
+        return ""
+    if not host:
+        return ""
+    host = host.split("@")[-1].split(":")[0]
+    if host.startswith("www."):
+        host = host[4:]
+    parts = [part for part in host.split(".") if part and part not in _URL_HOST_STOP_WORDS]
+    if not parts:
+        return ""
+    return _dashboard_clean_topic_label(parts[0])
+
+
+def _dashboard_title_topic_label(item: Item) -> str:
+    title = _clean_optional_string(item.title)
+    if not title:
+        return ""
+    for part in _DASHBOARD_TITLE_SPLIT_RE.split(title):
+        label = _dashboard_clean_topic_label(part)
+        if 2 <= len(label) <= 28:
+            return label
+    return _dashboard_clean_topic_label(title)
+
+
+def _dashboard_keyword_topic_labels(item: Item) -> list[str]:
+    signal_text = _dashboard_item_signal_text(item)
+    labels: list[str] = []
+    for label, keywords in _DASHBOARD_TOPIC_KEYWORD_RULES:
+        if _dashboard_text_has_any(signal_text, keywords):
+            labels.append(label)
+    return labels
+
+
+def _dashboard_item_is_reusable_reference(item: Item) -> bool:
+    signal_text = _dashboard_item_signal_text(item)
+    reference_keywords = (
+        "参考", "灵感", "素材", "图库", "画廊", "案例库", "角色", "卡通", "形象",
+        "jable", "reference", "inspiration", "asset", "gallery", "showcase",
+        "mobbin", "dribbble", "behance", "character design", "mascot", "cartoon",
+    )
+    return _dashboard_text_has_any(signal_text, reference_keywords)
+
+
+def _dashboard_topic_metadata(label: str, topic_items: list[Item] | None = None) -> dict[str, str]:
+    if label in _DASHBOARD_BUCKET_META:
+        return dict(_DASHBOARD_BUCKET_META[label])
+
+    items = topic_items or []
+    if items:
+        reusable_count = sum(1 for item in items if _dashboard_item_is_reusable_reference(item))
+        tool_count = sum(1 for item in items if _dashboard_item_is_tool_reference(item))
+        long_read_count = sum(1 for item in items if _dashboard_item_text_length(item) >= 1200)
+        if reusable_count >= max(1, len(items) // 3):
+            return {
+                "description": "可复用参考",
+                "reason": "这组内容更适合在需要做设计、找素材或找灵感时打开。",
+            }
+        if long_read_count >= max(1, len(items) // 3):
+            return {
+                "description": "适合阅读吸收",
+                "reason": "这组内容信息量更完整，适合集中读完再消化。",
+            }
+        if tool_count >= max(1, len(items) // 2):
+            return {
+                "description": "工具和资源",
+                "reason": "这组内容更像工具入口、项目或文档，需要时再查。",
+            }
+    return {
+        "description": "主题内容",
+        "reason": "这组内容在标题、标签、文件夹或来源上有相近主题。",
+    }
+
+
+def _dashboard_item_is_low_priority(item: Item, now: datetime | None = None) -> bool:
+    now = now or datetime.utcnow()
+    text_length = _dashboard_item_text_length(item)
+    signal_text = _dashboard_item_signal_text(item)
+    if bool(getattr(item, "is_favorite", False)):
+        return False
+    if _dashboard_item_is_tool_reference(item):
+        return False
+    if item.status == "failed":
+        return True
+    if _dashboard_text_has_any(signal_text, _DASHBOARD_LOW_PRIORITY_KEYWORDS):
+        return True
+    if item.last_viewed_at is not None:
+        viewed_age_days = max(0, (now - item.last_viewed_at).days)
+        if viewed_age_days <= 14 and text_length < 1200:
+            return True
+    return text_length < 240 and not _extract_item_tag_names(item) and not _extract_item_folder_names(item)
+
+
+def _dashboard_attention_labels(item: Item, now: datetime | None = None) -> list[str]:
+    now = now or datetime.utcnow()
+    if _dashboard_item_is_low_priority(item, now):
+        return []
+
+    if _dashboard_item_is_tool_reference(item):
+        return [_DASHBOARD_TOOL_LABEL]
+    if _dashboard_item_is_reusable_reference(item):
+        return [_DASHBOARD_REFERENCE_LABEL]
+    return [_DASHBOARD_READ_LABEL]
+
+
+def _dashboard_topic_labels(item: Item, now: datetime | None = None) -> list[str]:
+    return _dashboard_attention_labels(item, now)
+
+
+def _dashboard_topic_label(item: Item, now: datetime | None = None) -> str:
+    labels = _dashboard_topic_labels(item, now)
+    return labels[0] if labels else "先不看"
+
+
+def _score_dashboard_candidate(item: Item, now: datetime) -> float:
+    created_at = item.created_at or now
+    age_days = max(0, (now - created_at).days)
+    text_length = _dashboard_item_text_length(item)
+    score = 0.0
+
+    if item.last_viewed_at is None:
+        score += 5.0
+    else:
+        viewed_age_days = max(0, (now - item.last_viewed_at).days)
+        if viewed_age_days <= 7:
+            score -= 1.2
+        elif viewed_age_days >= 30:
+            score += 0.4
+
+    if age_days <= 3:
+        score += 2.2
+    elif age_days <= 14:
+        score += 1.4
+    elif age_days <= 45:
+        score += 0.7
+
+    if text_length >= 4000:
+        score += 1.5
+    elif text_length >= 1200:
+        score += 1.0
+    elif text_length >= 300:
+        score += 0.4
+
+    if item.parse_status == "completed":
+        score += 0.5
+    if bool(getattr(item, "is_favorite", False)):
+        score += 1.1
+    if _dashboard_item_is_tool_reference(item):
+        score -= 0.8
+    if not _extract_item_folder_names(item):
+        score += 0.35
+    if _extract_item_tag_names(item):
+        score += 0.35
+
+    return round(score, 3)
+
+
+def _dashboard_reason(item: Item, topic: str) -> str:
+    text_length = _dashboard_item_text_length(item)
+    signals: list[str] = []
+    if item.last_viewed_at is None:
+        signals.append("还没打开过")
+    if item.created_at:
+        age_days = max(0, (datetime.utcnow() - item.created_at).days)
+        if age_days <= 7:
+            signals.append("最近收录")
+    if text_length >= 4000:
+        signals.append("内容信息量高")
+    elif text_length >= 1200:
+        signals.append("内容较完整")
+    if bool(getattr(item, "is_favorite", False)):
+        signals.append("已收藏")
+    if not signals:
+        signals.append("和当前知识库主题相关")
+    if topic == _DASHBOARD_DAILY_LABEL:
+        return f"{'、'.join(signals[:3])}，适合放进今天最多 10 篇里先读。"
+    return f"{'、'.join(signals[:3])}，归在「{topic}」里适合继续读。"
+
+
+def _select_dashboard_recommendations(items: list[Item], limit: int, now: datetime) -> list[tuple[Item, float]]:
+    scored = [
+        (item, _score_dashboard_candidate(item, now))
+        for item in items
+        if (
+            item.status != "failed"
+            and not _dashboard_item_is_low_priority(item, now)
+            and not _dashboard_item_is_tool_reference(item)
+            and not _dashboard_item_is_reusable_reference(item)
+        )
+    ]
+    scored.sort(
+        key=lambda pair: (
+            pair[1],
+            pair[0].created_at or datetime.min,
+            pair[0].id,
+        ),
+        reverse=True,
+    )
+
+    selected: list[tuple[Item, float]] = []
+    platform_counts: dict[str, int] = {}
+    source_counts: dict[str, int] = {}
+    for item, score in scored:
+        if len(selected) >= limit:
+            break
+        platform = (_clean_optional_string(item.platform) or "web").lower()
+        source_key = _dashboard_source_host_label(item) or platform
+        if platform_counts.get(platform, 0) >= 3 and len(selected) < max(4, limit - 1):
+            continue
+        if source_counts.get(source_key, 0) >= 2 and len(selected) < max(4, limit - 1):
+            continue
+        selected.append((item, score))
+        platform_counts[platform] = platform_counts.get(platform, 0) + 1
+        source_counts[source_key] = source_counts.get(source_key, 0) + 1
+
+    if len(selected) < limit:
+        selected_ids = {item.id for item, _ in selected}
+        for item, score in scored:
+            if len(selected) >= limit:
+                break
+            if item.id in selected_ids:
+                continue
+            selected.append((item, score))
+            selected_ids.add(item.id)
+
+    return selected[:_DASHBOARD_DAILY_LIMIT]
+
+
+def _sort_dashboard_topic_items(items: list[Item], now: datetime) -> list[Item]:
+    return sorted(
+        items,
+        key=lambda item: (
+            _score_dashboard_candidate(item, now),
+            item.created_at or datetime.min,
+            item.id,
+        ),
+        reverse=True,
+    )
+
+
+def _make_dashboard_topic(label: str, sorted_items: list[Item], priority_limit: int = 6) -> AiDashboardTopic:
+    metadata = _dashboard_topic_metadata(label, sorted_items)
+    item_ids = [item.id for item in sorted_items]
+    priority_item_ids = [item.id for item in sorted_items[:priority_limit]]
+    unread_count = sum(1 for item in sorted_items if item.last_viewed_at is None)
+    return AiDashboardTopic(
+        label=label,
+        count=len(sorted_items),
+        unread_count=unread_count,
+        item_ids=item_ids,
+        priority_item_ids=priority_item_ids,
+        description=metadata["description"],
+        reason=metadata["reason"],
+    )
+
+
+def _build_dashboard_topics(
+    items: list[Item],
+    daily_items: list[Item] | None = None,
+    limit: int = 4,
+    now: datetime | None = None,
+) -> list[AiDashboardTopic]:
+    now = now or datetime.utcnow()
+    topics: list[AiDashboardTopic] = []
+    daily_items = [
+        item
+        for item in (daily_items or [])[:_DASHBOARD_DAILY_LIMIT]
+        if item.status != "failed"
+    ]
+    daily_ids = {item.id for item in daily_items}
+    if daily_items:
+        topics.append(_make_dashboard_topic(_DASHBOARD_DAILY_LABEL, daily_items, priority_limit=_DASHBOARD_DAILY_LIMIT))
+
+    topic_items: dict[str, list[Item]] = {
+        _DASHBOARD_READ_LABEL: [],
+        _DASHBOARD_REFERENCE_LABEL: [],
+        _DASHBOARD_TOOL_LABEL: [],
+    }
+    for item in items:
+        if item.status == "failed":
+            continue
+        if item.id in daily_ids:
+            continue
+        for label in _dashboard_topic_labels(item, now):
+            if label in topic_items:
+                topic_items[label].append(item)
+
+    for label in (_DASHBOARD_READ_LABEL, _DASHBOARD_REFERENCE_LABEL, _DASHBOARD_TOOL_LABEL):
+        sorted_items = _sort_dashboard_topic_items(topic_items[label], now)
+        if sorted_items:
+            topics.append(_make_dashboard_topic(label, sorted_items))
+    return topics[:limit]
+
+
+@router.get("/dashboard", response_model=AiDashboardResponse)
+def get_ai_dashboard(limit: int = 10, db: Session = Depends(get_db)):
+    user_id = get_current_user_id()
+    safe_limit = max(3, min(int(limit or _DASHBOARD_DAILY_LIMIT), _DASHBOARD_DAILY_LIMIT))
+
+    from routers.items import apply_hidden_from_all_filter, serialize_items
+
+    query = db.query(Item).filter(Item.user_id == user_id)
+    query = apply_hidden_from_all_filter(query, user_id)
+    items = (
+        query.order_by(Item.created_at.desc(), Item.id.desc())
+        .limit(1000)
+        .all()
+    )
+
+    now = datetime.utcnow()
+    selected = _select_dashboard_recommendations(items, safe_limit, now)
+    serialized_items = serialize_items([item for item, _ in selected])
+    for serialized_item in serialized_items:
+        serialized_item.canonical_text = None
+        serialized_item.canonical_html = None
+        serialized_item.content_blocks_json = None
+        serialized_item.extracted_text = None
+        serialized_item.ocr_text = None
+        serialized_item.frame_texts = []
+        serialized_item.urls = []
+        serialized_item.qr_links = []
+    serialized_by_id: dict[str, ItemResponse] = {item.id: item for item in serialized_items}
+
+    recommendations: list[AiDashboardRecommendation] = []
+    for item, score in selected:
+        serialized = serialized_by_id.get(item.id)
+        if not serialized:
+            continue
+        topic = _DASHBOARD_DAILY_LABEL
+        recommendations.append(
+            AiDashboardRecommendation(
+                item=serialized,
+                reason=_dashboard_reason(item, topic),
+                topic=topic,
+                score=score,
+                action_label="今天精读",
+            )
+        )
+
+    return AiDashboardResponse(
+        generated_at=now,
+        recommendations=recommendations,
+        topics=_build_dashboard_topics(
+            items,
+            daily_items=[item for item, _score in selected],
+            limit=4,
+            now=now,
+        ),
+        stats=AiDashboardStats(
+            total_count=len(items),
+            unread_count=sum(1 for item in items if item.last_viewed_at is None),
+            unfiled_count=sum(1 for item in items if not _extract_item_folder_names(item)),
+            untagged_count=sum(1 for item in items if not _extract_item_tag_names(item)),
+            low_priority_count=sum(1 for item in items if _dashboard_item_is_low_priority(item, now)),
+        ),
     )
 
 

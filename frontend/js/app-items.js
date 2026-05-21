@@ -53,6 +53,13 @@
             </svg>
         `;
         const extraItemCache = new Map();
+        let todayDashboardRequestId = 0;
+        let todayDashboardHasContent = false;
+        let todayDashboardData = null;
+        let todayDashboardItems = [];
+        let activeTodayTopic = null;
+        let todayDashboardLastDateKey = '';
+        let expandedAiTopicLabel = '';
 
         function cacheItemById(item) {
             if (!item || !item.id) return;
@@ -1096,6 +1103,18 @@
         }
 
         async function fetchItems() {
+            if (currentBoardPage === 'ai-dashboard') {
+                if (todayDashboardData) {
+                    renderTodayDashboard(todayDashboardData);
+                } else {
+                    fetchTodayDashboard();
+                }
+                return;
+            }
+            if (currentBoardPage === 'ai-topic') {
+                renderAiTopicItems({ animate: true });
+                return;
+            }
             const requestId = ++libraryRequestId;
             const controller = new AbortController();
             if (currentItemsRequestController) {
@@ -1130,6 +1149,7 @@
                     hasKeyword || hasPlatformFilter || hasFolderFilter || hasTagFilter
                 );
                 renderItems(filteredEntries, { animate: true });
+                syncBoardPageState();
                 fetchRecentViews();
                 startBackgroundRefresh();
                 const trackedSyncIds = getTrackedRemoteSyncItemIds(itemsData);
@@ -1139,6 +1159,7 @@
             } catch (error) {
                 if (error?.name === 'AbortError') return;
                 setStatsMessage('加载失败');
+                syncTodaySectionState({ hasContent: false });
                 grid.className = 'grid';
                 grid.innerHTML = '<div class="empty-state">无法连接到后端 API</div>';
             } finally {
@@ -1156,7 +1177,7 @@
             const hasViews = typeof options.hasViews === 'boolean'
                 ? options.hasViews
                 : Boolean(recentViewsSection.innerHTML.trim());
-            const shouldHide = currentView === 'graph' || hasKeyword || hasFolderFilter || hasTagFilter || !hasViews;
+            const shouldHide = currentBoardPage !== 'library' || currentView === 'graph' || hasKeyword || hasFolderFilter || hasTagFilter || !hasViews;
 
             recentViewsSection.classList.toggle('is-list-view', currentView === 'list');
             recentViewsSection.style.display = shouldHide ? 'none' : '';
@@ -1166,7 +1187,7 @@
             const hasKeyword = !!filterInput.value.trim();
             const hasFolderFilter = currentFolderScope !== 'all';
             const hasTagFilter = !!currentTagId;
-            if (currentView === 'graph' || hasKeyword || hasFolderFilter || hasTagFilter) {
+            if (currentBoardPage !== 'library' || currentView === 'graph' || hasKeyword || hasFolderFilter || hasTagFilter) {
                 syncRecentViewsSectionState({ hasViews: false });
                 return;
             }
@@ -1406,6 +1427,435 @@
             }).join('');
             recentViewsSection.innerHTML = `<div class="rv-header">最近查看</div><div class="rv-scroll">${cards}</div>`;
             syncRecentViewsSectionState({ hasViews: true });
+        }
+
+        function shouldShowTodaySection() {
+            return currentBoardPage === 'ai-dashboard';
+        }
+
+        function normalizeTodayTopicLabel(value) {
+            return String(value || '').trim().toLowerCase();
+        }
+
+        function hasActiveTodayTopic() {
+            return Boolean(activeTodayTopic?.label);
+        }
+
+        function getTodayTopicByLabel(label) {
+            const normalized = normalizeTodayTopicLabel(label);
+            if (!normalized) return null;
+            const topics = Array.isArray(todayDashboardData?.topics) ? todayDashboardData.topics : [];
+            return topics.find((topic) => normalizeTodayTopicLabel(topic?.label) === normalized) || null;
+        }
+
+        function getItemTodayTopicLabels(item) {
+            const labels = [
+                ...(Array.isArray(item?.tag_names) ? item.tag_names : []),
+                ...(Array.isArray(item?.folder_names) ? item.folder_names : []),
+                platformDisplayLabel(item),
+                item?.platform,
+            ];
+            return labels
+                .map((label) => String(label || '').trim())
+                .filter(Boolean);
+        }
+
+        function getTodayTopicItems(topic) {
+            if (!topic?.label) return [];
+            const normalized = normalizeTodayTopicLabel(topic.label);
+            const sourceItems = todayDashboardItems.length ? todayDashboardItems : itemsData;
+            const hintedIds = new Set(
+                (Array.isArray(topic.item_ids) ? topic.item_ids : [])
+                    .map((id) => String(id || '').trim())
+                    .filter(Boolean)
+            );
+            const itemOrder = new Map(
+                (Array.isArray(topic.item_ids) ? topic.item_ids : [])
+                    .map((id, index) => [String(id || '').trim(), index])
+                    .filter(([id]) => id)
+            );
+            return sourceItems.filter((item) => {
+                const itemId = String(item?.id || '').trim();
+                if (hintedIds.has(itemId)) return true;
+                return getItemTodayTopicLabels(item)
+                    .some((label) => normalizeTodayTopicLabel(label) === normalized);
+            }).sort((a, b) => {
+                const aOrder = itemOrder.has(String(a?.id || '')) ? itemOrder.get(String(a?.id || '')) : 9999;
+                const bOrder = itemOrder.has(String(b?.id || '')) ? itemOrder.get(String(b?.id || '')) : 9999;
+                if (aOrder !== bOrder) return aOrder - bOrder;
+                return new Date(b?.created_at || 0).getTime() - new Date(a?.created_at || 0).getTime();
+            });
+        }
+
+        function itemMatchesAiTopicToolbarFilters(item) {
+            if (!item) return false;
+            const keyword = filterInput.value.trim().toLowerCase();
+            if (keyword) {
+                const searchableText = [
+                    getDisplayItemTitle(item),
+                    item.title,
+                    item.source_url,
+                    item.platform,
+                    ...(Array.isArray(item.tag_names) ? item.tag_names : []),
+                    ...(Array.isArray(item.folder_names) ? item.folder_names : []),
+                    getDisplayItemPreview(item, 240),
+                ].join(' ').toLowerCase();
+                if (!searchableText.includes(keyword)) return false;
+            }
+
+            if (platformFilter.value !== 'all') {
+                const itemPlatform = normalizePlatform(item.platform || '', (item.source_url || '').toLowerCase());
+                if (itemPlatform !== platformFilter.value) return false;
+            }
+
+            if (currentTagId) {
+                const tagIds = Array.isArray(item.tag_ids) ? item.tag_ids.map((value) => String(value || '')) : [];
+                if (!tagIds.includes(String(currentTagId))) return false;
+            }
+
+            return true;
+        }
+
+        function renderAiTopicItems(options = {}) {
+            if (!activeTodayTopic?.label) {
+                openAiDashboardPage();
+                return;
+            }
+            const allTopicItems = getTodayTopicItems(activeTodayTopic);
+            filteredEntries = allTopicItems.filter(itemMatchesAiTopicToolbarFilters);
+            syncLibrarySelectionWithEntries(filteredEntries);
+            const hasFilter = Boolean(filterInput.value.trim()) || platformFilter.value !== 'all' || Boolean(currentTagId);
+            setStatsMessage(
+                hasFilter
+                    ? `AI 整理 · ${activeTodayTopic.label} · 匹配 ${filteredEntries.length} / ${allTopicItems.length} 条`
+                    : `AI 整理 · ${activeTodayTopic.label} · ${allTopicItems.length} 条`
+            );
+            renderItems(filteredEntries, options);
+            syncBoardPageState();
+        }
+
+        function openAiTopicPage(topic) {
+            if (!topic?.label) return false;
+            const nextTopic = getTodayTopicByLabel(topic.label) || topic;
+            const matchedItems = getTodayTopicItems(nextTopic);
+            if (!matchedItems.length) {
+                showToast(`「${nextTopic.label}」暂时没有可显示内容`, 'info');
+                return false;
+            }
+
+            activeTodayTopic = nextTopic;
+            currentBoardPage = 'ai-topic';
+            currentFolderScope = 'all';
+            currentFolderId = null;
+            if (currentView === 'graph') currentView = 'gallery';
+            galleryViewBtn.classList.toggle('active', currentView === 'gallery');
+            listViewBtn.classList.toggle('active', currentView === 'list');
+            graphViewBtn.classList.toggle('active', currentView === 'graph');
+            renderFolderNavigation();
+            renderAiTopicItems({ animate: true });
+            return true;
+        }
+
+        function backToAiDashboard() {
+            activeTodayTopic = null;
+            openAiDashboardPage();
+        }
+
+        function syncTodaySectionState(options = {}) {
+            if (!todaySection) return;
+            const hasContent = typeof options.hasContent === 'boolean'
+                ? options.hasContent
+                : todayDashboardHasContent;
+            const shouldHide = !shouldShowTodaySection() || !hasContent;
+            todaySection.classList.toggle('is-list-view', currentView === 'list');
+            todaySection.style.display = shouldHide ? 'none' : '';
+        }
+
+        function syncBoardPageState() {
+            const isAiDashboard = currentBoardPage === 'ai-dashboard';
+            if (boardToolbar) boardToolbar.style.display = '';
+            if (folderMobileStrip) folderMobileStrip.style.display = isAiDashboard ? 'none' : '';
+            if (recentViewsSection) recentViewsSection.style.display = currentBoardPage === 'library' ? '' : 'none';
+
+            if (isAiDashboard) {
+                if (grid) grid.style.display = 'none';
+                if (graphContainer) graphContainer.style.display = 'none';
+                if (typeof destroyGraph === 'function') destroyGraph();
+                syncTodaySectionState({ hasContent: todayDashboardHasContent || Boolean(todaySection?.innerHTML.trim()) });
+                return;
+            }
+
+            if (todaySection) todaySection.style.display = 'none';
+            if (currentView === 'graph') {
+                if (grid) grid.style.display = 'none';
+                if (graphContainer) graphContainer.style.display = 'block';
+            } else {
+                if (grid) grid.style.display = '';
+                if (graphContainer) graphContainer.style.display = 'none';
+            }
+            syncRecentViewsSectionState();
+        }
+
+        function getTodayDashboardDateKey() {
+            const now = new Date();
+            return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+        }
+
+        function openAiDashboardPage() {
+            currentBoardPage = 'ai-dashboard';
+            activeTodayTopic = null;
+            currentFolderScope = 'all';
+            currentFolderId = null;
+            currentView = 'gallery';
+            galleryViewBtn.classList.toggle('active', true);
+            listViewBtn.classList.toggle('active', false);
+            graphViewBtn.classList.toggle('active', false);
+            if (typeof renderFolderNavigation === 'function') renderFolderNavigation();
+            syncBoardPageState();
+            const todayKey = getTodayDashboardDateKey();
+            fetchTodayDashboard({ force: !todayDashboardHasContent || todayDashboardLastDateKey !== todayKey });
+        }
+
+        async function fetchTodayDashboardItems(force = false) {
+            if (todayDashboardItems.length && !force) return todayDashboardItems;
+            const res = await fetch('/api/items?limit=10000');
+            if (!res.ok) throw new Error('items api error');
+            const data = await res.json();
+            todayDashboardItems = Array.isArray(data) ? data : [];
+            todayDashboardItems.forEach((item) => cacheItemById(item));
+            return todayDashboardItems;
+        }
+
+        function formatDashboardGeneratedAt(value) {
+            const date = value ? new Date(value) : new Date();
+            if (Number.isNaN(date.getTime())) return '刚刚整理';
+            const sameDay = date.toDateString() === new Date().toDateString();
+            const time = date.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' });
+            return sameDay ? `今天 ${time}` : `${date.toLocaleDateString('zh-CN', { month: '2-digit', day: '2-digit' })} ${time}`;
+        }
+
+        function renderAiTopicPreviewTile(item, stackIndex) {
+            const thumb = getItemThumbnail(item);
+            const tileStyle = `--stack-index:${stackIndex}; --stack-x:${stackIndex * 12}px; --stack-y:${stackIndex * 24}px; --stack-rotate:${(stackIndex - 1) * 1.45}deg;`;
+            const title = escapeHtml(getDisplayItemTitle(item) || '未命名内容');
+            const meta = escapeHtml(`${platformDisplayLabel(item)} · ${formatRelativeTime(item.created_at)}`);
+            const body = thumb
+                ? `<span class="ai-pile-card-media"><img src="${escapeAttribute(resolveMediaUrl(thumb.url))}" loading="lazy" decoding="async" fetchpriority="low" alt=""></span>`
+                : `<span class="ai-pile-card-media ai-pile-card-placeholder">${renderPlatformMark(item)}</span>`;
+            return `
+                <span class="ai-pile-card" style="${tileStyle}">
+                    ${body}
+                    <span class="ai-pile-card-copy">
+                        <span class="ai-pile-card-title">${title}</span>
+                        <span class="ai-pile-card-meta">${meta}</span>
+                    </span>
+                </span>
+            `;
+        }
+
+        function getVisibleTodayTopicItems(topic) {
+            return getTodayTopicItems(topic).filter(itemMatchesAiTopicToolbarFilters);
+        }
+
+        function topicMatchesAiDashboardFilters(topic) {
+            const visibleItems = getVisibleTodayTopicItems(topic);
+            if (visibleItems.length) return true;
+            const keyword = filterInput.value.trim().toLowerCase();
+            const hasPlatformFilter = platformFilter.value !== 'all';
+            const hasTagFilter = Boolean(currentTagId);
+            if (!keyword || hasPlatformFilter || hasTagFilter) return false;
+            const topicText = [
+                topic?.label,
+                topic?.description,
+                topic?.reason,
+            ].map((value) => String(value || '').toLowerCase()).join('\n');
+            return topicText.includes(keyword);
+        }
+
+        function renderTodayTopicCard(topic, hasExpandedTopic = false) {
+            const label = String(topic?.label || '').trim();
+            if (!label) return '';
+            const matchedItems = getVisibleTodayTopicItems(topic);
+            const previewItems = matchedItems.slice(0, 3);
+            const count = matchedItems.length || Number(topic?.count || 0);
+            const unreadCount = matchedItems.length
+                ? matchedItems.filter((item) => !item.last_viewed_at).length
+                : Number(topic?.unread_count || 0);
+            const description = String(topic?.description || '').trim();
+            const reason = String(topic?.reason || '').trim();
+            const title = escapeHtml(label);
+            const normalizedLabel = normalizeTodayTopicLabel(label);
+            const isExpanded = expandedAiTopicLabel === normalizedLabel;
+            const preview = previewItems.length
+                ? previewItems.map(renderAiTopicPreviewTile).join('')
+                : `<span class="ai-pile-card ai-pile-card-fallback">
+                    <span class="ai-pile-card-media ai-pile-card-placeholder">${escapeHtml(label.slice(0, 2) || 'AI')}</span>
+                    <span class="ai-pile-card-copy">
+                        <span class="ai-pile-card-title">${title}</span>
+                        <span class="ai-pile-card-meta">${count} 条</span>
+                    </span>
+                </span>`;
+            return `
+                <div class="ai-topic-pile${isExpanded ? ' is-expanded' : ''}${hasExpandedTopic && !isExpanded ? ' is-dimmed' : ''}" role="button" tabindex="0" data-ai-topic-toggle data-ai-topic-label="${escapeAttribute(label)}" aria-expanded="${isExpanded ? 'true' : 'false'}">
+                    <div class="ai-topic-pile-stack" aria-hidden="true">
+                        ${preview}
+                        <span class="ai-topic-pile-count">${count} 条</span>
+                    </div>
+                    <div class="ai-topic-pile-foot">
+                        <div class="ai-topic-pile-copy">
+                            <div class="ai-topic-pile-title" title="${escapeAttribute(label)}">${title}</div>
+                            <div class="ai-topic-pile-meta">AI 整理 · ${unreadCount} 未读</div>
+                        </div>
+                        <span class="ai-topic-pile-action">${isExpanded ? '收起' : '展开'}</span>
+                    </div>
+                    <div class="ai-topic-pile-hint">
+                        ${description ? `<span class="tag">${escapeHtml(description)}</span>` : ''}
+                        <span class="ai-topic-pile-reason">${escapeHtml(reason || '这组内容有相近主题。')}</span>
+                    </div>
+                </div>
+            `;
+        }
+
+        function toggleAiTopicPile(label) {
+            const normalizedLabel = normalizeTodayTopicLabel(label);
+            if (!normalizedLabel) return;
+            if (expandedAiTopicLabel === normalizedLabel) {
+                expandedAiTopicLabel = '';
+            } else {
+                expandedAiTopicLabel = normalizedLabel;
+            }
+            if (todayDashboardData) renderTodayDashboard(todayDashboardData);
+        }
+
+        function renderAiTopicExpandedBoard(topics) {
+            const expandedTopic = topics.find((topic) => normalizeTodayTopicLabel(topic?.label) === expandedAiTopicLabel);
+            if (!expandedTopic) return '';
+            const items = getVisibleTodayTopicItems(expandedTopic);
+            const label = String(expandedTopic.label || '').trim();
+            const count = items.length || Number(expandedTopic.count || 0);
+            const cards = items.length
+                ? items.map((item) => renderCardMarkup(item)).join('')
+                : '<div class="empty-state">没有匹配的内容。</div>';
+            return `
+                <section class="ai-topic-expanded-board" aria-label="${escapeAttribute(label)}">
+                    <div class="ai-topic-expanded-board-head">
+                        <div>
+                            <div class="ai-topic-expanded-board-title">${escapeHtml(label)}</div>
+                            <div class="ai-topic-expanded-board-meta">${count} 条 · 已展开</div>
+                        </div>
+                        <button class="view-btn ai-topic-board-open" type="button" data-ai-topic-open data-ai-topic-label="${escapeAttribute(label)}">进入完整列表</button>
+                    </div>
+                    <div class="ai-topic-expanded-card-grid">
+                        ${cards}
+                    </div>
+                </section>
+            `;
+        }
+
+        function renderTodayDashboard(data) {
+            if (!todaySection) return;
+            todayDashboardData = data || null;
+            const recommendations = Array.isArray(data?.recommendations)
+                ? data.recommendations.filter((entry) => entry?.item?.id)
+                : [];
+            const topics = Array.isArray(data?.topics)
+                ? data.topics.filter((entry) => entry?.label && Number(entry?.count || 0) > 0).slice(0, 4)
+                : [];
+            if (!recommendations.length && !topics.length) {
+                setStatsMessage('AI 整理 · 还没有形成主题');
+                todaySection.innerHTML = `
+                    <div class="ai-dashboard-page">
+                        <div class="grid ai-topic-grid">
+                            <div class="empty-state">继续收录内容后，这里会按主题自动整理。</div>
+                        </div>
+                    </div>
+                `;
+                todayDashboardHasContent = true;
+                syncTodaySectionState({ hasContent: true });
+                return;
+            }
+
+            recommendations.forEach((entry) => cacheItemById(entry.item));
+            const stats = data?.stats || {};
+            const unreadCount = Number(stats.unread_count || 0);
+            const lowPriorityCount = Number(stats.low_priority_count || 0);
+            const generatedAt = formatDashboardGeneratedAt(data?.generated_at);
+            const visibleTopics = topics.filter(topicMatchesAiDashboardFilters);
+            if (expandedAiTopicLabel && !visibleTopics.some((topic) => normalizeTodayTopicLabel(topic?.label) === expandedAiTopicLabel)) {
+                expandedAiTopicLabel = '';
+            }
+            const hasExpandedTopic = Boolean(expandedAiTopicLabel);
+            const topicCards = visibleTopics.map((topic) => renderTodayTopicCard(topic, hasExpandedTopic)).join('');
+            const visibleTopicItems = visibleTopics.flatMap(getVisibleTodayTopicItems);
+            const curatedItemCount = new Set(
+                visibleTopicItems.map((item) => String(item?.id || '').trim())
+                    .filter(Boolean)
+            ).size || recommendations.length;
+            const expandedTopic = hasExpandedTopic
+                ? visibleTopics.find((topic) => normalizeTodayTopicLabel(topic?.label) === expandedAiTopicLabel)
+                : null;
+            const expandedItemCount = expandedTopic ? getVisibleTodayTopicItems(expandedTopic).length : 0;
+            const hasFilter = Boolean(filterInput.value.trim()) || platformFilter.value !== 'all' || Boolean(currentTagId);
+            setStatsMessage(
+                expandedTopic
+                    ? `AI 整理 · ${expandedTopic.label} · 已展开 ${expandedItemCount} 条 · ${generatedAt}`
+                    : hasFilter
+                    ? `AI 整理 · 匹配 ${visibleTopics.length} / ${topics.length} 组 · ${generatedAt}`
+                    : `AI 整理 · ${topics.length} 组 · 筛出 ${curatedItemCount} 条 · 未读 ${unreadCount} · 已过滤 ${lowPriorityCount} 条 · ${generatedAt}`
+            );
+
+            todaySection.innerHTML = `
+                <div class="ai-dashboard-page">
+                    <div class="grid ai-topic-grid">
+                        ${topicCards || '<div class="empty-state">没有匹配的主题。</div>'}
+                    </div>
+                    ${renderAiTopicExpandedBoard(visibleTopics)}
+                </div>
+            `;
+            todayDashboardHasContent = true;
+            syncTodaySectionState({ hasContent: true });
+        }
+
+        async function fetchTodayDashboard(options = {}) {
+            const { force = false } = options;
+            if (!todaySection) return;
+            if (!shouldShowTodaySection()) {
+                syncTodaySectionState();
+                return;
+            }
+            const requestId = ++todayDashboardRequestId;
+            if (!todayDashboardHasContent) {
+                setStatsMessage('AI 整理 · 正在整理主题...');
+                todaySection.innerHTML = `
+                    <div class="ai-dashboard-page">
+                        <div class="grid ai-topic-grid">
+                            <div class="empty-state">正在整理主题...</div>
+                        </div>
+                    </div>
+                `;
+                syncTodaySectionState({ hasContent: true });
+            } else if (force) {
+                todaySection.classList.add('is-refreshing');
+            }
+
+            try {
+                const dashboardItemsPromise = fetchTodayDashboardItems(force).catch(() => []);
+                const res = await fetch(`/api/ai/dashboard?limit=10&_=${force ? Date.now() : ''}`);
+                if (!res.ok) throw new Error('dashboard api error');
+                const data = await res.json();
+                await dashboardItemsPromise;
+                if (requestId !== todayDashboardRequestId) return;
+                todayDashboardLastDateKey = getTodayDashboardDateKey();
+                renderTodayDashboard(data);
+            } catch (error) {
+                if (requestId !== todayDashboardRequestId) return;
+                if (!todayDashboardHasContent) {
+                    todaySection.innerHTML = '';
+                    syncTodaySectionState({ hasContent: false });
+                }
+            } finally {
+                todaySection.classList.remove('is-refreshing');
+            }
         }
 
         async function fetchTags() {
@@ -1951,7 +2401,9 @@
                 const hasTagFilter = Boolean(currentTagId);
                 let emptyMessage = '没有找到匹配内容，请换个关键词或平台试试。';
                 if (!hasKeyword && !hasPlatformFilter && !hasTagFilter) {
-                    if (currentFolderScope === 'folder') {
+                    if (currentBoardPage === 'ai-topic') {
+                        emptyMessage = '这个主题堆里暂时没有内容。';
+                    } else if (currentFolderScope === 'folder') {
                         emptyMessage = '这个文件夹里还没有内容。';
                     } else if (currentFolderScope === 'favorites') {
                         emptyMessage = '收藏夹里还没有内容。';
@@ -1991,11 +2443,44 @@
         }
 
         function setView(view) {
+            const wasAiTopic = currentBoardPage === 'ai-topic';
+            const wasAiDashboard = currentBoardPage === 'ai-dashboard';
+            if (!wasAiTopic && !wasAiDashboard) currentBoardPage = 'library';
             currentView = view;
             galleryViewBtn.classList.toggle('active', view === 'gallery');
             listViewBtn.classList.toggle('active', view === 'list');
             graphViewBtn.classList.toggle('active', view === 'graph');
-            syncRecentViewsSectionState();
+            if (typeof renderFolderNavigation === 'function') renderFolderNavigation();
+            syncBoardPageState();
+
+            if (wasAiDashboard) {
+                if (view === 'graph') {
+                    currentBoardPage = 'library';
+                    expandedAiTopicLabel = '';
+                    syncBoardPageState();
+                    if (typeof initGraph === 'function') initGraph();
+                    return;
+                }
+                currentView = 'gallery';
+                galleryViewBtn.classList.toggle('active', true);
+                listViewBtn.classList.toggle('active', false);
+                graphViewBtn.classList.toggle('active', false);
+                if (todayDashboardData) renderTodayDashboard(todayDashboardData);
+                return;
+            }
+
+            if (wasAiTopic) {
+                if (view === 'graph') {
+                    currentBoardPage = 'library';
+                    activeTodayTopic = null;
+                    syncBoardPageState();
+                    if (typeof initGraph === 'function') initGraph();
+                    return;
+                }
+                if (typeof destroyGraph === 'function') destroyGraph();
+                renderAiTopicItems();
+                return;
+            }
 
             if (view === 'graph') {
                 grid.style.display = 'none';
@@ -2010,7 +2495,9 @@
             }
         }
 
-        filterInput.addEventListener('input', scheduleLibrarySearch);
+        filterInput.addEventListener('input', () => {
+            scheduleLibrarySearch();
+        });
         platformFilter.addEventListener('change', () => {
             if (typeof syncToolbarFilterLabels === 'function') syncToolbarFilterLabels();
             updateCommandPaletteState();
@@ -2020,6 +2507,49 @@
             currentTagId = tagFilter.value || null;
             if (typeof syncToolbarFilterLabels === 'function') syncToolbarFilterLabels();
             fetchItems();
+        });
+        todaySection?.addEventListener('click', (event) => {
+            const refreshButton = event.target.closest('[data-ai-dashboard-refresh]');
+            if (refreshButton) {
+                fetchTodayDashboard({ force: true });
+                return;
+            }
+
+            const clearButton = event.target.closest('[data-ai-topic-clear]');
+            if (clearButton) {
+                backToAiDashboard();
+                return;
+            }
+
+            const openButton = event.target.closest('[data-ai-topic-open]');
+            if (openButton) {
+                openAiTopicPage({ label: openButton.dataset.aiTopicLabel });
+                return;
+            }
+
+            const itemButton = event.target.closest('[data-ai-topic-item-id], [data-ai-dashboard-item-id]');
+            if (itemButton) {
+                handleItemPrimaryAction(itemButton.dataset.aiTopicItemId || itemButton.dataset.aiDashboardItemId);
+                return;
+            }
+
+            const topicButton = event.target.closest('[data-ai-topic-toggle]');
+            if (topicButton) {
+                toggleAiTopicPile(topicButton.dataset.aiTopicLabel);
+            }
+        });
+        todaySection?.addEventListener('keydown', (event) => {
+            if (event.key !== 'Enter' && event.key !== ' ') return;
+            const openButton = event.target.closest('[data-ai-topic-open]');
+            if (openButton) {
+                event.preventDefault();
+                openAiTopicPage({ label: openButton.dataset.aiTopicLabel });
+                return;
+            }
+            const topicButton = event.target.closest('[data-ai-topic-toggle]');
+            if (!topicButton) return;
+            event.preventDefault();
+            toggleAiTopicPile(topicButton.dataset.aiTopicLabel);
         });
         galleryViewBtn.addEventListener('click', () => setView('gallery'));
         listViewBtn.addEventListener('click', () => setView('list'));

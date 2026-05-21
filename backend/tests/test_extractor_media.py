@@ -18,6 +18,8 @@ from services.extractor import (  # noqa: E402
     _ensure_douyin_video_candidate,
     _extract_article_blocks,
     _extract_article_html,
+    _parse_dribbble_page_html,
+    _parse_dribbble_reader_markdown,
     _extract_page_media,
     _extract_syndication_media,
     _extract_twitter_media,
@@ -29,8 +31,10 @@ from services.extractor import (  # noqa: E402
     _parse_douyin_router_data,
     _parse_x_article_result,
     _parse_twitter_oembed_html,
+    detect_platform,
     extract_content,
     extract_douyin,
+    extract_dribbble,
     extract_twitter,
     extract_generic,
     ExtractResult,
@@ -870,6 +874,134 @@ class ExtractorMediaTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn('script', html)
         self.assertNotIn('style=', html)
 
+    def test_parse_dribbble_page_html_extracts_shot_metadata_and_media(self) -> None:
+        html = """
+        <html>
+          <head>
+            <meta property="og:title" content="Creative Ai Platform by Buraq Lab on Dribbble" />
+            <meta property="og:description" content="We are Master — a creative digital agency crafting bold websites and animations." />
+            <meta property="og:image" content="https://cdn.dribbble.com/userupload/44963223/file/02129728eac8172ea12c30849e468d48.jpg?resize=752x&amp;vertical=center" />
+          </head>
+          <body>
+            <main>
+              <h1>Creative Ai Platform</h1>
+              <a rel="author" href="/BuraqLab">Buraq Lab</a>
+              <ul class="shot-colors">
+                <li><a href="/colors/E3E8F1">#E3E8F1</a></li>
+                <li><a href="/colors/89B6D8">#89B6D8</a></li>
+              </ul>
+              <div class="shot-description">
+                We are Master — a creative digital agency crafting bold websites and animations.
+              </div>
+              <a href="/tags/ai">ai</a>
+            </main>
+          </body>
+        </html>
+        """
+
+        result = _parse_dribbble_page_html(
+            html,
+            "https://dribbble.com/shots/26542337-Creative-Ai-Platform",
+        )
+
+        self.assertIsNotNone(result)
+        assert result is not None
+        self.assertEqual(result.platform, "dribbble")
+        self.assertEqual(result.title, "Creative Ai Platform")
+        self.assertIn("作者：Buraq Lab", result.text)
+        self.assertIn("色板：#E3E8F1 #89B6D8", result.text)
+        self.assertIn("标签：#ai", result.text)
+        self.assertEqual((result.media_urls or [])[0]["type"], "image")
+        self.assertIn("02129728eac8172ea12c30849e468d48.jpg", (result.media_urls or [])[0]["url"])
+        self.assertEqual((result.content_blocks or [])[0]["type"], "image")
+        self.assertIn("<figure><img", result.content_html or "")
+
+    def test_parse_dribbble_reader_markdown_uses_main_shot_image(self) -> None:
+        markdown = """
+        Title: Creative Ai Platform
+
+        # Creative Ai Platform by Buraq Lab on Dribbble
+
+        ![Image 5: close](https://cdn.dribbble.com/assets/icon-shot-x-light.png)
+
+        [![Image 6: Buraq Lab](https://cdn.dribbble.com/users/18380125/avatars/normal/avatar.png)](https://dribbble.com/buraqlab)
+
+        [Buraq Lab](https://dribbble.com/buraqlab)
+
+        Available for work
+
+        *   [#E3E8F1](https://dribbble.com/shots?color=E3E8F1 "#E3E8F1")
+        *   [#89B6D8](https://dribbble.com/shots?color=89B6D8 "#89B6D8")
+
+        [![Image 7](https://cdn.dribbble.com/userupload/44963223/file/02129728eac8172ea12c30849e468d48.jpg?resize=752x&vertical=center)](https://cdn.dribbble.com/userupload/44963223/file/02129728eac8172ea12c30849e468d48.jpg?resize=752x&vertical=center)
+
+        We are Master — a creative digital agency crafting bold websites and animations.
+
+        [![Image 8: Buraq Lab](https://cdn.dribbble.com/users/18380125/avatars/normal/avatar.png)](https://dribbble.com/buraqlab)
+
+        #### More by Buraq Lab
+        """
+
+        result = _parse_dribbble_reader_markdown(
+            markdown,
+            "https://dribbble.com/shots/26542337-Creative-Ai-Platform",
+        )
+
+        self.assertIsNotNone(result)
+        assert result is not None
+        self.assertEqual(result.title, "Creative Ai Platform")
+        self.assertIn("作者：Buraq Lab", result.text)
+        self.assertIn("We are Master", result.text)
+        self.assertIn("色板：#E3E8F1 #89B6D8", result.text)
+        self.assertIn("02129728eac8172ea12c30849e468d48.jpg", (result.media_urls or [])[0]["url"])
+
+    async def test_extract_dribbble_uses_page_parser(self) -> None:
+        html = """
+        <html>
+          <head>
+            <meta property="og:title" content="Creative Ai Platform by Buraq Lab on Dribbble" />
+            <meta property="og:image" content="https://cdn.dribbble.com/userupload/44963223/file/shot.jpg" />
+          </head>
+          <body><h1>Creative Ai Platform</h1></body>
+        </html>
+        """
+
+        with patch("services.extractor._request_dribbble_api_shot", new=AsyncMock(return_value=None)):
+            with patch(
+                "services.extractor._request_dribbble_page_html",
+                new=AsyncMock(return_value=(html, "https://dribbble.com/shots/26542337-Creative-Ai-Platform")),
+            ):
+                result = await extract_dribbble("https://dribbble.com/shots/26542337-Creative-Ai-Platform")
+
+        self.assertIsNotNone(result)
+        assert result is not None
+        self.assertEqual(result.title, "Creative Ai Platform")
+        self.assertEqual(result.platform, "dribbble")
+        self.assertEqual((result.media_urls or [])[0]["url"], "https://cdn.dribbble.com/userupload/44963223/file/shot.jpg")
+
+    async def test_extract_dribbble_uses_reader_when_page_is_blocked(self) -> None:
+        markdown = """
+        # Creative Ai Platform by Buraq Lab on Dribbble
+
+        [![Image 7](https://cdn.dribbble.com/userupload/44963223/file/shot.jpg)](https://cdn.dribbble.com/userupload/44963223/file/shot.jpg)
+
+        We are Master — a creative digital agency.
+        """
+
+        with patch("services.extractor._request_dribbble_api_shot", new=AsyncMock(return_value=None)):
+            with patch("services.extractor._request_dribbble_page_html", new=AsyncMock(return_value=("", "https://dribbble.com/shots/26542337-Creative-Ai-Platform"))):
+                with patch(
+                    "services.extractor._request_dribbble_reader_markdown",
+                    new=AsyncMock(return_value=(markdown, "https://dribbble.com/shots/26542337-Creative-Ai-Platform")),
+                ):
+                    result = await extract_dribbble("https://dribbble.com/shots/26542337-Creative-Ai-Platform")
+
+        self.assertIsNotNone(result)
+        assert result is not None
+        self.assertEqual(result.platform, "dribbble")
+        self.assertEqual(result.title, "Creative Ai Platform")
+        self.assertEqual((result.media_urls or [])[0]["url"], "https://cdn.dribbble.com/userupload/44963223/file/shot.jpg")
+
     async def test_extract_generic_accepts_media_only_page(self) -> None:
         _StaticHtmlHandler.html = """
         <html>
@@ -971,6 +1103,34 @@ class ExtractorMediaTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result.text, "")
         self.assertEqual(result.platform, "zhihu")
         self.assertEqual(result.final_url, "https://zhuanlan.zhihu.com/p/2022246152867686214")
+
+    async def test_extract_content_rejects_dribbble_waf_challenge(self) -> None:
+        self.assertEqual(
+            detect_platform("https://dribbble.com/shots/26542337-Creative-Ai-Platform"),
+            "dribbble",
+        )
+        interstitial = ExtractResult(
+            title="",
+            text="JavaScript is disabled. In order to continue, we need to verify that you're not a robot.",
+            platform="generic",
+            final_url="https://dribbble.com/shots/26542337-Creative-Ai-Platform",
+        )
+
+        with patch.dict(
+            "services.extractor._EXTRACTORS",
+            {"dribbble": AsyncMock(return_value=None)},
+            clear=False,
+        ):
+            with patch(
+                "services.extractor.extract_generic",
+                new=AsyncMock(return_value=interstitial),
+            ):
+                result = await extract_content("https://dribbble.com/shots/26542337-Creative-Ai-Platform")
+
+        self.assertEqual(result.title, "提取失败")
+        self.assertEqual(result.text, "")
+        self.assertEqual(result.platform, "dribbble")
+        self.assertEqual(result.final_url, "https://dribbble.com/shots/26542337-Creative-Ai-Platform")
 
     def test_parse_twitter_oembed_html_extracts_text(self) -> None:
         result = _parse_twitter_oembed_html(

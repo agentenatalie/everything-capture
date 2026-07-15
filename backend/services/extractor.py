@@ -3838,6 +3838,31 @@ def _extract_visible_text(soup: BeautifulSoup) -> str:
 # 主入口
 # ---------------------------------------------------------------------------
 
+def _should_probe_wechat_gallery_for_article(result: ExtractResult) -> bool:
+    text = _clean_text(result.text)
+    blocks = result.content_blocks or []
+    image_count = sum(
+        1
+        for block in blocks
+        if isinstance(block, dict) and block.get("type") == "image" and block.get("url")
+    )
+    text_blocks = [
+        block
+        for block in blocks
+        if isinstance(block, dict)
+        and block.get("type") in {"text", "paragraph"}
+        and str(block.get("content") or block.get("markdown") or "").strip()
+    ]
+    return len(text) < 200 and image_count >= 4 and len(text_blocks) <= 1
+
+
+def _is_richer_wechat_article(candidate: ExtractResult | None, gallery: ExtractResult) -> bool:
+    if candidate is None or _is_wechat_interstitial_url(candidate.final_url):
+        return False
+    candidate_text = _clean_text(candidate.text)
+    gallery_text = _clean_text(gallery.text)
+    return len(candidate_text) >= 500 and len(candidate_text) > max(len(gallery_text) * 3, len(gallery_text) + 300)
+
 _EXTRACTORS = {
     "xiaohongshu": extract_xiaohongshu,
     "douyin": extract_douyin,
@@ -3877,6 +3902,17 @@ async def extract_content(url: str) -> ExtractResult:
             logger.warning("Dribbble 提取命中 WAF challenge: %s -> %s", url, result.final_url)
             result = None
         if result and (len(result.text) > 20 or result.media_urls):
+            if platform == "wechat" and _should_probe_wechat_gallery_for_article(result):
+                article_candidate = await extract_generic(url)
+                if _is_richer_wechat_article(article_candidate, result):
+                    logger.info(
+                        "微信分享页仅含短摘要，改用更完整的文章正文: %s (%d -> %d 字)",
+                        url,
+                        len(result.text),
+                        len(article_candidate.text),
+                    )
+                    article_candidate.platform = "wechat"
+                    return article_candidate
             return result
         logger.info("平台 %s 提取失败，回退到通用提取器", platform)
 

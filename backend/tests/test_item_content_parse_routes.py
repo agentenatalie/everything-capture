@@ -1,6 +1,8 @@
 import datetime
+import json
 import os
 import sys
+import types
 import unittest
 from unittest.mock import patch
 
@@ -62,6 +64,102 @@ class ItemContentParseRouteTests(unittest.TestCase):
         self.assertEqual(response.parse_status, "completed")
         self.assertEqual(response.extracted_text, "[ocr_text]\n解析完成")
         self.assertEqual(response.urls, ["https://example.com"])
+
+    def test_store_parse_result_keeps_wechat_gallery_ocr_out_of_article_blocks(self) -> None:
+        summary = "这是一篇值得保存的内容"
+        ocr_text = "AI 时代的内容创作与工作方式\n\n代码变便宜了，注意力变贵了。" * 12
+        gallery_blocks = [
+            {"type": "image", "url": "https://mmbiz.qpic.cn/slide-1.jpg"},
+            {"type": "image", "url": "https://mmbiz.qpic.cn/slide-2.jpg"},
+            {"type": "text", "content": summary},
+        ]
+        parse_result = types.SimpleNamespace(
+            extracted_text=f"[ocr_text]\n{ocr_text}",
+            ocr_text=ocr_text,
+            frame_texts=[],
+            urls=[],
+            qr_links=[],
+            parse_status="completed",
+            parse_error=None,
+            parsed_at=datetime.datetime(2026, 7, 15, 12, 0, 0),
+        )
+
+        detached_item = Item(
+            id="wechat-gallery-detached",
+            title="微信滑动图文",
+            source_url="https://mp.weixin.qq.com/s/example-gallery",
+            canonical_text=summary,
+            content_blocks_json=json.dumps(gallery_blocks, ensure_ascii=False),
+            platform="wechat",
+        )
+        persisted_item = Item(
+            id="wechat-gallery-persisted",
+            content_blocks_json=json.dumps(gallery_blocks, ensure_ascii=False),
+            platform="wechat",
+        )
+
+        items_router._store_item_parse_result(detached_item, parse_result)
+        items_router._copy_item_parse_fields(detached_item, persisted_item)
+
+        self.assertEqual(json.loads(detached_item.content_blocks_json), gallery_blocks)
+        self.assertEqual(json.loads(persisted_item.content_blocks_json), gallery_blocks)
+
+    def test_store_parse_result_removes_legacy_generated_ocr_article_block(self) -> None:
+        gallery_blocks = [
+            {"type": "image", "url": "https://mmbiz.qpic.cn/slide-1.jpg"},
+            {"type": "image", "url": "https://mmbiz.qpic.cn/slide-2.jpg"},
+            {"type": "text", "content": "原始导语"},
+        ]
+        parse_result = types.SimpleNamespace(
+            extracted_text="[ocr_text]\n清理后的识别结果",
+            ocr_text="清理后的识别结果",
+            frame_texts=[],
+            urls=[],
+            qr_links=[],
+            parse_status="completed",
+            parse_error=None,
+            parsed_at=datetime.datetime(2026, 7, 15, 12, 0, 0),
+        )
+        item = Item(
+            id="wechat-gallery-with-legacy-ocr",
+            content_blocks_json=json.dumps(
+                [*gallery_blocks, {"type": "text", "content": "旧乱码", "source": "ocr"}],
+                ensure_ascii=False,
+            ),
+            platform="wechat",
+        )
+
+        items_router._store_item_parse_result(item, parse_result)
+
+        self.assertEqual(json.loads(item.content_blocks_json), gallery_blocks)
+
+    def test_store_parse_result_does_not_promote_ocr_for_regular_wechat_article(self) -> None:
+        regular_blocks = [
+            {"type": "text", "content": "普通公众号正文第一段"},
+            {"type": "image", "url": "https://mmbiz.qpic.cn/inline.jpg"},
+            {"type": "text", "content": "普通公众号正文第二段"},
+        ]
+        parse_result = types.SimpleNamespace(
+            extracted_text="[ocr_text]\n配图上的少量文字" * 20,
+            ocr_text="配图上的少量文字" * 20,
+            frame_texts=[],
+            urls=[],
+            qr_links=[],
+            parse_status="completed",
+            parse_error=None,
+            parsed_at=datetime.datetime(2026, 7, 15, 12, 0, 0),
+        )
+        item = Item(
+            id="wechat-regular",
+            title="普通公众号文章",
+            canonical_text="普通公众号正文第一段\n\n普通公众号正文第二段",
+            content_blocks_json=json.dumps(regular_blocks, ensure_ascii=False),
+            platform="wechat",
+        )
+
+        items_router._store_item_parse_result(item, parse_result)
+
+        self.assertEqual(json.loads(item.content_blocks_json), regular_blocks)
 
     def test_note_route_updates_extracted_text(self) -> None:
         request = items_router.ItemNoteUpdateRequest(extracted_text="手动修改后的解析笔记")

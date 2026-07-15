@@ -19,9 +19,16 @@ struct FrameText: Codable {
     let text: String
 }
 
+struct OCRLine: Codable {
+    let text: String
+    let confidence: Float
+    let height: Double
+}
+
 struct ImageResult: Codable {
     let path: String
     let ocr_text: String
+    let ocr_lines: [OCRLine]
     let qr_links: [String]
     let urls: [String]
 }
@@ -106,16 +113,21 @@ func loadCGImage(from path: String) throws -> CGImage {
     return image
 }
 
-func recognizeText(in image: CGImage) -> String {
-    var recognized: [String] = []
+func recognizeTextLines(in image: CGImage) -> [OCRLine] {
+    var recognized: [OCRLine] = []
     let request = VNRecognizeTextRequest { request, _ in
         let observations = request.results as? [VNRecognizedTextObservation] ?? []
         recognized = observations.compactMap { observation in
-            observation.topCandidates(1).first?.string
+            guard let candidate = observation.topCandidates(1).first else { return nil }
+            return OCRLine(
+                text: candidate.string,
+                confidence: candidate.confidence,
+                height: Double(observation.boundingBox.height)
+            )
         }
     }
     request.recognitionLevel = .accurate
-    request.usesLanguageCorrection = false
+    request.usesLanguageCorrection = true
     request.recognitionLanguages = ["zh-Hans", "en-US"]
     if #available(macOS 13.0, *) {
         request.automaticallyDetectsLanguage = true
@@ -123,7 +135,12 @@ func recognizeText(in image: CGImage) -> String {
 
     let handler = VNImageRequestHandler(cgImage: image, options: [:])
     try? handler.perform([request])
-    return normalizeText(recognized.joined(separator: "\n"))
+    return recognized
+}
+
+func recognizeText(in image: CGImage) -> String {
+    let lines = recognizeTextLines(in: image)
+    return normalizeText(lines.map(\.text).joined(separator: "\n"))
 }
 
 func detectBarcodes(in image: CGImage) -> [String] {
@@ -224,10 +241,11 @@ func extractVideo(path: String) -> VideoResult {
 
 func extractImage(path: String) throws -> ImageResult {
     let image = try loadCGImage(from: path)
-    let ocrText = recognizeText(in: image)
+    let ocrLines = recognizeTextLines(in: image)
+    let ocrText = normalizeText(ocrLines.map(\.text).joined(separator: "\n"))
     let qrLinks = detectBarcodes(in: image)
     let urls = uniquePreserveOrder(extractUrls(ocrText) + qrLinks)
-    return ImageResult(path: path, ocr_text: ocrText, qr_links: qrLinks, urls: urls)
+    return ImageResult(path: path, ocr_text: ocrText, ocr_lines: ocrLines, qr_links: qrLinks, urls: urls)
 }
 
 func loadRequest(from path: String) throws -> ExtractRequest {

@@ -1034,6 +1034,53 @@ class ExtractorMediaTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsNotNone(result.media_urls)
         self.assertEqual(result.media_urls[0]["url"], "https://www.youtube.com/embed/dQw4w9WgXcQ")
 
+    async def test_extract_content_prefers_richer_article_over_short_wechat_gallery(self) -> None:
+        gallery = ExtractResult(
+            title="闭门会｜张咋啦 Zara：AI 时代的底层工作方式",
+            text="感觉是一篇十年都不会过期的 AI Builder 的内功心法",
+            platform="wechat",
+            final_url="https://mp.weixin.qq.com/s/example",
+            media_urls=[
+                {"type": "image", "url": f"https://mmbiz.qpic.cn/slide-{index}.jpg", "order": index}
+                for index in range(10)
+            ],
+            content_blocks=[
+                *[
+                    {"type": "image", "url": f"https://mmbiz.qpic.cn/slide-{index}.jpg"}
+                    for index in range(10)
+                ],
+                {"type": "text", "content": "感觉是一篇十年都不会过期的 AI Builder 的内功心法"},
+            ],
+        )
+        article = ExtractResult(
+            title=gallery.title,
+            text=("今天我想聊的，是 AI 时代真正发生变化的工作方式。" * 20),
+            platform="generic",
+            final_url=gallery.final_url,
+            media_urls=gallery.media_urls,
+            content_blocks=[
+                {"type": "heading_2", "content": "正文"},
+                {"type": "text", "content": "今天我想聊的，是 AI 时代真正发生变化的工作方式。" * 20},
+            ],
+            content_html="<h2>正文</h2><p>今天我想聊的，是 AI 时代真正发生变化的工作方式。</p>",
+        )
+
+        with patch.dict(
+            "services.extractor._EXTRACTORS",
+            {"wechat": AsyncMock(return_value=gallery)},
+            clear=False,
+        ):
+            with patch(
+                "services.extractor.extract_generic",
+                new=AsyncMock(return_value=article),
+            ) as mock_generic:
+                result = await extract_content("https://mp.weixin.qq.com/s/example")
+
+        mock_generic.assert_awaited_once()
+        self.assertIs(result, article)
+        self.assertEqual(result.platform, "wechat")
+        self.assertGreater(len(result.text), len(gallery.text) * 3)
+
     async def test_extract_content_rejects_wechat_captcha_interstitial(self) -> None:
         interstitial = ExtractResult(
             title="Unknown",

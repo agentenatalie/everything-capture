@@ -296,6 +296,7 @@ def _copy_item_parse_fields(source: Item, target: Item) -> None:
     target.parse_error = source.parse_error
     target.parse_started_at = source.parse_started_at
     target.parsed_at = source.parsed_at
+    _remove_generated_ocr_blocks(target)
 
 
 def _persist_offloaded_media_metadata(db: Session, media_entries: list[Media]) -> None:
@@ -648,6 +649,24 @@ def _cleanup_item_media_files(local_paths: list[str]) -> None:
     cleanup_relative_paths(local_paths)
 
 
+def _remove_generated_ocr_blocks(item: Item) -> None:
+    """Keep generated OCR out of the source-faithful article body."""
+    try:
+        raw_blocks = json.loads(item.content_blocks_json or "[]")
+    except (TypeError, json.JSONDecodeError):
+        return
+    if not isinstance(raw_blocks, list):
+        return
+
+    source_blocks = [
+        block
+        for block in raw_blocks
+        if not (isinstance(block, dict) and str(block.get("source") or "").lower() == "ocr")
+    ]
+    if len(source_blocks) != len(raw_blocks):
+        item.content_blocks_json = json.dumps(source_blocks, ensure_ascii=False)
+
+
 def _store_item_parse_result(item: Item, parse_result) -> None:
     item.extracted_text = parse_result.extracted_text or None
     item.ocr_text = parse_result.ocr_text or None
@@ -658,6 +677,7 @@ def _store_item_parse_result(item: Item, parse_result) -> None:
     item.parse_error = parse_result.parse_error
     item.parse_started_at = None
     item.parsed_at = parse_result.parsed_at
+    _remove_generated_ocr_blocks(item)
 
 
 def _store_item_parse_failure(item: Item, message: str) -> None:

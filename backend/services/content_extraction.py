@@ -970,6 +970,48 @@ def _build_source_type(has_images: bool, has_videos: bool) -> str:
     return SOURCE_TYPE_TEXT
 
 
+_SLIDE_PAGE_MARKER_PATTERN = re.compile(r"\b(?:[1-9]|1\d|2\d)\s*/\s*(?:2\d|3\d)\b")
+_CJK_TEXT_PATTERN = re.compile(r"[\u3400-\u9fff]")
+
+
+def _select_reliable_image_ocr_text(image_result: dict[str, Any]) -> str:
+    raw_text = _normalize_text_block(image_result.get("ocr_text"))
+    lines = image_result.get("ocr_lines")
+    if not isinstance(lines, list):
+        return raw_text
+
+    normalized_lines = [line for line in lines if isinstance(line, dict)]
+    is_slide = any(
+        _SLIDE_PAGE_MARKER_PATTERN.search(str(line.get("text") or ""))
+        for line in normalized_lines
+    )
+    selected: list[str] = []
+
+    for line in normalized_lines:
+        text = _normalize_text_block(line.get("text"))
+        if not text:
+            continue
+        try:
+            confidence = float(line.get("confidence") or 0)
+            height = float(line.get("height") or 0)
+        except (TypeError, ValueError):
+            continue
+        if height < 0.018:
+            continue
+
+        has_cjk = bool(_CJK_TEXT_PATTERN.search(text))
+        confidence_floor = 0.5 if has_cjk else 0.75
+        large_text_floor = 0.028 if has_cjk else 0.04
+        if confidence < confidence_floor and not (is_slide and height >= large_text_floor):
+            continue
+        selected.append(text)
+
+    # A lone logo or projected phrase from a photo is not article text.
+    if not is_slide and len(selected) < 3:
+        return ""
+    return _normalize_text_block("\n".join(_unique_preserve_order(selected)))
+
+
 def parse_item_content(item) -> ContentParseResult:
     title = str(getattr(item, "title", "") or "").strip()
     canonical_text = _normalize_text_block(getattr(item, "canonical_text", None))
@@ -999,7 +1041,7 @@ def parse_item_content(item) -> ContentParseResult:
             extractor_output = {"images": []}
         image_results = extractor_output.get("images", []) if isinstance(extractor_output, dict) else []
         for image_result in image_results:
-            ocr_text = _normalize_text_block(image_result.get("ocr_text"))
+            ocr_text = _select_reliable_image_ocr_text(image_result)
             if ocr_text:
                 ocr_sections.append(ocr_text)
                 urls.extend(_extract_urls_from_text(ocr_text))

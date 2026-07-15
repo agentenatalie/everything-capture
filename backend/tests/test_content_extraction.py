@@ -206,6 +206,60 @@ class ContentExtractionTests(unittest.TestCase):
         self.assertIn("[detected_title]\n第一行标题", result.extracted_text)
         self.assertIn("[urls]\nhttps://docs.example.com", result.extracted_text)
 
+    @patch("services.content_extraction._resolve_media_inputs")
+    @patch("services.content_extraction._run_swift_media_extractor")
+    def test_parse_item_content_filters_unreliable_image_ocr_lines(self, mock_swift, mock_media_inputs) -> None:
+        item = Item(
+            id="wechat-gallery-ocr-filter",
+            title="微信图片文章",
+            canonical_text="原始导语",
+            platform="wechat",
+        )
+        item.media = []
+        mock_media_inputs.return_value = {
+            "images": [
+                {"path": "/tmp/photo.jpg", "type": "image", "relative_path": "photo.jpg"},
+                {"path": "/tmp/slide.jpg", "type": "image", "relative_path": "slide.jpg"},
+            ],
+            "videos": [],
+        }
+        mock_swift.return_value = {
+            "images": [
+                {
+                    "path": "/tmp/photo.jpg",
+                    "ocr_text": "绝活大会\nBuilder 需要內自己的产油附、",
+                    "ocr_lines": [
+                        {"text": "绝活大会", "confidence": 1.0, "height": 0.04},
+                        {"text": "Builder 需要內自己的产油附、", "confidence": 0.3, "height": 0.04},
+                    ],
+                    "qr_links": [],
+                    "urls": [],
+                },
+                {
+                    "path": "/tmp/slide.jpg",
+                    "ocr_text": "18/27\n做一个给团队共用的 agent\n设置明确的角色和技能\n妗诱帒蛰\n截图里的微小乱码",
+                    "ocr_lines": [
+                        {"text": "18/27", "confidence": 0.5, "height": 0.03},
+                        {"text": "做一个给团队共用的 agent", "confidence": 0.3, "height": 0.05},
+                        {"text": "设置明确的角色和技能", "confidence": 1.0, "height": 0.06},
+                        {"text": "妗诱帒蛰", "confidence": 0.3, "height": 0.016},
+                        {"text": "截图里的微小乱码", "confidence": 0.8, "height": 0.01},
+                    ],
+                    "qr_links": [],
+                    "urls": [],
+                },
+            ],
+        }
+
+        result = parse_item_content(item)
+
+        self.assertIn("做一个给团队共用的 agent", result.ocr_text)
+        self.assertIn("设置明确的角色和技能", result.ocr_text)
+        self.assertNotIn("Builder 需要內自己的产油附", result.ocr_text)
+        self.assertNotIn("妗诱帒蛰", result.ocr_text)
+        self.assertNotIn("截图里的微小乱码", result.ocr_text)
+        self.assertNotIn("绝活大会", result.ocr_text)
+
 
 class SubtitleParsingTests(unittest.TestCase):
     def test_parse_srt_content(self) -> None:

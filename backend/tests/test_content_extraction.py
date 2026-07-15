@@ -259,6 +259,15 @@ class ContentExtractionTests(unittest.TestCase):
         self.assertNotIn("妗诱帒蛰", result.ocr_text)
         self.assertNotIn("截图里的微小乱码", result.ocr_text)
         self.assertNotIn("绝活大会", result.ocr_text)
+        self.assertEqual(
+            getattr(result, "image_ocr", None),
+            [
+                {
+                    "relative_path": "slide.jpg",
+                    "text": "做一个给团队共用的 agent\n设置明确的角色和技能",
+                }
+            ],
+        )
 
 
 class SubtitleParsingTests(unittest.TestCase):

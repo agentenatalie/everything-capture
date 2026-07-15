@@ -475,6 +475,7 @@ class ContentExtractionError(RuntimeError):
 class ContentParseResult:
     extracted_text: str
     ocr_text: str
+    image_ocr: list[dict[str, str]]
     frame_texts: list[dict[str, Any]]
     urls: list[str]
     qr_links: list[str]
@@ -1023,6 +1024,7 @@ def parse_item_content(item) -> ContentParseResult:
     has_videos = bool(media_inputs["videos"])
 
     ocr_sections: list[str] = []
+    image_ocr: list[dict[str, str]] = []
     qr_links: list[str] = []
     subtitle_sections: list[str] = []
     transcript_sections: list[str] = []
@@ -1040,11 +1042,21 @@ def parse_item_content(item) -> ContentParseResult:
             logger.warning("图片 OCR 已跳过，Swift 提取器失败: %s", exc)
             extractor_output = {"images": []}
         image_results = extractor_output.get("images", []) if isinstance(extractor_output, dict) else []
+        image_inputs_by_path = {
+            os.path.realpath(entry["path"]): entry
+            for entry in media_inputs["images"]
+            if entry.get("path")
+        }
         for image_result in image_results:
             ocr_text = _select_reliable_image_ocr_text(image_result)
             if ocr_text:
                 ocr_sections.append(ocr_text)
                 urls.extend(_extract_urls_from_text(ocr_text))
+                result_path = str(image_result.get("path") or "").strip()
+                media_input = image_inputs_by_path.get(os.path.realpath(result_path)) if result_path else None
+                relative_path = str((media_input or {}).get("relative_path") or "").strip()
+                if relative_path:
+                    image_ocr.append({"relative_path": relative_path, "text": ocr_text})
             urls.extend(_extract_urls_from_text("\n".join(image_result.get("urls") or [])))
             qr_links.extend(image_result.get("qr_links") or [])
 
@@ -1103,6 +1115,7 @@ def parse_item_content(item) -> ContentParseResult:
     return ContentParseResult(
         extracted_text=extracted_text,
         ocr_text=ocr_text,
+        image_ocr=image_ocr,
         frame_texts=[],
         urls=urls,
         qr_links=qr_links,

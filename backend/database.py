@@ -147,6 +147,8 @@ def ensure_runtime_schema():
             connection.exec_driver_sql("ALTER TABLE items ADD COLUMN extracted_text VARCHAR")
         if "ocr_text" not in item_columns:
             connection.exec_driver_sql("ALTER TABLE items ADD COLUMN ocr_text VARCHAR")
+        if "image_ocr_json" not in item_columns:
+            connection.exec_driver_sql("ALTER TABLE items ADD COLUMN image_ocr_json VARCHAR")
         if "frame_texts_json" not in item_columns:
             connection.exec_driver_sql("ALTER TABLE items ADD COLUMN frame_texts_json VARCHAR")
         if "urls_json" not in item_columns:

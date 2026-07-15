@@ -289,6 +289,7 @@ def _snapshot_media(media: Media) -> MediaSnapshot:
 def _copy_item_parse_fields(source: Item, target: Item) -> None:
     target.extracted_text = source.extracted_text
     target.ocr_text = source.ocr_text
+    target.image_ocr_json = source.image_ocr_json
     target.frame_texts_json = source.frame_texts_json
     target.urls_json = source.urls_json
     target.qr_links_json = source.qr_links_json
@@ -670,6 +671,7 @@ def _remove_generated_ocr_blocks(item: Item) -> None:
 def _store_item_parse_result(item: Item, parse_result) -> None:
     item.extracted_text = parse_result.extracted_text or None
     item.ocr_text = parse_result.ocr_text or None
+    item.image_ocr_json = json.dumps(getattr(parse_result, "image_ocr", []) or [], ensure_ascii=False)
     item.frame_texts_json = json.dumps(parse_result.frame_texts or [], ensure_ascii=False)
     item.urls_json = json.dumps(parse_result.urls or [], ensure_ascii=False)
     item.qr_links_json = json.dumps(parse_result.qr_links or [], ensure_ascii=False)
@@ -2098,17 +2100,55 @@ def _strip_html(html: str) -> str:
     return text.strip()
 
 
-@router.get("/items/{item_id}/export-zip")
-def export_item_zip(item_id: str, db: Session = Depends(get_db)):
-    user_id = get_current_user_id()
-    item = db.query(Item).filter(Item.id == item_id, Item.user_id == user_id).first()
-    if not item:
-        raise HTTPException(status_code=404, detail="Item not found")
+def _load_image_ocr(item: Item) -> dict[str, str]:
+    try:
+        entries = json.loads(item.image_ocr_json or '[]')
+    except (TypeError, json.JSONDecodeError):
+        return {}
+    if not isinstance(entries, list):
+        return {}
 
-    # --- Build content.md ---
+    image_ocr: dict[str, str] = {}
+    for entry in entries:
+        if not isinstance(entry, dict):
+            continue
+        relative_path = str(entry.get('relative_path') or '').strip()
+        text = str(entry.get('text') or '').strip()
+        if relative_path and text:
+            image_ocr[relative_path] = text
+    return image_ocr
+
+
+def _export_supplemental_extracted_text(extracted_text: str | None) -> str:
+    """Keep parsed sections that are not already represented in the article body."""
+    normalized = (extracted_text or '').replace('\r\n', '\n').replace('\r', '\n').strip()
+    if not normalized:
+        return ''
+
+    sections = re.split(r'(?m)(?=^\[[a-z_]+\]\s*$)', normalized)
+    retained: list[str] = []
+    for section in sections:
+        section = section.strip()
+        if not section:
+            continue
+        match = re.match(r'^\[([a-z_]+)\]\s*$', section.split('\n', 1)[0])
+        if match and match.group(1) in {'detected_title', 'ocr_text'}:
+            continue
+        retained.append(section)
+    return '\n\n'.join(retained)
+
+
+def _build_export_markdown(
+    item: Item,
+    *,
+    notes: list[ItemPageNote],
+    media_archive_names: dict[str, str],
+) -> str:
+    from routers.connect import _block_markdown, _get_structured_blocks, _media_lookup
+
     lines: list[str] = []
     title = item.title or '无标题'
-    lines.append(f"# {title}\n")
+    lines.append(f"# {title}")
 
     meta: list[str] = []
     if item.source_url:
@@ -2118,52 +2158,108 @@ def export_item_zip(item_id: str, db: Session = Depends(get_db)):
     if item.created_at:
         meta.append(f"- 收藏时间: {item.created_at.strftime('%Y-%m-%d %H:%M')}")
     if meta:
-        lines.append('\n'.join(meta) + '\n')
+        lines.append('\n'.join(meta))
 
-    body = item.canonical_text or ''
-    if not body and item.content_html:
-        body = _strip_html(item.content_html)
-    if body:
-        lines.append('## 正文\n')
-        lines.append(body + '\n')
+    blocks = _get_structured_blocks(item)
+    media_by_url = _media_lookup(item)
+    image_ocr = _load_image_ocr(item)
+    inlined_ocr_count = 0
+    image_index = 0
+    video_index = 0
+    body_parts: list[str] = []
 
-    if item.extracted_text:
-        lines.append('## 识别内容\n')
-        lines.append(item.extracted_text + '\n')
+    for block in blocks:
+        if not isinstance(block, dict):
+            continue
+        block_type = str(block.get('type') or '')
+        if block_type not in {'image', 'cover', 'video'}:
+            markdown = _block_markdown(block).strip()
+            if markdown:
+                body_parts.append(markdown)
+            continue
 
-    if item.ocr_text:
-        lines.append('## OCR 文字\n')
-        lines.append(item.ocr_text + '\n')
+        media = media_by_url.get(str(block.get('url') or ''))
+        archive_name = media_archive_names.get(media.id) if media else None
+        if block_type in {'image', 'cover'}:
+            image_index += 1
+            image_target = archive_name or str(block.get('url') or '').strip()
+            if image_target:
+                body_parts.append(f"![图片 {image_index}]({image_target})")
+            ocr_text = image_ocr.get(str(getattr(media, 'local_path', '') or '')) if media else None
+            if ocr_text:
+                quoted_ocr = '\n'.join(f"> {line}" if line else ">" for line in ocr_text.splitlines())
+                body_parts.append(f"> **图片文字：**\n>\n{quoted_ocr}")
+                inlined_ocr_count += 1
+            continue
 
-    # Page notes
+        video_index += 1
+        video_target = archive_name or str(block.get('url') or '').strip()
+        if video_target:
+            body_parts.append(f"[视频 {video_index}]({video_target})")
+
+    if body_parts:
+        lines.append('## 正文')
+        lines.extend(body_parts)
+    else:
+        body = item.canonical_text or ''
+        if not body and item.content_html:
+            body = _strip_html(item.content_html)
+        if body:
+            lines.extend(['## 正文', body])
+
+    if inlined_ocr_count:
+        supplemental_text = _export_supplemental_extracted_text(item.extracted_text)
+        if supplemental_text:
+            lines.extend(['## 其他识别内容', supplemental_text])
+    else:
+        if item.extracted_text:
+            lines.extend(['## 识别内容', item.extracted_text])
+        if item.ocr_text:
+            lines.extend(['## OCR 文字', item.ocr_text])
+
+    if notes:
+        lines.append('## 笔记')
+        lines.extend(f"- {note.content}" for note in notes)
+
+    return '\n\n'.join(line for line in lines if line).strip() + '\n'
+
+
+@router.get("/items/{item_id}/export-zip")
+def export_item_zip(item_id: str, db: Session = Depends(get_db)):
+    user_id = get_current_user_id()
+    item = db.query(Item).filter(Item.id == item_id, Item.user_id == user_id).first()
+    if not item:
+        raise HTTPException(status_code=404, detail="Item not found")
+
+    title = item.title or '无标题'
     notes = (
         db.query(ItemPageNote)
         .filter(ItemPageNote.item_id == item_id)
         .order_by(ItemPageNote.created_at)
         .all()
     )
-    if notes:
-        lines.append('## 笔记\n')
-        for n in notes:
-            lines.append(f"- {n.content}\n")
-
-    content_md = '\n'.join(lines)
-
     # --- Build zip ---
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, 'w', zipfile.ZIP_DEFLATED) as zf:
-        zf.writestr('content.md', content_md)
-
         media_idx = 0
+        media_archive_names: dict[str, str] = {}
         for m in sorted(item.media, key=lambda x: x.display_order):
             try:
                 with materialize_media_file(m) as materialized_path:
                     ext = materialized_path.suffix or '.bin'
                     arc_name = f"media/{m.type}_{media_idx:03d}{ext}"
                     zf.write(str(materialized_path), arc_name)
+                    media_archive_names[m.id] = arc_name
                     media_idx += 1
             except FileNotFoundError:
                 continue
+
+        content_md = _build_export_markdown(
+            item,
+            notes=notes,
+            media_archive_names=media_archive_names,
+        )
+        zf.writestr('content.md', content_md)
 
     buf.seek(0)
     safe_title = _sanitize_filename(title)

@@ -13,7 +13,7 @@ from sqlalchemy.orm import sessionmaker
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
 from database import Base  # noqa: E402
-from models import Item  # noqa: E402
+from models import Item, Media  # noqa: E402
 import routers.items as items_router  # noqa: E402
 
 
@@ -160,6 +160,79 @@ class ItemContentParseRouteTests(unittest.TestCase):
         items_router._store_item_parse_result(item, parse_result)
 
         self.assertEqual(json.loads(item.content_blocks_json), regular_blocks)
+
+    def test_export_markdown_inlines_each_image_ocr_at_its_article_position(self) -> None:
+        item = Item(
+            id="wechat-export-inline-ocr",
+            user_id="local-default-user",
+            workspace_id="local-default-workspace",
+            title="图文文章",
+            source_url="https://mp.weixin.qq.com/s/example",
+            canonical_text="第一段正文\n\n中间正文\n\n最后正文",
+            content_blocks_json=json.dumps(
+                [
+                    {"type": "paragraph", "content": "第一段正文"},
+                    {"type": "image", "url": "https://mmbiz.qpic.cn/first.png"},
+                    {"type": "paragraph", "content": "中间正文"},
+                    {"type": "image", "url": "https://mmbiz.qpic.cn/second.png"},
+                    {"type": "paragraph", "content": "最后正文"},
+                ],
+                ensure_ascii=False,
+            ),
+            platform="wechat",
+            ocr_text="第一张图文字\n\n第二张图文字",
+        )
+        first = Media(
+            id="media-first",
+            user_id=item.user_id,
+            workspace_id=item.workspace_id,
+            item_id=item.id,
+            type="image",
+            original_url="https://mmbiz.qpic.cn/first.png",
+            local_path="media/users/local-default-user/wechat-export-inline-ocr/image_000.png",
+            display_order=0,
+        )
+        second = Media(
+            id="media-second",
+            user_id=item.user_id,
+            workspace_id=item.workspace_id,
+            item_id=item.id,
+            type="image",
+            original_url="https://mmbiz.qpic.cn/second.png",
+            local_path="media/users/local-default-user/wechat-export-inline-ocr/image_001.png",
+            display_order=1,
+        )
+        item.media = [first, second]
+        item.image_ocr_json = json.dumps(
+            [
+                {"relative_path": first.local_path, "text": "第一张图文字"},
+                {"relative_path": second.local_path, "text": "第二张图文字"},
+            ],
+            ensure_ascii=False,
+        )
+        archive_names = {
+            first.id: "media/image_000.png",
+            second.id: "media/image_001.png",
+        }
+
+        builder = getattr(items_router, "_build_export_markdown", None)
+        self.assertIsNotNone(builder, "export markdown builder is missing")
+        markdown = builder(item, notes=[], media_archive_names=archive_names)
+
+        first_text = markdown.index("第一段正文")
+        first_image = markdown.index("![图片 1](media/image_000.png)")
+        first_ocr = markdown.index("第一张图文字")
+        middle_text = markdown.index("中间正文")
+        second_image = markdown.index("![图片 2](media/image_001.png)")
+        second_ocr = markdown.index("第二张图文字")
+        last_text = markdown.index("最后正文")
+        self.assertLess(first_text, first_image)
+        self.assertLess(first_image, first_ocr)
+        self.assertLess(first_ocr, middle_text)
+        self.assertLess(middle_text, second_image)
+        self.assertLess(second_image, second_ocr)
+        self.assertLess(second_ocr, last_text)
+        self.assertNotIn("## OCR 文字", markdown)
 
     def test_note_route_updates_extracted_text(self) -> None:
         request = items_router.ItemNoteUpdateRequest(extracted_text="手动修改后的解析笔记")

@@ -71,6 +71,7 @@ class Item(Base):
     folder_id = Column(String, ForeignKey("folders.id"), nullable=True, index=True)
     extracted_text = Column(String, nullable=True)
     ocr_text = Column(String, nullable=True)
+    image_ocr_json = Column(String, nullable=True)
     frame_texts_json = Column(String, nullable=True)
     urls_json = Column(String, nullable=True)
     qr_links_json = Column(String, nullable=True)

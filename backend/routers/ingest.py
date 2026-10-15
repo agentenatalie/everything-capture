@@ -682,9 +682,15 @@ async def execute_extract_request(
             stored_text = (result.title or resolved_url).strip()
 
         if not stored_text or (len(stored_text) < 20 and not has_media):
+            detail = f"内容提取失败或内容过短 (平台: {result.platform}，长度: {len(stored_text)})"
+            if result.platform == "xiaohongshu":
+                detail = (
+                    "未能读取小红书笔记。请在小红书 App 重新复制完整分享链接（保留链接参数）。"
+                    "如果笔记需要登录或验证，或已无法公开访问，可粘贴正文或上传图片/视频保存。"
+                )
             raise HTTPException(
                 status_code=422,
-                detail=f"内容提取失败或内容过短 (平台: {result.platform}，长度: {len(stored_text)})"
+                detail=detail,
             )
 
         new_item = Item(

@@ -2191,18 +2191,23 @@ async def extract_dribbble(url: str) -> ExtractResult | None:
 # ---------------------------------------------------------------------------
 
 async def extract_xiaohongshu(url: str) -> ExtractResult | None:
-    """小红书：HTTP + SSR JSON 解析，OG meta 兜底"""
-    async with _build_client(ua=_MOBILE_UA) as client:
-        try:
-            resp = await client.get(url)
-            resp.raise_for_status()
-        except Exception as e:
-            logger.warning("小红书 HTTP 请求失败: %s", e)
-            return None
+    """小红书：移动页优先，无可用笔记时尝试桌面页，保留完整分享参数。"""
+    for ua in (_MOBILE_UA, _DESKTOP_UA):
+        async with _build_client(ua=ua) as client:
+            try:
+                resp = await client.get(url)
+                resp.raise_for_status()
+            except httpx.HTTPError:
+                logger.warning("小红书 HTTP 请求失败，尝试下一种页面")
+                continue
 
-        html = resp.text
-        final_url = str(resp.url)
+        result = _parse_xhs_page_html(resp.text, str(resp.url))
+        if result and (len(result.text) > 20 or result.media_urls):
+            return result
+    return None
 
+
+def _parse_xhs_page_html(html: str, final_url: str) -> ExtractResult | None:
     # 策略 1: __INITIAL_STATE__ SSR JSON
     result = _parse_xhs_initial_state(html)
     if result:
@@ -2217,15 +2222,40 @@ async def extract_xiaohongshu(url: str) -> ExtractResult | None:
     # 策略 2: OG meta 标签
     soup = BeautifulSoup(html, "lxml")
     page_title = soup.title.string.strip() if soup.title and soup.title.string else ""
+    metadata_title = _html_meta(soup, "og:title") or page_title
+    body_text = soup.get_text(" ", strip=True)
+    guard_markers = (
+        "安全验证", "请完成验证", "访问频繁", "登录后查看", "扫码登录",
+        "当前内容无法展示", "当前笔记暂时无法浏览", "笔记不存在",
+        "你访问的页面不见了",
+    )
+    path = urlparse(final_url).path.lower()
+    if (
+        re.match(r"^/(?:website-login|login|404|error|captcha)(?:/|$)", path)
+        or any(marker in page_title for marker in guard_markers)
+        or (
+            not _normalize_xhs_title_candidate(metadata_title)
+            and any(marker in body_text for marker in guard_markers + _XHS_GENERIC_PAGE_MARKERS)
+        )
+        or _looks_like_xhs_generic_landing(final_url, metadata_title, body_text)
+    ):
+        return None
+
     desc = _html_meta(soup, "og:description") or ""
-    title = _resolve_xhs_title(_html_meta(soup, "og:title") or page_title, desc)
-    if desc and len(desc) > 10:
+    title = _resolve_xhs_title(metadata_title, desc)
+    media_urls = []
+    for media_type, prop in (("video", "og:video"), ("image", "og:image")):
+        media_url = _normalize_media_url(_html_meta(soup, prop) or "", base_url=final_url)
+        if media_url:
+            media_urls.append({"type": media_type, "url": media_url, "order": len(media_urls)})
+    if (desc and len(desc) > 10) or (title and media_urls):
         full = _compose_title_and_desc(title, desc)
         return ExtractResult(
             title=title or "Unknown",
             text=_clean_text(full),
             platform="xiaohongshu",
             final_url=final_url,
+            media_urls=media_urls or None,
         )
 
     # 策略 3: DOM 文本
@@ -2310,27 +2340,27 @@ def _parse_xhs_initial_state(html: str) -> dict | None:
         if not json_str:
             continue
 
-        json_str = json_str.replace("undefined", "null")
+        # JS undefined is not JSON; leave quoted note text and URLs untouched.
+        json_str = re.sub(
+            r'"(?:\\.|[^"\\])*"|\bundefined\b',
+            lambda match: "null" if match.group(0) == "undefined" else match.group(0),
+            json_str,
+        )
         try:
             state = json.loads(json_str)
         except json.JSONDecodeError:
             continue
 
-        # 路径 1: note.noteDetailMap
-        note_section = state.get("note", {})
-        detail_map = note_section.get("noteDetailMap", {})
-        for val in detail_map.values():
-            note_obj = val.get("note", val) if isinstance(val, dict) else {}
-            r = _extract_xhs_note(note_obj, fallback_title=fallback_title)
-            if r:
-                return r
-
-        # 路径 2: noteData.data
-        note_data = state.get("noteData", {})
-        data_map = note_data.get("data", {})
-        for val in data_map.values():
-            if isinstance(val, dict):
-                note_obj = val.get("note", val)
+        # Desktop note.noteDetailMap and mobile noteData.data can be null on shell pages.
+        for section_key, map_key in (("note", "noteDetailMap"), ("noteData", "data")):
+            section = state.get(section_key)
+            data_map = section.get(map_key) if isinstance(section, dict) else None
+            if not isinstance(data_map, dict):
+                continue
+            for val in data_map.values():
+                note_obj = val.get("note", val) if isinstance(val, dict) else None
+                if not isinstance(note_obj, dict):
+                    continue
                 r = _extract_xhs_note(note_obj, fallback_title=fallback_title)
                 if r:
                     return r
@@ -2353,8 +2383,6 @@ def _extract_xhs_note(note: dict, fallback_title: str | None = None) -> dict | N
         full = f"{full}\n\n{tags}" if full else tags
 
     full = full.strip()
-    if len(full) <= 20:
-        return None
 
     media_urls = []
     video_url = _extract_xhs_video_url(note)
@@ -2385,6 +2413,9 @@ def _extract_xhs_note(note: dict, fallback_title: str | None = None) -> dict | N
     else:
         for i, img_url in enumerate(image_urls):
             media_urls.append({"type": "image", "url": img_url, "order": i})
+
+    if len(full) <= 20 and not media_urls:
+        return None
 
     return {"title": title or "Unknown", "text": full, "media_urls": media_urls or None}
 
@@ -3914,6 +3945,10 @@ async def extract_content(url: str) -> ExtractResult:
                     article_candidate.platform = "wechat"
                     return article_candidate
             return result
+        # The XHS parser already tries both page variants and DOM/meta fallbacks.
+        # Generic extraction can otherwise save login/verification copy as a note.
+        if platform == "xiaohongshu":
+            return ExtractResult(title="提取失败", text="", platform=platform, final_url=url)
         logger.info("平台 %s 提取失败，回退到通用提取器", platform)
 
     # 通用提取器

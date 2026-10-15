@@ -5,7 +5,7 @@ import asyncio
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
-from fastapi import BackgroundTasks
+from fastapi import BackgroundTasks, HTTPException
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
@@ -96,6 +96,44 @@ class ShortcutCompatibilityTests(unittest.TestCase):
             self.assertEqual(item.canonical_text, "一段没有链接的分享文本\n\n第二段内容")
             self.assertEqual(item.title, "快捷指令文本")
             self.assertIn("<p>", item.canonical_html)
+
+    def test_xiaohongshu_failure_explains_share_link_and_manual_capture(self) -> None:
+        url = "https://www.xiaohongshu.com/explore/example"
+        with self.Session() as db, patch(
+            "routers.ingest.extract_content",
+            new=AsyncMock(return_value=ExtractResult(
+                title="提取失败", text="", platform="xiaohongshu", final_url=url,
+            )),
+        ):
+            with self.assertRaises(HTTPException) as error:
+                asyncio.run(execute_extract_request(
+                    ExtractRequest(url=url), None, _BackgroundTasksStub(), db, DEFAULT_USER_ID,
+                ))
+            self.assertEqual(error.exception.status_code, 422)
+            self.assertIn("完整分享链接", error.exception.detail)
+            self.assertIn("上传图片/视频", error.exception.detail)
+            self.assertEqual(db.query(Item).count(), 0)
+
+    def test_xiaohongshu_short_image_note_is_saved(self) -> None:
+        url = "https://www.xiaohongshu.com/explore/example"
+        result = ExtractResult(
+            title="随手拍", text="随手拍", platform="xiaohongshu", final_url=url,
+            media_urls=[{"type": "image", "url": "https://cdn.example.com/photo.jpg", "order": 0}],
+        )
+        with self.Session() as db, patch(
+            "routers.ingest.extract_content", new=AsyncMock(return_value=result),
+        ), patch(
+            "routers.ingest._should_background_media_processing", new=AsyncMock(return_value=False),
+        ), patch(
+            "routers.ingest._download_and_apply_media_updates", new=AsyncMock(return_value=1),
+        ):
+            response, item = asyncio.run(execute_extract_request(
+                ExtractRequest(url=url), None, _BackgroundTasksStub(), db, DEFAULT_USER_ID,
+            ))
+            self.assertEqual(response.status, "ready")
+            self.assertEqual(response.media_count, 1)
+            self.assertEqual(item.canonical_text, "随手拍")
+            self.assertEqual(db.query(Item).count(), 1)
 
     def test_phone_extract_assigns_requested_folder(self) -> None:
         background_tasks = _BackgroundTasksStub()
